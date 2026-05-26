@@ -33,6 +33,7 @@ target_sources(fpvd_core PRIVATE
     src/supervise/supervisor.cpp
     src/supervise/orchestrator.cpp
     src/supervise/radio.cpp
+    src/http/server.cpp
     src/daemon.cpp
 )
 
@@ -58,6 +59,7 @@ target_sources(fpvd_tests PRIVATE
     tests/integration/test_orchestrator.cpp
     tests/integration/test_radio.cpp
     tests/integration/test_daemon.cpp
+    tests/integration/test_http_server.cpp
 )
 add_test(NAME fpvd_tests COMMAND fpvd_tests)
 
