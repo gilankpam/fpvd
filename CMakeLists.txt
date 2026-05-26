@@ -22,6 +22,9 @@ find_package(Threads REQUIRED)
 add_library(fpvd_core STATIC src/placeholder.cpp)
 target_include_directories(fpvd_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(fpvd_core PUBLIC third_party Threads::Threads)
+target_sources(fpvd_core PRIVATE
+    src/config/store.cpp
+)
 
 # Executable.
 add_executable(fpvd src/main.cpp)
@@ -34,6 +37,7 @@ target_link_libraries(fpvd_tests PRIVATE fpvd_core)
 target_sources(fpvd_tests PRIVATE
     tests/unit/test_sanity.cpp
     tests/unit/test_schema.cpp
+    tests/unit/test_store.cpp
 )
 add_test(NAME fpvd_tests COMMAND fpvd_tests)
 
