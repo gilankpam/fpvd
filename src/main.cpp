@@ -3,8 +3,11 @@
 #include "http/server.hpp"
 #include <atomic>
 #include <csignal>
+#include <cstring>
+#include <fcntl.h>
 #include <iostream>
 #include <thread>
+#include <unistd.h>
 
 static std::atomic<bool> g_stop{false};
 
@@ -17,6 +20,7 @@ int main(int argc, char** argv) {
     std::string waybeamPath  = "/etc/waybeam.json";
     std::string httpHost     = "0.0.0.0";
     int httpPort             = 8080;
+    std::string logPath;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -26,10 +30,11 @@ int main(int argc, char** argv) {
         else if (a == "--waybeam-json" && i + 1 < argc) waybeamPath = argv[++i];
         else if (a == "--host" && i + 1 < argc) httpHost = argv[++i];
         else if (a == "--port" && i + 1 < argc) httpPort = std::stoi(argv[++i]);
+        else if (a == "--log" && i + 1 < argc) logPath = argv[++i];
         else if (a == "-h" || a == "--help") {
             std::cerr << "Usage: fpvd [--defaults PATH] [--overlay PATH] "
                          "[--radio-up PATH] [--waybeam-json PATH] "
-                         "[--host HOST] [--port PORT]\n";
+                         "[--host HOST] [--port PORT] [--log PATH]\n";
             return 0;
         }
     }
@@ -37,6 +42,18 @@ int main(int argc, char** argv) {
     std::signal(SIGTERM, onSignal);
     std::signal(SIGINT,  onSignal);
     std::signal(SIGPIPE, SIG_IGN);
+
+    if (!logPath.empty()) {
+        int fd = ::open(logPath.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd >= 0) {
+            ::dup2(fd, 1);
+            ::dup2(fd, 2);
+            ::close(fd);
+        } else {
+            std::cerr << "fpvd: failed to open log " << logPath
+                      << ": " << std::strerror(errno) << "\n";
+        }
+    }
 
     fpvd::DaemonPaths paths{defaultsPath, overlayPath, radioUp, waybeamPath};
     fpvd::Daemon daemon(paths);

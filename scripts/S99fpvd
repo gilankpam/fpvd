@@ -1,34 +1,25 @@
 #!/bin/sh
 DAEMON=fpvd
 DAEMON_PATH=/usr/bin/fpvd
+PIDFILE=/var/run/fpvd.pid
 LOG=/tmp/fpvd.log
-PID_NAME=fpvd
+DAEMON_ARGS="--log $LOG"
 
 start() {
-    if pidof "$PID_NAME" >/dev/null 2>&1; then
-        echo "$DAEMON already running"
-        return 0
-    fi
-    echo -n "Starting $DAEMON: "
-    "$DAEMON_PATH" >> "$LOG" 2>&1 &
-    sleep 0.5
-    pidof "$PID_NAME" >/dev/null 2>&1 && echo "OK" || { echo "FAILED (see $LOG)"; return 1; }
+    printf 'Starting %s: ' "$DAEMON"
+    start-stop-daemon -S -q -b -m -p "$PIDFILE" -x "$DAEMON_PATH" -- $DAEMON_ARGS
+    [ $? = 0 ] && echo "OK" || echo "FAIL"
 }
 
 stop() {
-    echo -n "Stopping $DAEMON: "
-    killall -TERM "$PID_NAME" 2>/dev/null
-    i=0
-    while pidof "$PID_NAME" >/dev/null 2>&1 && [ $i -lt 30 ]; do
-        sleep 0.5; i=$((i + 1))
-    done
-    pidof "$PID_NAME" >/dev/null 2>&1 && killall -9 "$PID_NAME" 2>/dev/null
-    echo "OK"
+    printf 'Stopping %s: ' "$DAEMON"
+    start-stop-daemon -K -q -p "$PIDFILE"
+    [ $? = 0 ] && echo "OK" || echo "FAIL"
 }
 
 case "$1" in
-    start) start ;;
-    stop)  stop ;;
-    restart) stop; start ;;
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; sleep 1; start ;;
     *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
 esac
