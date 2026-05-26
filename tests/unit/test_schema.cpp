@@ -1,0 +1,53 @@
+#include "doctest.h"
+#include "config/schema.hpp"
+#include <nlohmann/json.hpp>
+
+using fpvd::Config;
+using nlohmann::json;
+
+TEST_CASE("schema: round-trip a minimal config through json") {
+    json j = json::parse(R"({
+        "link":{"channel":161,"width":20,"txpower":1,"mcs":2,
+                "fec":{"k":8,"n":12},"stbc":false,"ldpc":false,
+                "linkId":7669206,"mtu":1500,"wlanAdapter":null},
+        "video":{"codec":"h265","resolution":"1920x1080","fps":60,
+                 "bitrate":8192,"rcMode":"cbr","gopSize":1.0,"qpDelta":-4,
+                 "roi":{"enabled":true,"qp":0,"center":0.4,"steps":2}},
+        "image":{"mirror":false,"flip":false,"rotate":0},
+        "telemetry":{"router":"msposd","serial":"ttyS2","osdFps":20,"baud":115200},
+        "recording":{"enabled":false,"dir":"/mnt/mmcblk0p1","format":"ts",
+                     "mode":"mirror","maxSeconds":300,"maxMB":500},
+        "snapshot":{"enabled":true,"quality":80},
+        "services":{}
+    })");
+
+    Config c = j.get<Config>();
+    CHECK(c.link.channel == 161);
+    CHECK(c.video.fps == 60);
+    CHECK(c.telemetry.router == "msposd");
+    CHECK(c.services.empty());
+
+    json out = c;
+    // Idempotent round-trip.
+    CHECK(out == j);
+}
+
+TEST_CASE("schema: service entry round-trips") {
+    json j = json::parse(R"({
+        "enabled":true,
+        "exec":"/usr/bin/adaptive-link",
+        "args":["--port","9601"],
+        "env":{"LOG":"info"},
+        "startAfter":["wfb_tlm_rx"],
+        "restart":"always"
+    })");
+    auto s = j.get<fpvd::Service>();
+    CHECK(s.enabled);
+    CHECK(s.exec == "/usr/bin/adaptive-link");
+    CHECK(s.args.size() == 2);
+    CHECK(s.env.at("LOG") == "info");
+    CHECK(s.startAfter == std::vector<std::string>{"wfb_tlm_rx"});
+    CHECK(s.restart == "always");
+    json out = s;
+    CHECK(out == j);
+}
