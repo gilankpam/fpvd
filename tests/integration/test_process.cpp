@@ -5,8 +5,8 @@
 
 using namespace std::chrono_literals;
 
-TEST_CASE("process: start /bin/true, observe clean exit") {
-    fpvd::Process p({"/bin/true"});
+TEST_CASE("process: start a child that exits 0, observe clean exit") {
+    fpvd::Process p({"/bin/sh", "-c", "exit 0"});
     p.start();
     auto ok = p.waitFor(2s);
     REQUIRE(ok);
@@ -14,8 +14,8 @@ TEST_CASE("process: start /bin/true, observe clean exit") {
     CHECK(p.lastExitCode() == 0);
 }
 
-TEST_CASE("process: start /bin/false, observe nonzero exit") {
-    fpvd::Process p({"/bin/false"});
+TEST_CASE("process: start a child that exits 1, observe nonzero exit") {
+    fpvd::Process p({"/bin/sh", "-c", "exit 1"});
     p.start();
     REQUIRE(p.waitFor(2s));
     CHECK(p.lastExitCode() == 1);
