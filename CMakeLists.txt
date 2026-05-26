@@ -30,6 +30,7 @@ target_sources(fpvd_core PRIVATE
     src/translate/telemetry.cpp
     src/supervise/process.cpp
     src/supervise/supervisor.cpp
+    src/supervise/orchestrator.cpp
 )
 
 # Executable.
@@ -50,6 +51,7 @@ target_sources(fpvd_tests PRIVATE
     tests/unit/test_translate_telemetry.cpp
     tests/integration/test_process.cpp
     tests/integration/test_supervisor.cpp
+    tests/integration/test_orchestrator.cpp
 )
 add_test(NAME fpvd_tests COMMAND fpvd_tests)
 
