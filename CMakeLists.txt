@@ -29,6 +29,7 @@ target_sources(fpvd_core PRIVATE
     src/translate/wfb.cpp
     src/translate/telemetry.cpp
     src/supervise/process.cpp
+    src/supervise/supervisor.cpp
 )
 
 # Executable.
@@ -48,6 +49,7 @@ target_sources(fpvd_tests PRIVATE
     tests/unit/test_translate_wfb.cpp
     tests/unit/test_translate_telemetry.cpp
     tests/integration/test_process.cpp
+    tests/integration/test_supervisor.cpp
 )
 add_test(NAME fpvd_tests COMMAND fpvd_tests)
 
