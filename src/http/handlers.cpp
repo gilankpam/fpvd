@@ -1,4 +1,5 @@
 #include "http/handlers.hpp"
+#include "status.hpp"
 
 namespace fpvd {
 
@@ -9,7 +10,7 @@ static nlohmann::json errBody(const std::string& code, const std::string& msg,
     return j;
 }
 
-void registerHandlers(HttpServer& srv, Daemon& d, bool /*reallyRestart*/) {
+void registerHandlers(HttpServer& srv, Daemon& d, bool reallyRestart) {
     srv.get("/healthz", [](const httplib::Request&, httplib::Response& res){
         res.status = 200; res.set_content("{}", "application/json");
     });
@@ -45,6 +46,34 @@ void registerHandlers(HttpServer& srv, Daemon& d, bool /*reallyRestart*/) {
             return;
         }
         res.set_content(nlohmann::json(d.pending()).dump(), "application/json");
+    });
+
+    srv.post("/apply", [&, reallyRestart](const httplib::Request&, httplib::Response& res){
+        auto ar = d.apply(reallyRestart);
+        if (!ar.ok) {
+            nlohmann::json details = nlohmann::json::array();
+            for (auto& e : ar.errors)
+                details.push_back({{"path", e.path}, {"message", e.message}});
+            res.status = 400;
+            res.set_content(errBody("validation", "cannot apply invalid config",
+                                     details).dump(), "application/json");
+            return;
+        }
+        nlohmann::json out = {
+            {"applied", true},
+            {"version", ar.version},
+            {"restarted", ar.restarted}
+        };
+        res.set_content(out.dump(), "application/json");
+    });
+
+    srv.post("/reset", [&](const httplib::Request&, httplib::Response& res){
+        d.reset();
+        res.set_content(R"({"reset":true})", "application/json");
+    });
+
+    srv.get("/status", [&](const httplib::Request&, httplib::Response& res){
+        res.set_content(buildStatus(d).dump(), "application/json");
     });
 }
 

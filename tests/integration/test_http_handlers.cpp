@@ -138,3 +138,60 @@ TEST_CASE("handlers: PATCH /config rejects validation errors") {
     srv.stop();
     fs::remove_all(tmp);
 }
+
+TEST_CASE("handlers: POST /apply commits pending and increments version") {
+    auto tmp = fs::temp_directory_path() / "fpvd-handlers-apply";
+    fs::remove_all(tmp);
+    auto d = makeTestDaemon(tmp);
+    fpvd::HttpServer srv;
+    fpvd::registerHandlers(srv, *d, false);
+    srv.listenInBackground("127.0.0.1", 18091);
+    srv.waitUntilReady(std::chrono::seconds(2));
+    httplib::Client c("http://127.0.0.1:18091");
+    c.Patch("/config", R"({"video":{"bitrate":9999}})", "application/json");
+    auto r = c.Post("/apply", "", "application/json");
+    REQUIRE(r); CHECK(r->status == 200);
+    auto j = nlohmann::json::parse(r->body);
+    CHECK(j["applied"] == true);
+    CHECK(j["version"] == 1);
+    CHECK(d->effective().video.bitrate == 9999);
+    srv.stop(); fs::remove_all(tmp);
+}
+
+TEST_CASE("handlers: POST /reset removes overlay") {
+    auto tmp = fs::temp_directory_path() / "fpvd-handlers-reset";
+    fs::remove_all(tmp);
+    auto d = makeTestDaemon(tmp);
+    // Stage and apply something so an overlay file exists.
+    fpvd::HttpServer srv;
+    fpvd::registerHandlers(srv, *d, false);
+    srv.listenInBackground("127.0.0.1", 18092);
+    srv.waitUntilReady(std::chrono::seconds(2));
+    httplib::Client c("http://127.0.0.1:18092");
+    c.Patch("/config", R"({"video":{"bitrate":5555}})", "application/json");
+    c.Post("/apply", "", "application/json");
+    REQUIRE(fs::exists(tmp / "etc" / "fpvd" / "config.json"));
+    auto r = c.Post("/reset", "", "application/json");
+    REQUIRE(r); CHECK(r->status == 200);
+    CHECK_FALSE(fs::exists(tmp / "etc" / "fpvd" / "config.json"));
+    srv.stop(); fs::remove_all(tmp);
+}
+
+TEST_CASE("handlers: GET /status returns expected shape") {
+    auto tmp = fs::temp_directory_path() / "fpvd-handlers-status";
+    fs::remove_all(tmp);
+    auto d = makeTestDaemon(tmp);
+    fpvd::HttpServer srv;
+    fpvd::registerHandlers(srv, *d, false);
+    srv.listenInBackground("127.0.0.1", 18093);
+    srv.waitUntilReady(std::chrono::seconds(2));
+    httplib::Client c("http://127.0.0.1:18093");
+    auto r = c.Get("/status");
+    REQUIRE(r); CHECK(r->status == 200);
+    auto j = nlohmann::json::parse(r->body);
+    CHECK(j.contains("uptime"));
+    CHECK(j.contains("version"));
+    CHECK(j.contains("processes"));
+    CHECK(j["processes"].is_array());
+    srv.stop(); fs::remove_all(tmp);
+}

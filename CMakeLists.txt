@@ -35,6 +35,7 @@ target_sources(fpvd_core PRIVATE
     src/supervise/radio.cpp
     src/http/server.cpp
     src/http/handlers.cpp
+    src/status.cpp
     src/daemon.cpp
 )
 
