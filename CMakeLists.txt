@@ -27,6 +27,7 @@ target_sources(fpvd_core PRIVATE
     src/config/validate.cpp
     src/translate/waybeam.cpp
     src/translate/wfb.cpp
+    src/translate/telemetry.cpp
 )
 
 # Executable.
@@ -44,6 +45,7 @@ target_sources(fpvd_tests PRIVATE
     tests/unit/test_validate.cpp
     tests/unit/test_translate_waybeam.cpp
     tests/unit/test_translate_wfb.cpp
+    tests/unit/test_translate_telemetry.cpp
 )
 add_test(NAME fpvd_tests COMMAND fpvd_tests)
 
