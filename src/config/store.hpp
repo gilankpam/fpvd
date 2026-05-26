@@ -24,4 +24,13 @@ nlohmann::json deepMergeJson(const nlohmann::json& base,
 Config loadEffective(const std::string& defaultsPath,
                      const std::string& overlayPath);
 
+// Return the JSON diff: every key/path in `effective` that differs from
+// the same path in `defaults`. Arrays are diffed as wholesale.
+nlohmann::json computeOverlay(const nlohmann::json& defaults,
+                               const nlohmann::json& effective);
+
+// Atomically write `j` to `path` (write to .tmp, fsync, rename).
+// Throws StoreError on I/O error.
+void atomicWriteJson(const std::string& path, const nlohmann::json& j);
+
 } // namespace fpvd

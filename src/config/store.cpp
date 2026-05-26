@@ -1,6 +1,10 @@
 #include "config/store.hpp"
 #include <fstream>
 #include <sstream>
+#include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
+#include <filesystem>
 
 namespace fpvd {
 
@@ -64,6 +68,49 @@ Config loadEffective(const std::string& defaultsPath,
     try { return merged.get<Config>(); }
     catch (const nlohmann::json::exception& e) {
         throw StoreError(std::string("merged schema: ") + e.what());
+    }
+}
+
+nlohmann::json computeOverlay(const nlohmann::json& defaults,
+                               const nlohmann::json& effective) {
+    if (!defaults.is_object() || !effective.is_object()) {
+        return (defaults == effective) ? nlohmann::json::object() : effective;
+    }
+    nlohmann::json diff = nlohmann::json::object();
+    for (auto it = effective.begin(); it != effective.end(); ++it) {
+        if (!defaults.contains(it.key())) {
+            diff[it.key()] = it.value();
+        } else if (defaults[it.key()] != it.value()) {
+            if (defaults[it.key()].is_object() && it.value().is_object()) {
+                auto sub = computeOverlay(defaults[it.key()], it.value());
+                if (!sub.empty()) diff[it.key()] = sub;
+            } else {
+                diff[it.key()] = it.value();
+            }
+        }
+    }
+    return diff;
+}
+
+void atomicWriteJson(const std::string& path, const nlohmann::json& j) {
+    std::string tmp = path + ".tmp";
+    std::filesystem::create_directories(
+        std::filesystem::path(path).parent_path());
+    int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) throw StoreError("open .tmp: " + std::string(strerror(errno)));
+    std::string s = j.dump(2);
+    s.push_back('\n');
+    if (::write(fd, s.data(), s.size()) != (ssize_t)s.size()) {
+        ::close(fd);
+        throw StoreError("write: " + std::string(strerror(errno)));
+    }
+    if (::fsync(fd) != 0) {
+        ::close(fd);
+        throw StoreError("fsync: " + std::string(strerror(errno)));
+    }
+    ::close(fd);
+    if (::rename(tmp.c_str(), path.c_str()) != 0) {
+        throw StoreError("rename: " + std::string(strerror(errno)));
     }
 }
 

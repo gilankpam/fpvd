@@ -1,6 +1,9 @@
 #include "doctest.h"
 #include "config/store.hpp"
 #include <nlohmann/json.hpp>
+#include <filesystem>
+#include <fstream>
+namespace fs = std::filesystem;
 
 TEST_CASE("store: load defaults from file") {
     auto cfg = fpvd::loadDefaults("tests/fixtures/defaults.json");
@@ -53,4 +56,33 @@ TEST_CASE("store: deepMergeJson replaces arrays wholesale") {
     json over = {{"arr", {9}}};
     json m = fpvd::deepMergeJson(base, over);
     CHECK(m["arr"] == json::array({9}));
+}
+
+TEST_CASE("store: computeOverlay returns only diff") {
+    using nlohmann::json;
+    json defaults = {{"a", 1}, {"b", {{"x", 1}, {"y", 2}}}};
+    json effective = {{"a", 1}, {"b", {{"x", 1}, {"y", 99}}}};
+    auto ov = fpvd::computeOverlay(defaults, effective);
+    CHECK(ov == json{{"b", {{"y", 99}}}});
+}
+
+TEST_CASE("store: computeOverlay handles arrays as wholesale replace") {
+    using nlohmann::json;
+    json defaults = {{"arr", {1, 2, 3}}};
+    json effective = {{"arr", {1, 2, 4}}};
+    auto ov = fpvd::computeOverlay(defaults, effective);
+    CHECK(ov == json{{"arr", {1, 2, 4}}});
+}
+
+TEST_CASE("store: atomicWriteJson writes file and survives") {
+    auto tmp = fs::temp_directory_path() / "fpvd_atomic_test.json";
+    fs::remove(tmp);
+    nlohmann::json j = {{"k", "v"}};
+    fpvd::atomicWriteJson(tmp.string(), j);
+    std::ifstream in(tmp);
+    nlohmann::json round;
+    in >> round;
+    CHECK(round == j);
+    CHECK_FALSE(fs::exists(tmp.string() + ".tmp"));
+    fs::remove(tmp);
 }
