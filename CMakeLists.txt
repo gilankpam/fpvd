@@ -24,6 +24,7 @@ target_include_directories(fpvd_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(fpvd_core PUBLIC third_party Threads::Threads)
 target_sources(fpvd_core PRIVATE
     src/config/store.cpp
+    src/config/validate.cpp
 )
 
 # Executable.
@@ -38,6 +39,7 @@ target_sources(fpvd_tests PRIVATE
     tests/unit/test_sanity.cpp
     tests/unit/test_schema.cpp
     tests/unit/test_store.cpp
+    tests/unit/test_validate.cpp
 )
 add_test(NAME fpvd_tests COMMAND fpvd_tests)
 
