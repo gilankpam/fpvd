@@ -25,6 +25,7 @@ target_link_libraries(fpvd_core PUBLIC third_party Threads::Threads)
 target_sources(fpvd_core PRIVATE
     src/config/store.cpp
     src/config/validate.cpp
+    src/translate/waybeam.cpp
 )
 
 # Executable.
@@ -40,6 +41,7 @@ target_sources(fpvd_tests PRIVATE
     tests/unit/test_schema.cpp
     tests/unit/test_store.cpp
     tests/unit/test_validate.cpp
+    tests/unit/test_translate_waybeam.cpp
 )
 add_test(NAME fpvd_tests COMMAND fpvd_tests)
 
