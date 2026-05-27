@@ -48,8 +48,10 @@ no extra config file, no second source of truth on the drone.
 - Diff categorization so `dynamicLink.*` changes restart `dl_applier`
   only; `link.mtu` and `video.fps` changes also restart `dl_applier`
   (because they feed `--hello-mtu-bytes` / `--hello-fps`).
+- Cross-field lock: when `dynamicLink.enabled` is true, reject PATCH
+  bodies that write to the link/video fields dl-applier owns at runtime.
 - Unit tests: schema validation, translator golden-file, diff
-  categorization.
+  categorization, cross-field lock matrix.
 
 ### Out of scope (v1)
 
@@ -170,6 +172,65 @@ itself).
 
 Unknown keys inside `dynamicLink.*` rejected with 400 per §6 of the
 parent spec (typo protection).
+
+### Cross-field lock: dl-applier owns these at runtime
+
+When `dynamicLink.enabled` is `true`, `dl-applier` mutates the
+following fields at runtime via `wfb_tx` control commands, `iw`, and
+the encoder HTTP API. Letting an operator also write to them through
+`PATCH /config` creates two writers to the same physical value, with
+dl-applier's next decision (typically <100 ms away) silently
+overwriting whatever the operator just set.
+
+To prevent the confusion, `PATCH /config` rejects any body that writes
+to these keys when the *merged pending* config would have
+`dynamicLink.enabled == true`:
+
+| Locked path | Owner inside dl-applier |
+|---|---|
+| `link.mcs` | `CMD_SET_RADIO` (mcs field) |
+| `link.txpower` | `iw wlan0 set txpower fixed <mBm>` |
+| `link.fec` (the entire subtree, `k` and `n`) | `CMD_SET_FEC` |
+| `link.width` | `CMD_SET_RADIO` (bandwidth field) |
+| `video.bitrate` | encoder HTTP API |
+| `video.qpDelta` | encoder HTTP API |
+| `video.roi` (the entire subtree) | encoder HTTP API (notably `fpv.roiQp` is recomputed on every bitrate apply) |
+
+`link.channel` is **not** locked — dl-applier never changes frequency,
+only width.
+
+**Evaluation rule.** The check runs against the *pending* config after
+the incoming PATCH body has been deep-merged in, not against the
+current effective config:
+
+- `PATCH {dynamicLink:{enabled:false}, link:{mcs:5}}` while DL is
+  enabled in effective → **allowed**. Merged pending has
+  `enabled=false`, so the lock is open in the same operation.
+  Operator can disable DL and edit baseline atomically.
+- `PATCH {dynamicLink:{enabled:true}, link:{mcs:5}}` while DL is
+  disabled in effective → **rejected**. Merged pending has
+  `enabled=true` *and* the body writes a locked key. Operator must
+  send two PATCHes: baseline first, then enable.
+- `PATCH {link:{mcs:5}}` while DL is enabled in pending → **rejected**.
+
+**Implementation.** The check happens in
+`src/config/validate.cpp::validatePatch(body, mergedPending)` and runs
+*before* the schema range checks. The body-key walk is path-based
+(`link.fec` is locked → any `link.fec.k` or `link.fec.n` in the body
+fails, and a body that overwrites `link.fec` wholesale also fails).
+Toggling `enabled` itself is always allowed.
+
+**Error shape.** 400 with `{ error: "dynamic_link_locked", details: {
+locked: ["link.mcs", "video.bitrate"] } }`. The `locked` array lists
+the specific dotted paths the rejected body tried to write, so the
+client can surface a precise message.
+
+**Apply path.** `POST /apply` does not re-run this check — pending was
+already validated at each PATCH. The only way to reach a pending state
+with `enabled=true` and a "modified" locked field is to PATCH the
+locked field first while DL was off, then PATCH `enabled=true` in a
+separate body; that's the intended flow ("set my baseline, then turn
+DL on").
 
 ## 6. Translator
 
@@ -309,7 +370,19 @@ panel.
   section through `from_json` / `to_json`; verify defaults match
   §5; verify unknown keys inside `dynamicLink.*` reject.
 - `tests/unit/test_validate.cpp` — one positive + one negative case
-  per validation rule in §5.
+  per validation rule in §5, plus the cross-field lock matrix:
+  - DL enabled in effective, PATCH writes a locked key → 400
+    `dynamic_link_locked` listing the path.
+  - DL enabled in effective, PATCH disables it *and* writes a locked
+    key in the same body → 200.
+  - DL disabled in effective, PATCH enables it *and* writes a locked
+    key in the same body → 400.
+  - DL enabled, PATCH writes `dynamicLink.safe.mcs` (not a locked
+    key) → 200.
+  - DL enabled, PATCH writes `link.channel` (deliberately
+    non-locked) → 200.
+  - DL enabled, PATCH overwrites `link.fec` wholesale → 400 (subtree
+    lock).
 - `tests/unit/test_translate_dynamic_link.cpp` (new file, mirrors
   `test_translate_wfb.cpp`) — golden-file argv tests:
   1. Defaults config → exact expected argv.
@@ -377,20 +450,25 @@ For drones currently running `dl-applier` under
 
 ## 13. Trade-off: dl-applier × fpvd config races
 
-`dl-applier` mutates `video.bitrate` live via the encoder HTTP API,
-and pushes `fpv.roiQp` on every bitrate apply. fpvd's apply flow
-rewrites `/etc/waybeam.json` and restarts `waybeam` whenever any
-`video.*` field changes. On every such apply, dl-applier's runtime
-adaptations are reset to the freshly-translated baseline until the
-next decision packet arrives from the GS (typically <100 ms at the
-configured stats cadence).
+Resolved by the cross-field lock in §5. While `dynamicLink.enabled ==
+true`, `PATCH /config` rejects any write to the runtime-owned
+fields (`link.mcs`/`txpower`/`fec`/`width`,
+`video.bitrate`/`qpDelta`/`roi`), so the only writer to those fields
+at runtime is dl-applier. fpvd still writes the schema-defined
+*baseline* into `/etc/waybeam.json` and `wfb_tx` argv at process
+start, but no PATCH can change those baselines without first disabling
+dl-applier — which means no apply-cycle race between an operator edit
+and an in-flight dl-applier decision.
 
-This is acceptable under fpvd's v1 hard assumption (pre-flight workflow
-only). Worth recording so a future v2 — which may add hot reload —
-knows that `video.bitrate` is a shared write surface and needs an
-explicit ownership rule (e.g. fpvd writes baseline, dl-applier writes
-runtime, the encoder's last-writer wins, and `GET /config` always
-returns the baseline). v1 does not encode such a rule.
+What remains: each `POST /apply` that restarts `waybeam` for a
+non-locked `video.*` change (e.g. `video.codec`, `video.resolution`,
+`video.fps`, `video.gopSize`, `recording.*`, `snapshot.*`) still
+resets the encoder's runtime ROI-QP and bitrate to the
+freshly-translated baseline until dl-applier's next decision arrives
+(typically <100 ms at the configured stats cadence). That's a brief
+visual blip during a deliberate operator-initiated apply, not a
+silent overwrite. Acceptable under v1's pre-flight workflow hard
+assumption.
 
 ## 14. Open questions
 
@@ -400,8 +478,9 @@ None blocking. Items intentionally deferred to v2+:
   counters in `GET /status.dynamicLink`.
 - Exposing the deferred Phase-3 debug-suite knobs (`dbg_log_dir`,
   `dbg_max_bytes`, `dbg_fsync_each`) once a deployment asks for them.
-- Resolving the `video.bitrate` ownership race documented in §13 once
-  fpvd grows hot reload.
+- Extending the §5 cross-field lock pattern to other future
+  runtime-controllers (e.g. a hypothetical auto-channel-select
+  service that would own `link.channel`).
 
 ## 15. Success criteria
 
