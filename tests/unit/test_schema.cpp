@@ -18,6 +18,17 @@ TEST_CASE("schema: round-trip a minimal config through json") {
         "recording":{"enabled":false,"dir":"/mnt/mmcblk0p1","format":"ts",
                      "mode":"mirror","maxSeconds":300,"maxMB":500},
         "snapshot":{"enabled":true,"quality":80},
+        "dynamicLink":{
+            "enabled":false,"healthTimeoutMs":10000,
+            "interleavingSupported":true,"debug":false,
+            "minIdrIntervalMs":500,"applyStaggerMs":50,"applySubPaceMs":5,
+            "mavlinkEnable":true,
+            "osd":{"enabled":true,"debugLatency":false},
+            "roiQp":{"thresholdKbps":6000,"lowAnchorKbps":2000,
+                     "floor":-24,"step":3},
+            "safe":{"mcs":1,"k":8,"n":12,"depth":1,
+                    "bandwidth":20,"txPowerDbm":20,"bitrateKbps":2000}
+        },
         "services":{}
     })");
 
@@ -50,4 +61,48 @@ TEST_CASE("schema: service entry round-trips") {
     CHECK(s.restart == "always");
     json out = s;
     CHECK(out == j);
+}
+
+TEST_CASE("schema: dynamicLink round-trips through json") {
+    using nlohmann::json;
+    fpvd::Config c{};
+    c.dynamicLink.enabled = true;
+    c.dynamicLink.safe.mcs = 3;
+    c.dynamicLink.roiQp.floor = -18;
+    c.dynamicLink.osd.debugLatency = true;
+    json j = c;
+    fpvd::Config c2 = j.get<fpvd::Config>();
+    CHECK(c2.dynamicLink.enabled == true);
+    CHECK(c2.dynamicLink.safe.mcs == 3);
+    CHECK(c2.dynamicLink.roiQp.floor == -18);
+    CHECK(c2.dynamicLink.osd.debugLatency == true);
+    // unchanged defaults round-trip too
+    CHECK(c2.dynamicLink.healthTimeoutMs == 10000);
+    CHECK(c2.dynamicLink.interleavingSupported == true);
+    CHECK(c2.dynamicLink.mavlinkEnable == true);
+}
+
+TEST_CASE("schema: dynamicLink defaults match spec") {
+    fpvd::Config c{};
+    CHECK(c.dynamicLink.enabled == false);
+    CHECK(c.dynamicLink.healthTimeoutMs == 10000);
+    CHECK(c.dynamicLink.interleavingSupported == true);
+    CHECK(c.dynamicLink.debug == false);
+    CHECK(c.dynamicLink.minIdrIntervalMs == 500);
+    CHECK(c.dynamicLink.applyStaggerMs == 50);
+    CHECK(c.dynamicLink.applySubPaceMs == 5);
+    CHECK(c.dynamicLink.mavlinkEnable == true);
+    CHECK(c.dynamicLink.osd.enabled == true);
+    CHECK(c.dynamicLink.osd.debugLatency == false);
+    CHECK(c.dynamicLink.roiQp.thresholdKbps == 6000);
+    CHECK(c.dynamicLink.roiQp.lowAnchorKbps == 2000);
+    CHECK(c.dynamicLink.roiQp.floor == -24);
+    CHECK(c.dynamicLink.roiQp.step == 3);
+    CHECK(c.dynamicLink.safe.mcs == 1);
+    CHECK(c.dynamicLink.safe.k == 8);
+    CHECK(c.dynamicLink.safe.n == 12);
+    CHECK(c.dynamicLink.safe.depth == 1);
+    CHECK(c.dynamicLink.safe.bandwidth == 20);
+    CHECK(c.dynamicLink.safe.txPowerDbm == 20);
+    CHECK(c.dynamicLink.safe.bitrateKbps == 2000);
 }

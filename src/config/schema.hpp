@@ -96,6 +96,56 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Recording, enabled, dir, format, mode,
 struct Snapshot { bool enabled{true}; int quality{80}; };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Snapshot, enabled, quality)
 
+struct DynamicLinkSafe {
+    int mcs{1};
+    int k{8};
+    int n{12};
+    int depth{1};
+    int bandwidth{20};
+    int txPowerDbm{20};
+    int bitrateKbps{2000};
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkSafe, mcs, k, n,
+                                               depth, bandwidth, txPowerDbm,
+                                               bitrateKbps)
+
+struct DynamicLinkOsd {
+    bool enabled{true};
+    bool debugLatency{false};
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkOsd, enabled,
+                                               debugLatency)
+
+struct DynamicLinkRoiQp {
+    int thresholdKbps{6000};
+    int lowAnchorKbps{2000};
+    int floor{-24};
+    int step{3};
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkRoiQp,
+                                               thresholdKbps, lowAnchorKbps,
+                                               floor, step)
+
+struct DynamicLink {
+    bool enabled{false};
+    int healthTimeoutMs{10000};
+    bool interleavingSupported{true};
+    bool debug{false};
+    int minIdrIntervalMs{500};
+    int applyStaggerMs{50};
+    int applySubPaceMs{5};
+    bool mavlinkEnable{true};
+    DynamicLinkOsd osd{};
+    DynamicLinkRoiQp roiQp{};
+    DynamicLinkSafe safe{};
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled,
+                                               healthTimeoutMs,
+                                               interleavingSupported, debug,
+                                               minIdrIntervalMs, applyStaggerMs,
+                                               applySubPaceMs, mavlinkEnable,
+                                               osd, roiQp, safe)
+
 struct Service {
     bool enabled{true};
     std::string exec{};
@@ -114,9 +164,11 @@ struct Config {
     Telemetry telemetry{};
     Recording recording{};
     Snapshot snapshot{};
+    DynamicLink dynamicLink{};
     std::map<std::string, Service> services{};
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Config, link, video, image, telemetry,
-                                   recording, snapshot, services)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, link, video, image,
+                                               telemetry, recording, snapshot,
+                                               dynamicLink, services)
 
 } // namespace fpvd
