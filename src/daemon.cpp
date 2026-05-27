@@ -1,4 +1,5 @@
 #include "daemon.hpp"
+#include "config/lock.hpp"
 #include "config/store.hpp"
 #include "config/validate.hpp"
 #include "supervise/radio.hpp"
@@ -103,12 +104,16 @@ PatchResult Daemon::patchPending(const nlohmann::json& patch) {
     Config candidate;
     try { candidate = next.get<Config>(); }
     catch (const nlohmann::json::exception& e) {
-        return {false, {{"<root>", e.what()}}};
+        return {false, {{"<root>", e.what()}}, {}};
+    }
+    auto lockR = checkDynamicLinkLock(patch, candidate);
+    if (!lockR.ok) {
+        return {false, {}, std::move(lockR.lockedPaths)};
     }
     auto errs = validate(candidate);
-    if (!errs.empty()) return {false, std::move(errs)};
+    if (!errs.empty()) return {false, std::move(errs), {}};
     pending_ = candidate;
-    return {true, {}};
+    return {true, {}, {}};
 }
 
 ApplyResult Daemon::apply(bool reallyRestart) {

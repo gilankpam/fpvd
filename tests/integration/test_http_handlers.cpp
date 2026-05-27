@@ -177,6 +177,64 @@ TEST_CASE("handlers: POST /reset removes overlay") {
     srv.stop(); fs::remove_all(tmp);
 }
 
+TEST_CASE("handlers: PATCH /config rejects locked field when DL enabled") {
+    auto tmp = fs::temp_directory_path() / "fpvd-handlers-lock";
+    fs::remove_all(tmp);
+    auto d = makeTestDaemon(tmp);
+    fpvd::HttpServer srv;
+    fpvd::registerHandlers(srv, *d, false);
+    srv.listenInBackground("127.0.0.1", 18094);
+    srv.waitUntilReady(std::chrono::seconds(2));
+
+    httplib::Client c("http://127.0.0.1:18094");
+    // First enable DL in pending and apply, so effective.dynamicLink.enabled = true.
+    auto r1 = c.Patch("/config",
+        R"({"dynamicLink":{"enabled":true}})", "application/json");
+    REQUIRE(r1); CHECK(r1->status == 200);
+    auto r2 = c.Post("/apply", "", "application/json");
+    REQUIRE(r2); CHECK(r2->status == 200);
+
+    // Now try to write a locked field.
+    auto r3 = c.Patch("/config",
+        R"({"link":{"mcs":5}})", "application/json");
+    REQUIRE(r3);
+    CHECK(r3->status == 400);
+    auto j = nlohmann::json::parse(r3->body);
+    CHECK(j["error"] == "dynamic_link_locked");
+    REQUIRE(j["details"]["locked"].is_array());
+    CHECK(j["details"]["locked"].size() == 1);
+    CHECK(j["details"]["locked"][0] == "link.mcs");
+
+    // Pending should be unchanged.
+    CHECK(d->pending().link.mcs == 2);
+    srv.stop(); fs::remove_all(tmp);
+}
+
+TEST_CASE("handlers: PATCH that disables DL and writes locked key is allowed") {
+    auto tmp = fs::temp_directory_path() / "fpvd-handlers-lock-unlock";
+    fs::remove_all(tmp);
+    auto d = makeTestDaemon(tmp);
+    fpvd::HttpServer srv;
+    fpvd::registerHandlers(srv, *d, false);
+    srv.listenInBackground("127.0.0.1", 18095);
+    srv.waitUntilReady(std::chrono::seconds(2));
+
+    httplib::Client c("http://127.0.0.1:18095");
+    // Enable + apply.
+    c.Patch("/config",
+        R"({"dynamicLink":{"enabled":true}})", "application/json");
+    c.Post("/apply", "", "application/json");
+
+    // Single PATCH disables DL and writes link.mcs.
+    auto r = c.Patch("/config",
+        R"({"dynamicLink":{"enabled":false},"link":{"mcs":5}})",
+        "application/json");
+    REQUIRE(r); CHECK(r->status == 200);
+    CHECK(d->pending().dynamicLink.enabled == false);
+    CHECK(d->pending().link.mcs == 5);
+    srv.stop(); fs::remove_all(tmp);
+}
+
 TEST_CASE("handlers: GET /status returns expected shape") {
     auto tmp = fs::temp_directory_path() / "fpvd-handlers-status";
     fs::remove_all(tmp);
