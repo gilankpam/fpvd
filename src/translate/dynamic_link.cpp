@@ -40,7 +40,6 @@ std::vector<std::string> dynamicLinkArgs(const Config& c,
         // schema-driven scalars and toggles
         "--health-timeout-ms", to_string(dl.healthTimeoutMs),
         "--interleaving-supported", b01(dl.interleavingSupported),
-        "--debug-enable", b01(dl.debug),
         "--min-idr-interval-ms", to_string(dl.minIdrIntervalMs),
         "--apply-stagger-ms", to_string(dl.applyStaggerMs),
         "--apply-sub-pace-ms", to_string(dl.applySubPaceMs),

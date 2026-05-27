@@ -20,7 +20,7 @@ TEST_CASE("schema: round-trip a minimal config through json") {
         "snapshot":{"enabled":true,"quality":80},
         "dynamicLink":{
             "enabled":false,"healthTimeoutMs":10000,
-            "interleavingSupported":true,"debug":false,
+            "interleavingSupported":true,
             "minIdrIntervalMs":500,"applyStaggerMs":50,"applySubPaceMs":5,
             "mavlinkEnable":true,
             "osd":{"enabled":true,"debugLatency":false},
@@ -86,7 +86,6 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
     CHECK(c.dynamicLink.enabled == false);
     CHECK(c.dynamicLink.healthTimeoutMs == 10000);
     CHECK(c.dynamicLink.interleavingSupported == true);
-    CHECK(c.dynamicLink.debug == false);
     CHECK(c.dynamicLink.minIdrIntervalMs == 500);
     CHECK(c.dynamicLink.applyStaggerMs == 50);
     CHECK(c.dynamicLink.applySubPaceMs == 5);

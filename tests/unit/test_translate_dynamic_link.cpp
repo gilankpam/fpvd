@@ -30,7 +30,6 @@ TEST_CASE("translate.dl: defaults map to expected schema-driven flags") {
     auto a = dynamicLinkArgs(c, "wlan0");
     CHECK(pairAfter(a, "--health-timeout-ms") == "10000");
     CHECK(pairAfter(a, "--interleaving-supported") == "1");
-    CHECK(pairAfter(a, "--debug-enable") == "0");
     CHECK(pairAfter(a, "--min-idr-interval-ms") == "500");
     CHECK(pairAfter(a, "--apply-stagger-ms") == "50");
     CHECK(pairAfter(a, "--apply-sub-pace-ms") == "5");
@@ -81,13 +80,11 @@ TEST_CASE("translate.dl: hard-coded operational defaults present") {
 TEST_CASE("translate.dl: schema toggles propagate as 0/1") {
     Config c{};
     c.dynamicLink.interleavingSupported = false;
-    c.dynamicLink.debug = true;
     c.dynamicLink.mavlinkEnable = false;
     c.dynamicLink.osd.enabled = false;
     c.dynamicLink.osd.debugLatency = true;
     auto a = dynamicLinkArgs(c, "wlan0");
     CHECK(pairAfter(a, "--interleaving-supported") == "0");
-    CHECK(pairAfter(a, "--debug-enable") == "1");
     CHECK(pairAfter(a, "--mavlink-enable") == "0");
     CHECK(pairAfter(a, "--osd-enable") == "0");
     CHECK(pairAfter(a, "--osd-debug-latency") == "1");
