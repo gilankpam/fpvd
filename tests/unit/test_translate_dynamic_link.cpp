@@ -46,7 +46,7 @@ TEST_CASE("translate.dl: defaults map to expected schema-driven flags") {
     CHECK(pairAfter(a, "--safe-n") == "12");
     CHECK(pairAfter(a, "--safe-depth") == "1");
     CHECK(pairAfter(a, "--safe-bandwidth") == "20");
-    CHECK(pairAfter(a, "--safe-tx-power-d-bm") == "20");
+    CHECK(pairAfter(a, "--safe-tx-power-dBm") == "20");
     CHECK(pairAfter(a, "--safe-bitrate-kbps") == "2000");
 }
 

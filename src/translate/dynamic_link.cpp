@@ -60,7 +60,7 @@ std::vector<std::string> dynamicLinkArgs(const Config& c,
         "--safe-n", to_string(dl.safe.n),
         "--safe-depth", to_string(dl.safe.depth),
         "--safe-bandwidth", to_string(dl.safe.bandwidth),
-        "--safe-tx-power-d-bm", to_string(dl.safe.txPowerDbm),
+        "--safe-tx-power-dBm", to_string(dl.safe.txPowerDbm),
         "--safe-bitrate-kbps", to_string(dl.safe.bitrateKbps),
 
         // derived from existing fpvd schema
