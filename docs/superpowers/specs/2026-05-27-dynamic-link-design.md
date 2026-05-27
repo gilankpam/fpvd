@@ -159,12 +159,12 @@ itself).
 - `safe.k` ≥ 1, `safe.n` ≥ 1, `safe.n` ≤ 32, `safe.k` < `safe.n`
 - `safe.depth` ∈ [1, 8]
 - `safe.bandwidth` ∈ {20, 40}
-- `safe.txPowerDbm` ∈ [0, 30]
+- `safe.txPowerDbm` ∈ [-10, 30] (matches dl-applier's own range)
 - `safe.bitrateKbps` > 0
 - `healthTimeoutMs` ≥ 1000 (sub-second watchdog never makes sense
   given decision cadence)
 - `minIdrIntervalMs` ≥ 16 (one frame at 60 fps)
-- `applyStaggerMs` ∈ [0, 1000]
+- `applyStaggerMs` ∈ [0, 500] (matches dl-applier's own range)
 - `applySubPaceMs` ∈ [0, 50] (matches dl-applier's own range check)
 - `roiQp.thresholdKbps` > `roiQp.lowAnchorKbps` > 0
 - `roiQp.floor` ≤ 0 (negative-sharpens-center convention)
@@ -214,7 +214,7 @@ current effective config:
 - `PATCH {link:{mcs:5}}` while DL is enabled in pending → **rejected**.
 
 **Implementation.** The check happens in
-`src/config/validate.cpp::validatePatch(body, mergedPending)` and runs
+`src/config/lock.cpp::checkDynamicLinkLock(body, mergedPending), called from Daemon::patchPending` and runs
 *before* the schema range checks. The body-key walk is path-based
 (`link.fec` is locked → any `link.fec.k` or `link.fec.n` in the body
 fails, and a body that overwrites `link.fec` wholesale also fails).
@@ -277,7 +277,7 @@ The translator emits one flat argv:
 | `dynamicLink.safe.n` | `--safe-n <N>` |
 | `dynamicLink.safe.depth` | `--safe-depth <N>` |
 | `dynamicLink.safe.bandwidth` | `--safe-bandwidth <N>` |
-| `dynamicLink.safe.txPowerDbm` | `--safe-tx-power-d-bm <N>` |
+| `dynamicLink.safe.txPowerDbm` | `--safe-tx-power-dBm <N>` |
 | `dynamicLink.safe.bitrateKbps` | `--safe-bitrate-kbps <N>` |
 | `link.mtu` | `--hello-mtu-bytes <N>` |
 | `video.fps` | `--hello-fps <N>` |
