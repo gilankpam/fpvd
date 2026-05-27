@@ -102,8 +102,8 @@ std::vector<ValidationError> validate(const Config& c) {
             errs.push_back({"dynamicLink.safe.depth", "must be 1..8"});
         if (dl.safe.bandwidth != 20 && dl.safe.bandwidth != 40)
             errs.push_back({"dynamicLink.safe.bandwidth", "must be 20 or 40"});
-        if (dl.safe.txPowerDbm < 0 || dl.safe.txPowerDbm > 30)
-            errs.push_back({"dynamicLink.safe.txPowerDbm", "must be 0..30"});
+        if (dl.safe.txPowerDbm < -10 || dl.safe.txPowerDbm > 30)
+            errs.push_back({"dynamicLink.safe.txPowerDbm", "must be -10..30"});
         if (dl.safe.bitrateKbps <= 0)
             errs.push_back({"dynamicLink.safe.bitrateKbps", "must be > 0"});
 
@@ -111,8 +111,8 @@ std::vector<ValidationError> validate(const Config& c) {
             errs.push_back({"dynamicLink.healthTimeoutMs", "must be >= 1000"});
         if (dl.minIdrIntervalMs < 16)
             errs.push_back({"dynamicLink.minIdrIntervalMs", "must be >= 16"});
-        if (dl.applyStaggerMs < 0 || dl.applyStaggerMs > 1000)
-            errs.push_back({"dynamicLink.applyStaggerMs", "must be 0..1000"});
+        if (dl.applyStaggerMs < 0 || dl.applyStaggerMs > 500)
+            errs.push_back({"dynamicLink.applyStaggerMs", "must be 0..500"});
         if (dl.applySubPaceMs < 0 || dl.applySubPaceMs > 50)
             errs.push_back({"dynamicLink.applySubPaceMs", "must be 0..50"});
 

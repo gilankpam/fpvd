@@ -126,13 +126,13 @@ TEST_CASE("validate: dynamicLink.safe.bandwidth must be 20 or 40") {
     CHECK(errs[0].path == "dynamicLink.safe.bandwidth");
 }
 
-TEST_CASE("validate: dynamicLink.safe.txPowerDbm in [0,30]") {
+TEST_CASE("validate: dynamicLink.safe.txPowerDbm in [-10,30]") {
     Config c{}; c.dynamicLink.safe.txPowerDbm = 31;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.safe.txPowerDbm");
 
-    Config c2{}; c2.dynamicLink.safe.txPowerDbm = -1;
+    Config c2{}; c2.dynamicLink.safe.txPowerDbm = -11;
     auto errs2 = validate(c2);
     REQUIRE(errs2.size() == 1);
     CHECK(errs2[0].path == "dynamicLink.safe.txPowerDbm");
@@ -159,8 +159,8 @@ TEST_CASE("validate: dynamicLink.minIdrIntervalMs >= 16") {
     CHECK(errs[0].path == "dynamicLink.minIdrIntervalMs");
 }
 
-TEST_CASE("validate: dynamicLink.applyStaggerMs in [0,1000]") {
-    Config c{}; c.dynamicLink.applyStaggerMs = 1001;
+TEST_CASE("validate: dynamicLink.applyStaggerMs in [0,500]") {
+    Config c{}; c.dynamicLink.applyStaggerMs = 501;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.applyStaggerMs");
