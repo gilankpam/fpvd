@@ -64,7 +64,6 @@ TEST_CASE("schema: service entry round-trips") {
 }
 
 TEST_CASE("schema: dynamicLink round-trips through json") {
-    using nlohmann::json;
     fpvd::Config c{};
     c.dynamicLink.enabled = true;
     c.dynamicLink.safe.mcs = 3;
@@ -105,4 +104,26 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
     CHECK(c.dynamicLink.safe.bandwidth == 20);
     CHECK(c.dynamicLink.safe.txPowerDbm == 20);
     CHECK(c.dynamicLink.safe.bitrateKbps == 2000);
+}
+
+TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") {
+    using nlohmann::json;
+    json j = json::parse(R"({
+        "link": {"channel":161,"width":20,"txpower":1,"mcs":2,
+                 "fec":{"k":8,"n":12},"stbc":false,"ldpc":false,
+                 "linkId":7669206,"mtu":1500,"wlanAdapter":null},
+        "video": {"codec":"h265","resolution":"1920x1080","fps":60,
+                  "bitrate":8192,"rcMode":"cbr","gopSize":1.0,"qpDelta":-4,
+                  "roi":{"enabled":true,"qp":0,"center":0.4,"steps":2}},
+        "image": {"mirror":false,"flip":false,"rotate":0},
+        "telemetry": {"router":"msposd","serial":"ttyS2","osdFps":20,"baud":115200},
+        "recording": {"enabled":false,"dir":"/mnt/mmcblk0p1","format":"ts",
+                      "mode":"mirror","maxSeconds":300,"maxMB":500},
+        "snapshot": {"enabled":true,"quality":80},
+        "services": {}
+    })");
+    fpvd::Config c = j.get<fpvd::Config>();  // must not throw
+    CHECK(c.dynamicLink.enabled == false);
+    CHECK(c.dynamicLink.safe.mcs == 1);
+    CHECK(c.dynamicLink.healthTimeoutMs == 10000);
 }
