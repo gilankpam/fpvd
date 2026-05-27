@@ -60,6 +60,7 @@ target_sources(fpvd_tests PRIVATE
     tests/unit/test_translate_wfb.cpp
     tests/unit/test_translate_telemetry.cpp
     tests/unit/test_translate_dynamic_link.cpp
+    tests/unit/test_dl_applier_cli_assumptions.cpp
     tests/integration/test_process.cpp
     tests/integration/test_supervisor.cpp
     tests/integration/test_orchestrator.cpp

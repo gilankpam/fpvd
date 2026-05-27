@@ -1,0 +1,59 @@
+Usage: /tmp/build/dl-applier [--config <drone.conf>] [--debug] [field-overrides...]
+
+  --config PATH      path to drone.conf (optional; defaults used if omitted)
+  --debug            enable DEBUG-level logging
+  --help             print this help and exit
+
+Field overrides (CLI > conf file > defaults):
+
+  Integer fields (--name VALUE):
+    --listen-port  (u16, range [1..65535])
+    --wfb-tx-ctrl-port  (u16, range [1..65535])
+    --min-idr-interval-ms  (u32, range [0..60000])
+    --idr-listen-port  (u16, range [0..65535])
+    --apply-stagger-ms  (u32, range [0..500])
+    --apply-sub-pace-ms  (u32, range [0..50])
+    --osd-update-interval-ms  (u32, range [100..60000])
+    --health-timeout-ms  (u32, range [500..120000])
+    --safe-k  (u8, range [1..32])
+    --safe-n  (u8, range [2..255])
+    --safe-depth  (u8, range [1..8])
+    --safe-mcs  (u8, range [0..7])
+    --safe-bandwidth  (u8, range [20..40])
+    --safe-tx-power-dBm  (i8, range [-10..30])
+    --safe-bitrate-kbps  (u16, range [100..65535])
+    --encoder-port  (u16, range [1..65535])
+    --roi-qp-threshold-kbps  (u16, range [100..65535])
+    --roi-qp-low-anchor-kbps  (u16, range [100..65535])
+    --roi-qp-floor  (i8, range [-30..0])
+    --roi-qp-step  (u8, range [1..10])
+    --mavlink-port  (u16, range [1..65535])
+    --mavlink-sysid  (u8, range [0..255])
+    --mavlink-compid  (u8, range [0..255])
+    --gs-tunnel-port  (u16, range [1..65535])
+    --hello-announce-initial-ms  (u32, range [1..60000])
+    --hello-announce-steady-ms  (u32, range [1..300000])
+    --hello-keepalive-ms  (u32, range [1..300000])
+    --hello-announce-initial-count  (u32, range [0..100000])
+    --hello-mtu-bytes  (u16, range [0..65535])
+    --hello-fps  (u16, range [0..65535])
+
+  Boolean fields (--name or --name=true|false|1|0; default = true when no value):
+    --osd-enable
+    --osd-debug-latency
+    --interleaving-supported
+    --mavlink-enable
+
+  String fields (--name VALUE):
+    --listen-addr
+    --wfb-tx-ctrl-addr
+    --idr-listen-addr
+    --osd-msg-path
+    --wlan-dev
+    --encoder-kind
+    --encoder-host
+    --mavlink-addr
+    --gs-tunnel-addr
+    --hello-majestic-yaml-path
+    --hello-waybeam-json-path
+
