@@ -46,3 +46,21 @@ Then:
 | GET | /defaults | Read baseline |
 | GET | /status | Daemon + process state |
 | GET | /healthz | 200 OK |
+
+## Adaptive link (`dl-applier`)
+
+Set `dynamicLink.enabled = true` to have fpvd supervise the drone-side
+of `wfbng-dynamic-link` (`/usr/bin/dl-applier`). Configuration is
+driven entirely by fpvd — no `/etc/dynamic-link/drone.conf` is read.
+
+When enabled, these fields become read-only via the API
+(`PATCH /config` returns `400 dynamic_link_locked`) because
+`dl-applier` mutates them at runtime: `link.mcs`, `link.txpower`,
+`link.fec`, `link.width`, `video.bitrate`, `video.qpDelta`,
+`video.roi`. To edit a baseline, disable `dynamicLink.enabled`,
+PATCH the field, then re-enable.
+
+Per-airframe failsafe ceilings live under `dynamicLink.safe` and the
+ROI-QP curve under `dynamicLink.roiQp`. See the design spec at
+`docs/superpowers/specs/2026-05-27-dynamic-link-design.md` for the
+full list and the lock-rule semantics.
