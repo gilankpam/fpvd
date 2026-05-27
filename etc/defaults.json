@@ -10,5 +10,19 @@
   "recording": {"enabled": false, "dir": "/mnt/mmcblk0p1", "format": "ts",
                 "mode": "mirror", "maxSeconds": 300, "maxMB": 500},
   "snapshot": {"enabled": true, "quality": 80},
+  "dynamicLink": {
+    "enabled": false,
+    "healthTimeoutMs": 10000,
+    "interleavingSupported": true,
+    "debug": false,
+    "minIdrIntervalMs": 500,
+    "applyStaggerMs": 50,
+    "applySubPaceMs": 5,
+    "mavlinkEnable": true,
+    "osd": {"enabled": true, "debugLatency": false},
+    "roiQp": {"thresholdKbps": 6000, "lowAnchorKbps": 2000, "floor": -24, "step": 3},
+    "safe": {"mcs": 1, "k": 8, "n": 12, "depth": 1,
+             "bandwidth": 20, "txPowerDbm": 20, "bitrateKbps": 2000}
+  },
   "services": {}
 }
