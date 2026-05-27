@@ -82,3 +82,120 @@ TEST_CASE("validate: service.restart must be always|on-failure|never") {
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "services.x.restart");
 }
+
+TEST_CASE("validate: dynamicLink.safe.mcs in [0,7]") {
+    Config c{}; c.dynamicLink.safe.mcs = 8;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.safe.mcs");
+}
+
+TEST_CASE("validate: dynamicLink.safe k<n and both in [1,32]") {
+    Config c{}; c.dynamicLink.safe.k = 12; c.dynamicLink.safe.n = 8;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.safe.fec");
+
+    Config c2{}; c2.dynamicLink.safe.k = 0;
+    auto errs2 = validate(c2);
+    REQUIRE(errs2.size() == 1);
+    CHECK(errs2[0].path == "dynamicLink.safe.fec");
+
+    Config c3{}; c3.dynamicLink.safe.n = 33;
+    auto errs3 = validate(c3);
+    REQUIRE(errs3.size() == 1);
+    CHECK(errs3[0].path == "dynamicLink.safe.fec");
+}
+
+TEST_CASE("validate: dynamicLink.safe.depth in [1,8]") {
+    Config c{}; c.dynamicLink.safe.depth = 0;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.safe.depth");
+
+    Config c2{}; c2.dynamicLink.safe.depth = 9;
+    auto errs2 = validate(c2);
+    REQUIRE(errs2.size() == 1);
+    CHECK(errs2[0].path == "dynamicLink.safe.depth");
+}
+
+TEST_CASE("validate: dynamicLink.safe.bandwidth must be 20 or 40") {
+    Config c{}; c.dynamicLink.safe.bandwidth = 80;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.safe.bandwidth");
+}
+
+TEST_CASE("validate: dynamicLink.safe.txPowerDbm in [0,30]") {
+    Config c{}; c.dynamicLink.safe.txPowerDbm = 31;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.safe.txPowerDbm");
+
+    Config c2{}; c2.dynamicLink.safe.txPowerDbm = -1;
+    auto errs2 = validate(c2);
+    REQUIRE(errs2.size() == 1);
+    CHECK(errs2[0].path == "dynamicLink.safe.txPowerDbm");
+}
+
+TEST_CASE("validate: dynamicLink.safe.bitrateKbps > 0") {
+    Config c{}; c.dynamicLink.safe.bitrateKbps = 0;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.safe.bitrateKbps");
+}
+
+TEST_CASE("validate: dynamicLink.healthTimeoutMs >= 1000") {
+    Config c{}; c.dynamicLink.healthTimeoutMs = 500;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.healthTimeoutMs");
+}
+
+TEST_CASE("validate: dynamicLink.minIdrIntervalMs >= 16") {
+    Config c{}; c.dynamicLink.minIdrIntervalMs = 10;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.minIdrIntervalMs");
+}
+
+TEST_CASE("validate: dynamicLink.applyStaggerMs in [0,1000]") {
+    Config c{}; c.dynamicLink.applyStaggerMs = 1001;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.applyStaggerMs");
+}
+
+TEST_CASE("validate: dynamicLink.applySubPaceMs in [0,50]") {
+    Config c{}; c.dynamicLink.applySubPaceMs = 51;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.applySubPaceMs");
+}
+
+TEST_CASE("validate: dynamicLink.roiQp threshold > lowAnchor > 0") {
+    Config c{}; c.dynamicLink.roiQp.thresholdKbps = 1000;
+    c.dynamicLink.roiQp.lowAnchorKbps = 2000;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.roiQp");
+
+    Config c2{}; c2.dynamicLink.roiQp.lowAnchorKbps = 0;
+    auto errs2 = validate(c2);
+    REQUIRE(errs2.size() == 1);
+    CHECK(errs2[0].path == "dynamicLink.roiQp");
+}
+
+TEST_CASE("validate: dynamicLink.roiQp.floor must be <= 0") {
+    Config c{}; c.dynamicLink.roiQp.floor = 1;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.roiQp.floor");
+}
+
+TEST_CASE("validate: dynamicLink.roiQp.step >= 1") {
+    Config c{}; c.dynamicLink.roiQp.step = 0;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.roiQp.step");
+}
