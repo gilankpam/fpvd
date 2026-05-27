@@ -3,6 +3,7 @@
 #include "config/store.hpp"
 #include "config/validate.hpp"
 #include "supervise/radio.hpp"
+#include "translate/dynamic_link.hpp"
 #include "translate/telemetry.hpp"
 #include "translate/waybeam.hpp"
 #include "translate/wfb.hpp"
@@ -92,6 +93,20 @@ void Daemon::seedOrchestrator() {
                      : RestartPolicy::Never;
         orch_.add(std::move(spec));
     }
+    if (effective_.dynamicLink.enabled) {
+        SupervisedSpec dl{};
+        dl.name = "dl_applier";
+        dl.argv = dynamicLinkArgs(effective_, iface);
+        dl.restart = RestartPolicy::Always;
+        dl.startAfter = {"wfb_video_tx", "wfb_tun", "waybeam"};
+        // Telemetry router participates only if it's present.
+        if (effective_.telemetry.router == "msposd") {
+            dl.startAfter.push_back("msposd");
+        } else if (effective_.telemetry.router == "mavfwd") {
+            dl.startAfter.push_back("mavfwd");
+        }
+        orch_.add(std::move(dl));
+    }
 }
 
 void Daemon::rewriteWaybeamJson() {
@@ -134,6 +149,12 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     rewriteWaybeamJson();
 
     std::vector<std::string> restarted;
+    if (subs.radio) restarted.push_back("radio");
+    if (subs.encoder) restarted.push_back("encoder");
+    if (subs.telemetry) restarted.push_back("telemetry");
+    if (subs.dynamicLink) restarted.push_back("dl_applier");
+    for (auto& n : subs.servicesAffected) restarted.push_back(n);
+
     if (reallyRestart) {
         // Subsystem-level restart: rebuild orchestrator (simple v1).
         orch_.stopAll();
@@ -150,10 +171,11 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         }
         seedOrchestrator();
         orch_.startAll();
-        if (subs.radio) restarted.push_back("radio");
-        if (subs.encoder) restarted.push_back("encoder");
-        if (subs.telemetry) restarted.push_back("telemetry");
-        for (auto& n : subs.servicesAffected) restarted.push_back(n);
+    } else {
+        // Re-seed the orchestrator's specs without touching real processes,
+        // so introspection (Orchestrator::names()) reflects the new config.
+        orch_ = Orchestrator{};
+        seedOrchestrator();
     }
     version_++;
     lastApply_ = {nowIso(), true, restarted, std::nullopt};

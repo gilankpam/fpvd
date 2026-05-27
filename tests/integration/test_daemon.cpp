@@ -1,5 +1,6 @@
 #include "doctest.h"
 #include "daemon.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -92,6 +93,69 @@ TEST_CASE("daemon: reset clears overlay") {
     d.reset();
     CHECK(d.pending().video.bitrate == 8192);
     CHECK_FALSE(fs::exists(paths.overlayPath));
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("daemon: enabling dynamicLink seeds dl_applier in orchestrator") {
+    auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-seed";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
+                  fs::copy_options::overwrite_existing);
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // dl_applier is NOT present when disabled.
+    auto names = d.orchestrator().names();
+    CHECK(std::find(names.begin(), names.end(), "dl_applier") == names.end());
+
+    // Enable + apply (without really restarting; we only need the orch
+    // re-seeded).
+    auto pr = d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":true}})"));
+    CHECK(pr.ok);
+    auto ar = d.apply(/*reallyRestart=*/false);
+    CHECK(ar.ok);
+
+    // Now dl_applier should be in the orchestrator.
+    names = d.orchestrator().names();
+    CHECK(std::find(names.begin(), names.end(), "dl_applier") != names.end());
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("daemon: dl_applier restarted-list reflects subs.dynamicLink") {
+    auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-restarted";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
+                  fs::copy_options::overwrite_existing);
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"safe":{"mcs":3}}})"));
+    auto ar = d.apply(/*reallyRestart=*/false);
+    REQUIRE(ar.ok);
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dl_applier")
+          != ar.restarted.end());
 
     fs::remove_all(tmp);
 }
