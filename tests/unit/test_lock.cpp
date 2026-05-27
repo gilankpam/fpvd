@@ -92,9 +92,30 @@ TEST_CASE("lock: multiple locked paths reported together") {
 }
 
 TEST_CASE("lock: body writes link.fec but with no children → still rejected") {
-    // Wholesale write of the locked subtree as null/object — implementation
-    // detail: it counts the key itself.
+    // Wholesale write of the locked subtree as an empty object —
+    // implementation detail: the walker stops at the empty object and
+    // records the prefix `link.fec` itself, which trips the lock.
     auto body = nlohmann::json::parse(R"({"link":{"fec":{}}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK_FALSE(r.ok);
+    REQUIRE(r.lockedPaths.size() == 1);
+    CHECK(r.lockedPaths[0] == "link.fec");
+}
+
+TEST_CASE("lock: non-object body is allowed through regardless of DL") {
+    auto body = nlohmann::json::parse(R"([1,2,3])");
+    CHECK(checkDynamicLinkLock(body, dlOn()).ok);
+}
+
+TEST_CASE("lock: empty body is always allowed (DL on)") {
+    CHECK(checkDynamicLinkLock(nlohmann::json::object(), dlOn()).ok);
+}
+
+TEST_CASE("lock: null leaf inside locked subtree is still rejected") {
+    // {"link":{"fec":null}} writes the path link.fec with a null value.
+    // null is a non-object leaf, so the walker emits the prefix link.fec,
+    // which matches the link.fec lock and rejects.
+    auto body = nlohmann::json::parse(R"({"link":{"fec":null}})");
     auto r = checkDynamicLinkLock(body, dlOn());
     CHECK_FALSE(r.ok);
     REQUIRE(r.lockedPaths.size() == 1);

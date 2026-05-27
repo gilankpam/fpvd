@@ -67,6 +67,7 @@ LockResult checkDynamicLinkLock(const nlohmann::json& patchBody,
                                 const Config& mergedPending) {
     if (!mergedPending.dynamicLink.enabled) return {true, {}};
     if (!patchBody.is_object()) return {true, {}};
+    if (patchBody.empty())      return {true, {}};  // empty object touches no paths
 
     std::vector<std::vector<std::string>> written;
     std::vector<std::string> prefix;
