@@ -133,7 +133,7 @@ TEST_CASE("daemon: enabling dynamicLink seeds dl_applier in orchestrator") {
     fs::remove_all(tmp);
 }
 
-TEST_CASE("daemon: dl_applier restarted-list reflects subs.dynamicLink") {
+TEST_CASE("daemon: dl_applier in restarted-list when safe.* changes while DL is enabled") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-restarted";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "rom" / "etc" / "fpvd");
@@ -150,8 +150,72 @@ TEST_CASE("daemon: dl_applier restarted-list reflects subs.dynamicLink") {
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
+    // Enable DL first and apply, so effective.dynamicLink.enabled = true.
+    d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})"));
+    REQUIRE(d.apply(/*reallyRestart=*/false).ok);
+
+    // Now change a safe.* knob: dl_applier should appear in restarted.
     d.patchPending(nlohmann::json::parse(
         R"({"dynamicLink":{"safe":{"mcs":3}}})"));
+    auto ar = d.apply(/*reallyRestart=*/false);
+    REQUIRE(ar.ok);
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dl_applier")
+          != ar.restarted.end());
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("daemon: dl_applier NOT in restarted-list when safe.* changes while DL is disabled") {
+    auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-not-restarted";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
+                  fs::copy_options::overwrite_existing);
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // DL stays disabled. Change a safe knob: dl_applier should NOT be reported.
+    d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"safe":{"mcs":3}}})"));
+    auto ar = d.apply(/*reallyRestart=*/false);
+    REQUIRE(ar.ok);
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dl_applier")
+          == ar.restarted.end());
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("daemon: dl_applier IN restarted-list when DL is being disabled (transition)") {
+    auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-disable-restart";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
+                  fs::copy_options::overwrite_existing);
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // Enable DL and apply.
+    d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})"));
+    REQUIRE(d.apply(/*reallyRestart=*/false).ok);
+
+    // Now disable DL — the apply still touches dl_applier (it stops).
+    d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":false}})"));
     auto ar = d.apply(/*reallyRestart=*/false);
     REQUIRE(ar.ok);
     CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dl_applier")

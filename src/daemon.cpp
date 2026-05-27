@@ -61,6 +61,12 @@ static SupervisedSpec wfbSpec(const std::string& name, std::vector<std::string> 
 void Daemon::seedOrchestrator() {
     const std::string iface = radio_.iface.empty() ? "wlan0" : radio_.iface;
     const std::string key = "/etc/drone.key";
+
+    // Telemetry router process name (empty when router is "none" or unknown).
+    std::string telemetryName;
+    if (effective_.telemetry.router == "mavfwd") telemetryName = "mavfwd";
+    else if (effective_.telemetry.router == "msposd") telemetryName = "msposd";
+
     orch_.add(wfbSpec("wfb_video_tx",
               wfbArgs(effective_, WfbRole::VideoTx, iface, key), {}));
     orch_.add(wfbSpec("wfb_tun_rx",
@@ -74,10 +80,8 @@ void Daemon::seedOrchestrator() {
               wfbArgs(effective_, WfbRole::TlmTx, iface, key), {}));
     orch_.add(wfbSpec("waybeam", {"/usr/bin/waybeam"}, {"wfb_video_tx"}));
     auto tArgs = telemetryArgs(effective_);
-    if (!tArgs.empty()) {
-        std::string name = (effective_.telemetry.router == "mavfwd")
-                              ? "mavfwd" : "msposd";
-        orch_.add(wfbSpec(name, std::move(tArgs),
+    if (!tArgs.empty() && !telemetryName.empty()) {
+        orch_.add(wfbSpec(telemetryName, std::move(tArgs),
                           {"wfb_tlm_rx", "wfb_tlm_tx"}));
     }
     for (auto& [n, s] : effective_.services) {
@@ -99,12 +103,7 @@ void Daemon::seedOrchestrator() {
         dl.argv = dynamicLinkArgs(effective_, iface);
         dl.restart = RestartPolicy::Always;
         dl.startAfter = {"wfb_video_tx", "wfb_tun", "waybeam"};
-        // Telemetry router participates only if it's present.
-        if (effective_.telemetry.router == "msposd") {
-            dl.startAfter.push_back("msposd");
-        } else if (effective_.telemetry.router == "mavfwd") {
-            dl.startAfter.push_back("mavfwd");
-        }
+        if (!telemetryName.empty()) dl.startAfter.push_back(telemetryName);
         orch_.add(std::move(dl));
     }
 }
@@ -138,6 +137,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
 
     // Compute diff before overwriting effective.
     auto subs = diffSubsystems(effective_, pending_);
+    const bool wasDlEnabled = effective_.dynamicLink.enabled;
 
     // Persist overlay (sparse diff vs defaults).
     auto defaultsJ = defaultsJson();
@@ -152,7 +152,12 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     if (subs.radio) restarted.push_back("radio");
     if (subs.encoder) restarted.push_back("encoder");
     if (subs.telemetry) restarted.push_back("telemetry");
-    if (subs.dynamicLink) restarted.push_back("dl_applier");
+    // Only report dl_applier as restarted when the process existed before
+    // the apply or will exist after; pure baseline edits while DL is off
+    // don't restart anything.
+    if (subs.dynamicLink && (wasDlEnabled || effective_.dynamicLink.enabled)) {
+        restarted.push_back("dl_applier");
+    }
     for (auto& n : subs.servicesAffected) restarted.push_back(n);
 
     if (reallyRestart) {
@@ -172,8 +177,12 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         seedOrchestrator();
         orch_.startAll();
     } else {
-        // Re-seed the orchestrator's specs without touching real processes,
-        // so introspection (Orchestrator::names()) reflects the new config.
+        // Re-seed the orchestrator's specs so introspection
+        // (Orchestrator::names()) reflects the new config. Note: assigning
+        // a fresh Orchestrator here destroys any existing Supervisor
+        // unique_ptrs, which would also shutdown() their children — this
+        // is safe today only because every caller pairs bootstrap(false)
+        // with apply(false), so no live children exist.
         orch_ = Orchestrator{};
         seedOrchestrator();
     }
