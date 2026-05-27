@@ -253,3 +253,54 @@ TEST_CASE("handlers: GET /status returns expected shape") {
     CHECK(j["processes"].is_array());
     srv.stop(); fs::remove_all(tmp);
 }
+
+TEST_CASE("handlers: enabling dynamicLink surfaces dl_applier in /status") {
+    auto tmp = fs::temp_directory_path() / "fpvd-handlers-dl-e2e";
+    fs::remove_all(tmp);
+    auto d = makeTestDaemon(tmp);
+    fpvd::HttpServer srv;
+    fpvd::registerHandlers(srv, *d, /*reallyRestart=*/false);
+    srv.listenInBackground("127.0.0.1", 18096);
+    srv.waitUntilReady(std::chrono::seconds(2));
+
+    httplib::Client c("http://127.0.0.1:18096");
+
+    // Before enabling: dl_applier not in /status.processes.
+    auto s0 = c.Get("/status");
+    REQUIRE(s0); CHECK(s0->status == 200);
+    auto j0 = nlohmann::json::parse(s0->body);
+    bool found0 = false;
+    for (auto& p : j0["processes"]) if (p["name"] == "dl_applier") found0 = true;
+    CHECK_FALSE(found0);
+
+    // PATCH + apply.
+    c.Patch("/config", R"({"dynamicLink":{"enabled":true}})",
+            "application/json");
+    auto ap = c.Post("/apply", "", "application/json");
+    REQUIRE(ap); CHECK(ap->status == 200);
+    auto japp = nlohmann::json::parse(ap->body);
+    CHECK(japp["applied"] == true);
+    bool restartedDl = false;
+    for (auto& r : japp["restarted"])
+        if (r == "dl_applier") restartedDl = true;
+    CHECK(restartedDl);
+
+    // After: dl_applier visible.
+    auto s1 = c.Get("/status");
+    auto j1 = nlohmann::json::parse(s1->body);
+    bool found1 = false;
+    for (auto& p : j1["processes"]) if (p["name"] == "dl_applier") found1 = true;
+    CHECK(found1);
+
+    // Flip back off + apply — dl_applier disappears.
+    c.Patch("/config", R"({"dynamicLink":{"enabled":false}})",
+            "application/json");
+    c.Post("/apply", "", "application/json");
+    auto s2 = c.Get("/status");
+    auto j2 = nlohmann::json::parse(s2->body);
+    bool found2 = false;
+    for (auto& p : j2["processes"]) if (p["name"] == "dl_applier") found2 = true;
+    CHECK_FALSE(found2);
+
+    srv.stop(); fs::remove_all(tmp);
+}
