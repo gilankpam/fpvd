@@ -11,6 +11,7 @@
 #include <ctime>
 #include <fstream>
 #include <filesystem>
+#include <thread>
 
 namespace fpvd {
 
@@ -138,6 +139,13 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     // Compute diff before overwriting effective.
     auto subs = diffSubsystems(effective_, pending_);
     const bool wasDlEnabled = effective_.dynamicLink.enabled;
+    // Channel/bandwidth retune drops the over-the-air link (and the
+    // wfb_tun tunnel carrying this HTTP session) until the client also
+    // retunes — defer the restart so the response can flush first.
+    // Other link changes (mcs/txpower/fec/...) don't drop the air link.
+    const bool deferRadioRetune =
+        effective_.link.channel != pending_.link.channel ||
+        effective_.link.width   != pending_.link.width;
 
     // Persist overlay (sparse diff vs defaults).
     auto defaultsJ = defaultsJson();
@@ -159,6 +167,31 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         restarted.push_back("dl_applier");
     }
     for (auto& n : subs.servicesAffected) restarted.push_back(n);
+
+    if (reallyRestart && deferRadioRetune) {
+        // Defer the restart so the HTTP response can flush before the
+        // channel/bandwidth change drops the client's wfb_tun session.
+        // lastApply_.ok is set to true optimistically; the deferred
+        // worker flips it to false (with .error) if radio bring-up fails.
+        version_++;
+        lastApply_ = {nowIso(), true, restarted, std::nullopt};
+        std::thread([this]{
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            std::lock_guard<std::mutex> g2(mu_);
+            orch_.stopAll();
+            orch_ = Orchestrator{};
+            auto rr = bringUpRadio(paths_.radioUpScript, effective_);
+            if (!rr.ok) {
+                lastApply_.ok = false;
+                lastApply_.error = std::string("radio: ") + rr.stderrText;
+                return;
+            }
+            radio_ = {rr.driver, rr.iface, rr.adapterId};
+            seedOrchestrator();
+            orch_.startAll();
+        }).detach();
+        return {true, {}, restarted, std::nullopt, version_};
+    }
 
     if (reallyRestart) {
         // Subsystem-level restart: rebuild orchestrator (simple v1).
