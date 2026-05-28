@@ -177,6 +177,64 @@ TEST_CASE("handlers: POST /reset removes overlay") {
     srv.stop(); fs::remove_all(tmp);
 }
 
+TEST_CASE("handlers: PATCH /config rejects locked field when DL enabled") {
+    auto tmp = fs::temp_directory_path() / "fpvd-handlers-lock";
+    fs::remove_all(tmp);
+    auto d = makeTestDaemon(tmp);
+    fpvd::HttpServer srv;
+    fpvd::registerHandlers(srv, *d, false);
+    srv.listenInBackground("127.0.0.1", 18094);
+    srv.waitUntilReady(std::chrono::seconds(2));
+
+    httplib::Client c("http://127.0.0.1:18094");
+    // First enable DL in pending and apply, so effective.dynamicLink.enabled = true.
+    auto r1 = c.Patch("/config",
+        R"({"dynamicLink":{"enabled":true}})", "application/json");
+    REQUIRE(r1); CHECK(r1->status == 200);
+    auto r2 = c.Post("/apply", "", "application/json");
+    REQUIRE(r2); CHECK(r2->status == 200);
+
+    // Now try to write a locked field.
+    auto r3 = c.Patch("/config",
+        R"({"link":{"mcs":5}})", "application/json");
+    REQUIRE(r3);
+    CHECK(r3->status == 400);
+    auto j = nlohmann::json::parse(r3->body);
+    CHECK(j["error"] == "dynamic_link_locked");
+    REQUIRE(j["details"]["locked"].is_array());
+    CHECK(j["details"]["locked"].size() == 1);
+    CHECK(j["details"]["locked"][0] == "link.mcs");
+
+    // Pending should be unchanged.
+    CHECK(d->pending().link.mcs == 2);
+    srv.stop(); fs::remove_all(tmp);
+}
+
+TEST_CASE("handlers: PATCH that disables DL and writes locked key is allowed") {
+    auto tmp = fs::temp_directory_path() / "fpvd-handlers-lock-unlock";
+    fs::remove_all(tmp);
+    auto d = makeTestDaemon(tmp);
+    fpvd::HttpServer srv;
+    fpvd::registerHandlers(srv, *d, false);
+    srv.listenInBackground("127.0.0.1", 18095);
+    srv.waitUntilReady(std::chrono::seconds(2));
+
+    httplib::Client c("http://127.0.0.1:18095");
+    // Enable + apply.
+    c.Patch("/config",
+        R"({"dynamicLink":{"enabled":true}})", "application/json");
+    c.Post("/apply", "", "application/json");
+
+    // Single PATCH disables DL and writes link.mcs.
+    auto r = c.Patch("/config",
+        R"({"dynamicLink":{"enabled":false},"link":{"mcs":5}})",
+        "application/json");
+    REQUIRE(r); CHECK(r->status == 200);
+    CHECK(d->pending().dynamicLink.enabled == false);
+    CHECK(d->pending().link.mcs == 5);
+    srv.stop(); fs::remove_all(tmp);
+}
+
 TEST_CASE("handlers: GET /status returns expected shape") {
     auto tmp = fs::temp_directory_path() / "fpvd-handlers-status";
     fs::remove_all(tmp);
@@ -193,5 +251,56 @@ TEST_CASE("handlers: GET /status returns expected shape") {
     CHECK(j.contains("version"));
     CHECK(j.contains("processes"));
     CHECK(j["processes"].is_array());
+    srv.stop(); fs::remove_all(tmp);
+}
+
+TEST_CASE("handlers: enabling dynamicLink surfaces dl_applier in /status") {
+    auto tmp = fs::temp_directory_path() / "fpvd-handlers-dl-e2e";
+    fs::remove_all(tmp);
+    auto d = makeTestDaemon(tmp);
+    fpvd::HttpServer srv;
+    fpvd::registerHandlers(srv, *d, /*reallyRestart=*/false);
+    srv.listenInBackground("127.0.0.1", 18096);
+    srv.waitUntilReady(std::chrono::seconds(2));
+
+    httplib::Client c("http://127.0.0.1:18096");
+
+    // Before enabling: dl_applier not in /status.processes.
+    auto s0 = c.Get("/status");
+    REQUIRE(s0); CHECK(s0->status == 200);
+    auto j0 = nlohmann::json::parse(s0->body);
+    bool found0 = false;
+    for (auto& p : j0["processes"]) if (p["name"] == "dl_applier") found0 = true;
+    CHECK_FALSE(found0);
+
+    // PATCH + apply.
+    c.Patch("/config", R"({"dynamicLink":{"enabled":true}})",
+            "application/json");
+    auto ap = c.Post("/apply", "", "application/json");
+    REQUIRE(ap); CHECK(ap->status == 200);
+    auto japp = nlohmann::json::parse(ap->body);
+    CHECK(japp["applied"] == true);
+    bool restartedDl = false;
+    for (auto& r : japp["restarted"])
+        if (r == "dl_applier") restartedDl = true;
+    CHECK(restartedDl);
+
+    // After: dl_applier visible.
+    auto s1 = c.Get("/status");
+    auto j1 = nlohmann::json::parse(s1->body);
+    bool found1 = false;
+    for (auto& p : j1["processes"]) if (p["name"] == "dl_applier") found1 = true;
+    CHECK(found1);
+
+    // Flip back off + apply — dl_applier disappears.
+    c.Patch("/config", R"({"dynamicLink":{"enabled":false}})",
+            "application/json");
+    c.Post("/apply", "", "application/json");
+    auto s2 = c.Get("/status");
+    auto j2 = nlohmann::json::parse(s2->body);
+    bool found2 = false;
+    for (auto& p : j2["processes"]) if (p["name"] == "dl_applier") found2 = true;
+    CHECK_FALSE(found2);
+
     srv.stop(); fs::remove_all(tmp);
 }

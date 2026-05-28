@@ -26,9 +26,11 @@ target_sources(fpvd_core PRIVATE
     src/config/store.cpp
     src/config/validate.cpp
     src/config/diff.cpp
+    src/config/lock.cpp
     src/translate/waybeam.cpp
     src/translate/wfb.cpp
     src/translate/telemetry.cpp
+    src/translate/dynamic_link.cpp
     src/supervise/process.cpp
     src/supervise/supervisor.cpp
     src/supervise/orchestrator.cpp
@@ -53,9 +55,12 @@ target_sources(fpvd_tests PRIVATE
     tests/unit/test_store.cpp
     tests/unit/test_validate.cpp
     tests/unit/test_diff.cpp
+    tests/unit/test_lock.cpp
     tests/unit/test_translate_waybeam.cpp
     tests/unit/test_translate_wfb.cpp
     tests/unit/test_translate_telemetry.cpp
+    tests/unit/test_translate_dynamic_link.cpp
+    tests/unit/test_dl_applier_cli_assumptions.cpp
     tests/integration/test_process.cpp
     tests/integration/test_supervisor.cpp
     tests/integration/test_orchestrator.cpp

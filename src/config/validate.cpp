@@ -89,6 +89,44 @@ std::vector<ValidationError> validate(const Config& c) {
     if (hasCycle(c.services))
         errs.push_back({"services", "startAfter has a cycle"});
 
+    // dynamicLink
+    {
+        const auto& dl = c.dynamicLink;
+        if (dl.safe.mcs < 0 || dl.safe.mcs > 7)
+            errs.push_back({"dynamicLink.safe.mcs", "must be 0..7"});
+        if (dl.safe.k < 1 || dl.safe.k > 32 ||
+            dl.safe.n < 1 || dl.safe.n > 32 ||
+            dl.safe.k >= dl.safe.n)
+            errs.push_back({"dynamicLink.safe.fec", "require 1<=k<n<=32"});
+        if (dl.safe.depth < 1 || dl.safe.depth > 8)
+            errs.push_back({"dynamicLink.safe.depth", "must be 1..8"});
+        if (dl.safe.bandwidth != 20 && dl.safe.bandwidth != 40)
+            errs.push_back({"dynamicLink.safe.bandwidth", "must be 20 or 40"});
+        if (dl.safe.txPowerDbm < -10 || dl.safe.txPowerDbm > 30)
+            errs.push_back({"dynamicLink.safe.txPowerDbm", "must be -10..30"});
+        if (dl.safe.bitrateKbps <= 0)
+            errs.push_back({"dynamicLink.safe.bitrateKbps", "must be > 0"});
+
+        if (dl.healthTimeoutMs < 1000)
+            errs.push_back({"dynamicLink.healthTimeoutMs", "must be >= 1000"});
+        if (dl.minIdrIntervalMs < 16)
+            errs.push_back({"dynamicLink.minIdrIntervalMs", "must be >= 16"});
+        if (dl.applyStaggerMs < 0 || dl.applyStaggerMs > 500)
+            errs.push_back({"dynamicLink.applyStaggerMs", "must be 0..500"});
+        if (dl.applySubPaceMs < 0 || dl.applySubPaceMs > 50)
+            errs.push_back({"dynamicLink.applySubPaceMs", "must be 0..50"});
+
+        if (dl.roiQp.thresholdKbps <= 0 ||
+            dl.roiQp.lowAnchorKbps <= 0 ||
+            dl.roiQp.thresholdKbps <= dl.roiQp.lowAnchorKbps)
+            errs.push_back({"dynamicLink.roiQp",
+                            "require thresholdKbps > lowAnchorKbps > 0"});
+        if (dl.roiQp.floor > 0)
+            errs.push_back({"dynamicLink.roiQp.floor", "must be <= 0"});
+        if (dl.roiQp.step < 1)
+            errs.push_back({"dynamicLink.roiQp.step", "must be >= 1"});
+    }
+
     return errs;
 }
 

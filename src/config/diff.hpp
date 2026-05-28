@@ -8,6 +8,7 @@ struct SubsystemDiff {
     bool radio{false};
     bool encoder{false};
     bool telemetry{false};
+    bool dynamicLink{false};
     std::set<std::string> servicesAffected{};
 };
 

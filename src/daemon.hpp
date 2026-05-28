@@ -21,6 +21,7 @@ struct DaemonPaths {
 struct PatchResult {
     bool ok{true};
     std::vector<ValidationError> errors;
+    std::vector<std::string> lockedPaths;  // non-empty => 400 dynamic_link_locked
 };
 
 struct ApplyResult {

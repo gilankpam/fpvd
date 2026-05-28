@@ -13,6 +13,12 @@ SubsystemDiff diffSubsystems(const Config& a, const Config& b) {
         d.encoder = true;
     if (ja["telemetry"] != jb["telemetry"]) d.telemetry = true;
 
+    // dynamicLink fires when its own subtree changes, OR when a derived
+    // input feeding the translator (link.mtu, video.fps) moves.
+    if (ja["dynamicLink"] != jb["dynamicLink"]) d.dynamicLink = true;
+    if (ja["link"]["mtu"] != jb["link"]["mtu"]) d.dynamicLink = true;
+    if (ja["video"]["fps"] != jb["video"]["fps"]) d.dynamicLink = true;
+
     // services
     for (auto& [name, sa] : a.services) {
         auto it = b.services.find(name);
