@@ -109,7 +109,7 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
 TEST_CASE("schema: beamforming defaults and round-trip") {
     fpvd::Config c{};
     CHECK(c.link.beamforming.enabled == false);
-    CHECK(c.link.beamforming.remoteMac == "");
+    CHECK(c.link.beamforming.remoteMac.empty());
     CHECK(c.link.beamforming.ackTimeout == 255);
     CHECK(c.link.beamforming.intervalMs == 100);
 
@@ -117,6 +117,9 @@ TEST_CASE("schema: beamforming defaults and round-trip") {
     nlohmann::json j = c;
     auto c2 = j.get<fpvd::Config>();
     CHECK(c2.link.beamforming.ackTimeout == 255);
+    CHECK(c2.link.beamforming.enabled == false);
+    CHECK(c2.link.beamforming.intervalMs == 100);
+    CHECK(c2.link.beamforming.remoteMac.empty());
 
     // Overlay predating the key still parses (WITH_DEFAULT).
     nlohmann::json old = {{"link", {{"channel", 149}}}};
