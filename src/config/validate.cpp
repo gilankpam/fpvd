@@ -40,8 +40,8 @@ std::vector<ValidationError> validate(const Config& c) {
     std::vector<ValidationError> errs;
 
     // link
-    if (c.link.width != 20 && c.link.width != 40)
-        errs.push_back({"link.width", "must be 20 or 40"});
+    if (c.link.width != 10 && c.link.width != 20 && c.link.width != 40)
+        errs.push_back({"link.width", "must be 10, 20, or 40"});
     if (c.link.mcs < 0 || c.link.mcs > 7)
         errs.push_back({"link.mcs", "must be 0..7"});
     if (c.link.txpower < 1 || c.link.txpower > 63)
@@ -100,8 +100,9 @@ std::vector<ValidationError> validate(const Config& c) {
             errs.push_back({"dynamicLink.safe.fec", "require 1<=k<n<=32"});
         if (dl.safe.depth < 1 || dl.safe.depth > 8)
             errs.push_back({"dynamicLink.safe.depth", "must be 1..8"});
-        if (dl.safe.bandwidth != 20 && dl.safe.bandwidth != 40)
-            errs.push_back({"dynamicLink.safe.bandwidth", "must be 20 or 40"});
+        if (dl.safe.bandwidth != 10 && dl.safe.bandwidth != 20 &&
+            dl.safe.bandwidth != 40)
+            errs.push_back({"dynamicLink.safe.bandwidth", "must be 10, 20, or 40"});
         if (dl.safe.txPowerDbm < -10 || dl.safe.txPowerDbm > 30)
             errs.push_back({"dynamicLink.safe.txPowerDbm", "must be -10..30"});
         if (dl.safe.bitrateKbps <= 0)

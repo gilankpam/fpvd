@@ -1,4 +1,5 @@
 #include "translate/wfb.hpp"
+#include "link_width.hpp"
 
 namespace fpvd {
 
@@ -9,7 +10,7 @@ static std::vector<std::string> commonTx(const Config& c, int mcs,
         "/usr/bin/wfb_tx",
         "-K", key,
         "-M", std::to_string(mcs),
-        "-B", std::to_string(c.link.width),
+        "-B", std::to_string(modulationWidth(c.link.width)),
         "-k", std::to_string(c.link.fec.k),
         "-n", std::to_string(c.link.fec.n),
         "-S", c.link.stbc ? "1" : "0",

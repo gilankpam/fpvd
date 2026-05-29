@@ -50,6 +50,7 @@ enable_testing()
 add_executable(fpvd_tests tests/test_main.cpp)
 target_link_libraries(fpvd_tests PRIVATE fpvd_core)
 target_sources(fpvd_tests PRIVATE
+    tests/unit/test_link_width.cpp
     tests/unit/test_sanity.cpp
     tests/unit/test_schema.cpp
     tests/unit/test_store.cpp

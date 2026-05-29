@@ -64,6 +64,14 @@ TEST_CASE("translate.wfb: wfb_tun argv") {
     CHECK(std::find(a.begin(), a.end(), "10.5.0.10/24") != a.end());
 }
 
+TEST_CASE("translate.wfb: width=10 injects -B 20 (modulation width)") {
+    Config c{}; c.link.width = 10;
+    auto a = wfbArgs(c, fpvd::WfbRole::VideoTx, "wlan0", "/etc/drone.key");
+    auto idx = std::find(a.begin(), a.end(), "-B");
+    REQUIRE(idx != a.end());
+    CHECK(*(idx + 1) == "20");
+}
+
 TEST_CASE("translate.wfb: stbc and ldpc reflected") {
     Config c{}; c.link.stbc = true; c.link.ldpc = true;
     auto a = wfbArgs(c, fpvd::WfbRole::VideoTx, "wlan0", "/etc/drone.key");
