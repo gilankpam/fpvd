@@ -90,12 +90,11 @@ New struct in `src/config/schema.hpp`, added as a field on `Link`:
 struct Beamforming {
     bool enabled{false};
     std::string remoteMac{};                 // ground-station eFuse MAC, required when enabled
-    std::optional<std::string> localMac{};   // override; omitted => resolve from iface
     int ackTimeout{255};                     // 33..255 µs
     int intervalMs{100};                     // sounding cadence
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beamforming, enabled, remoteMac,
-                                                localMac, ackTimeout, intervalMs)
+                                                ackTimeout, intervalMs)
 ```
 
 `Link` gains `Beamforming beamforming{};` (appended to its
@@ -113,12 +112,14 @@ Bandwidth is **not** stored here — it is derived from `link.width`.
 `link.beamforming` is **not** added to the dynamic-link lock list: it is
 operator config, not a field dl-applier mutates.
 
-`localMac` is normally left unset. At BF start fpvd resolves the effective
-local MAC as `localMac` if present, else the interface hardware address
-(`/sys/class/net/<iface>/address`). The resolved value is reported in
-`/status` so the GS operator can read the drone reference. (Caveat: in monitor
-mode this reads the current iface MAC — the eFuse original unless something
-reassigned it; if a setup randomizes it, set `localMac` explicitly.)
+The local MAC is **not** configurable — it is a fixed hardware fact (the eFuse
+address the chip filters on), so exposing it as config would only invite a
+wrong value that silently breaks BF. fpvd resolves it automatically at BF start
+from the driver node `/proc/net/rtl88x2eu/<iface>/mac_addr`
+(`proc_get_mac_addr` → `rtw_hal_dump_macaddr`, the chip's actual MAC-layer
+address), falling back to `/sys/class/net/<iface>/address` if that node is
+absent. The resolved value is reported in `/status` so the GS operator can read
+the drone reference.
 
 ### 2. Validation (`src/config/validate.cpp`)
 
@@ -129,7 +130,6 @@ When `link.beamforming.enabled` is true:
 | `link.stbc == false` | `link.beamforming requires link.stbc=false` |
 | `link.mcs` in `0..9` | `link.beamforming requires link.mcs in 0..9` |
 | `remoteMac` non-empty, valid `aa:bb:cc:dd:ee:ff` | `link.beamforming.remoteMac must be a valid MAC` |
-| `localMac` (if present) valid MAC | `link.beamforming.localMac must be a valid MAC` |
 | `ackTimeout` in `33..255` | `link.beamforming.ackTimeout must be 33..255` |
 | `intervalMs >= 1` | `link.beamforming.intervalMs must be >= 1` |
 
@@ -261,7 +261,7 @@ void Daemon::reconcileBeamforming() {
     BfParams p;
     p.iface      = radio_.iface.empty() ? "wlan0" : radio_.iface;
     p.driver     = radio_.driver;
-    p.localMac   = bfc.localMac.value_or(readIfaceMac(p.iface));
+    p.localMac   = resolveLocalMac(p.iface);   // proc mac_addr, fallback /sys
     p.remoteMac  = bfc.remoteMac;
     p.width      = effective_.link.width;
     p.ackTimeout = bfc.ackTimeout;
@@ -318,8 +318,10 @@ Host tests (`fpvd_tests`), no hardware/root required.
 
 - `modulationWidth()`: 10→20, 20→20, 40→40.
 - Validation: BF-on rejects `stbc=true`, `mcs ∉ 0..9`, empty/invalid
-  `remoteMac`, invalid `localMac`, `ackTimeout ∉ 33..255`, `intervalMs < 1`;
-  BF-off accepts stale fields; `width` accepts 10/20/40 and rejects others.
+  `remoteMac`, `ackTimeout ∉ 33..255`, `intervalMs < 1`; BF-off accepts stale
+  fields; `width` accepts 10/20/40 and rejects others.
+- `resolveLocalMac()`: reads from a faked proc `mac_addr`; falls back to a
+  faked `/sys/.../address` when the proc node is absent.
 - `wfb.cpp`: `width=10` → argv contains `-B 20`.
 - Config round-trip: defaults parse; overlay lacking `beamforming` still loads.
 - `apply()` reports `"beamforming"` in `restarted` when BF params or
