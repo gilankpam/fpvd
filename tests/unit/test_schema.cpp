@@ -9,7 +9,8 @@ TEST_CASE("schema: round-trip a minimal config through json") {
     json j = json::parse(R"({
         "link":{"channel":161,"width":20,"txpower":1,"mcs":2,
                 "fec":{"k":8,"n":12},"stbc":false,"ldpc":false,
-                "linkId":7669206,"mtu":1500,"wlanAdapter":null},
+                "linkId":7669206,"mtu":1500,"wlanAdapter":null,
+                "beamforming":{"enabled":false,"remoteMac":"","ackTimeout":255,"intervalMs":100}},
         "video":{"codec":"h265","resolution":"1920x1080","fps":60,
                  "bitrate":8192,"rcMode":"cbr","gopSize":1.0,"qpDelta":-4,
                  "roi":{"enabled":true,"qp":0,"center":0.4,"steps":2}},
@@ -103,6 +104,25 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
     CHECK(c.dynamicLink.safe.bandwidth == 20);
     CHECK(c.dynamicLink.safe.txPowerDbm == 20);
     CHECK(c.dynamicLink.safe.bitrateKbps == 2000);
+}
+
+TEST_CASE("schema: beamforming defaults and round-trip") {
+    fpvd::Config c{};
+    CHECK(c.link.beamforming.enabled == false);
+    CHECK(c.link.beamforming.remoteMac == "");
+    CHECK(c.link.beamforming.ackTimeout == 255);
+    CHECK(c.link.beamforming.intervalMs == 100);
+
+    // Round-trips through JSON.
+    nlohmann::json j = c;
+    auto c2 = j.get<fpvd::Config>();
+    CHECK(c2.link.beamforming.ackTimeout == 255);
+
+    // Overlay predating the key still parses (WITH_DEFAULT).
+    nlohmann::json old = {{"link", {{"channel", 149}}}};
+    auto c3 = old.get<fpvd::Config>();
+    CHECK(c3.link.beamforming.enabled == false);
+    CHECK(c3.link.channel == 149);
 }
 
 TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") {

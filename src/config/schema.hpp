@@ -35,6 +35,15 @@ namespace fpvd {
 struct Fec { int k{8}; int n{12}; };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Fec, k, n)
 
+struct Beamforming {
+    bool enabled{false};
+    std::string remoteMac{};   // ground-station eFuse MAC, required when enabled
+    int ackTimeout{255};       // 33..255 us
+    int intervalMs{100};       // sounding cadence
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beamforming, enabled, remoteMac,
+                                                ackTimeout, intervalMs)
+
 struct Link {
     int channel{161};
     int width{20};
@@ -46,9 +55,11 @@ struct Link {
     long linkId{7669206};
     int mtu{1500};
     std::optional<std::string> wlanAdapter{};
+    Beamforming beamforming{};
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Link, channel, width, txpower, mcs, fec,
-                                   stbc, ldpc, linkId, mtu, wlanAdapter)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Link, channel, width, txpower,
+                                                mcs, fec, stbc, ldpc, linkId,
+                                                mtu, wlanAdapter, beamforming)
 
 struct Roi {
     bool enabled{true};
