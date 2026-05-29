@@ -122,11 +122,14 @@ TEST_CASE("validate: dynamicLink.safe.depth in [1,8]") {
     CHECK(errs2[0].path == "dynamicLink.safe.depth");
 }
 
-TEST_CASE("validate: dynamicLink.safe.bandwidth must be 20 or 40") {
+TEST_CASE("validate: dynamicLink.safe.bandwidth must be 10, 20, or 40") {
     Config c{}; c.dynamicLink.safe.bandwidth = 80;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.safe.bandwidth");
+
+    Config ok{}; ok.dynamicLink.safe.bandwidth = 10;
+    CHECK(validate(ok).empty());
 }
 
 TEST_CASE("validate: dynamicLink.safe.txPowerDbm in [-10,30]") {
