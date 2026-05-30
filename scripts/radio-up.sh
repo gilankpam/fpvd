@@ -36,8 +36,13 @@ fi
 ifconfig $WLAN_DEV up
 ifconfig $WLAN_DEV mtu "${FPVD_MTU:-1500}"
 iw $WLAN_DEV set monitor none
-[ "${FPVD_WIDTH:-20}" = "40" ] && width=HT40+ || width=HT20
-iw $WLAN_DEV set channel "${FPVD_CHANNEL:-161}" "$width"
+# 10MHz uses a dedicated channel-width token (baseband underclocked, 20MHz
+# modulation); 40 => HT40+; everything else => HT20.
+case "${FPVD_WIDTH:-20}" in
+    10) iw $WLAN_DEV set channel "${FPVD_CHANNEL:-161}" 10MHz ;;
+    40) iw $WLAN_DEV set channel "${FPVD_CHANNEL:-161}" HT40+ ;;
+    *)  iw $WLAN_DEV set channel "${FPVD_CHANNEL:-161}" HT20 ;;
+esac
 iw reg set 00
 if [ "$driver" = "88XXau" ]; then
     iw $WLAN_DEV set txpower fixed $(( ${FPVD_TXPOWER:-1} * -100 ))
