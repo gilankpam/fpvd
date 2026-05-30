@@ -17,6 +17,7 @@ int main(int argc, char** argv) {
     std::string defaultsPath = "/rom/etc/fpvd/defaults.json";
     std::string overlayPath  = "/etc/fpvd/config.json";
     std::string radioUp      = "/usr/libexec/fpvd/radio-up.sh";
+    std::string radioTune    = "/usr/libexec/fpvd/radio-tune.sh";
     std::string waybeamPath  = "/etc/waybeam.json";
     std::string httpHost     = "0.0.0.0";
     int httpPort             = 8080;
@@ -27,13 +28,14 @@ int main(int argc, char** argv) {
         if (a == "--defaults" && i + 1 < argc) defaultsPath = argv[++i];
         else if (a == "--overlay" && i + 1 < argc) overlayPath = argv[++i];
         else if (a == "--radio-up" && i + 1 < argc) radioUp = argv[++i];
+        else if (a == "--radio-tune" && i + 1 < argc) radioTune = argv[++i];
         else if (a == "--waybeam-json" && i + 1 < argc) waybeamPath = argv[++i];
         else if (a == "--host" && i + 1 < argc) httpHost = argv[++i];
         else if (a == "--port" && i + 1 < argc) httpPort = std::stoi(argv[++i]);
         else if (a == "--log" && i + 1 < argc) logPath = argv[++i];
         else if (a == "-h" || a == "--help") {
             std::cerr << "Usage: fpvd [--defaults PATH] [--overlay PATH] "
-                         "[--radio-up PATH] [--waybeam-json PATH] "
+                         "[--radio-up PATH] [--radio-tune PATH] [--waybeam-json PATH] "
                          "[--host HOST] [--port PORT] [--log PATH]\n";
             return 0;
         }
@@ -55,7 +57,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    fpvd::DaemonPaths paths{defaultsPath, overlayPath, radioUp, waybeamPath};
+    fpvd::DaemonPaths paths{defaultsPath, overlayPath, radioUp, waybeamPath,
+                            radioTune};
     fpvd::Daemon daemon(paths);
     try {
         daemon.bootstrap(/*startProcesses=*/true);
