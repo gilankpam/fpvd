@@ -1,10 +1,20 @@
 #include "config/validate.hpp"
+#include <cctype>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
 
 namespace fpvd {
+
+static bool isValidMac(const std::string& s) {
+    if (s.size() != 17) return false;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (i % 3 == 2) { if (s[i] != ':') return false; }
+        else if (!std::isxdigit(static_cast<unsigned char>(s[i]))) return false;
+    }
+    return true;
+}
 
 static bool parseResolution(const std::string& s, int& w, int& h) {
     auto x = s.find('x');
@@ -52,6 +62,21 @@ std::vector<ValidationError> validate(const Config& c) {
         errs.push_back({"link.fec", "require 1<=k<n<=32"});
     if (c.link.channel < 1 || c.link.channel > 200)
         errs.push_back({"link.channel", "out of range"});
+    if (c.link.beamforming.enabled) {
+        const auto& bf = c.link.beamforming;
+        // Driver requires STBC off under monitor beamforming. (The MCS/NSS1
+        // requirement is already covered by the global link.mcs 0..7 rule.)
+        if (c.link.stbc)
+            errs.push_back({"link.beamforming",
+                            "requires link.stbc=false"});
+        if (!isValidMac(bf.remoteMac))
+            errs.push_back({"link.beamforming.remoteMac",
+                            "must be a valid MAC (aa:bb:cc:dd:ee:ff)"});
+        if (bf.ackTimeout < 33 || bf.ackTimeout > 255)
+            errs.push_back({"link.beamforming.ackTimeout", "must be 33..255"});
+        if (bf.intervalMs < 1)
+            errs.push_back({"link.beamforming.intervalMs", "must be >= 1"});
+    }
 
     // video
     if (c.video.codec != "h264" && c.video.codec != "h265")
