@@ -1,5 +1,6 @@
 #include "doctest.h"
 #include "daemon.hpp"
+#include "status.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -250,5 +251,28 @@ TEST_CASE("daemon: apply reports beamforming when its config changes") {
     REQUIRE(ar.ok);
     auto& r = ar.restarted;
     CHECK(std::find(r.begin(), r.end(), "beamforming") != r.end());
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("status: includes beamforming block") {
+    auto tmp = fs::temp_directory_path() / "fpvd-test-bf-status";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    auto j = fpvd::buildStatus(d);
+    REQUIRE(j.contains("beamforming"));
+    CHECK(j["beamforming"]["state"] == "disabled");
+    CHECK(j["beamforming"].contains("localMac"));
     fs::remove_all(tmp);
 }
