@@ -14,6 +14,16 @@ static const char* stateName(ProcState s) {
     return "unknown";
 }
 
+static const char* bfStateName(BfState s) {
+    switch (s) {
+        case BfState::Disabled:    return "disabled";
+        case BfState::Unsupported: return "unsupported";
+        case BfState::Active:      return "active";
+        case BfState::Error:       return "error";
+    }
+    return "unknown";
+}
+
 nlohmann::json buildStatus(Daemon& d) {
     using namespace std::chrono;
     auto uptimeSec = duration_cast<seconds>(
@@ -49,6 +59,8 @@ nlohmann::json buildStatus(Daemon& d) {
         };
     }
 
+    auto bf = d.beamformingStatus();
+
     return {
         {"uptime", uptimeSec},
         {"version", d.version()},
@@ -59,6 +71,18 @@ nlohmann::json buildStatus(Daemon& d) {
             {"adapterId", d.radio().adapterId.has_value()
                            ? nlohmann::json(d.radio().adapterId.value())
                            : nlohmann::json(nullptr)}
+        }},
+        {"beamforming", {
+            {"requested", bf.requested},
+            {"state", bfStateName(bf.state)},
+            {"reason", bf.reason},
+            {"localMac", bf.localMac},
+            {"remoteMac", bf.remoteMac},
+            {"bw", bf.bw},
+            {"soundingCount", bf.soundingCount},
+            {"lastCbr", bf.lastCbr.has_value()
+                         ? nlohmann::json(bf.lastCbr.value())
+                         : nlohmann::json(nullptr)}
         }},
         {"processes", procs}
     };

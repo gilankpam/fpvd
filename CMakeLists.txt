@@ -35,6 +35,7 @@ target_sources(fpvd_core PRIVATE
     src/supervise/supervisor.cpp
     src/supervise/orchestrator.cpp
     src/supervise/radio.cpp
+    src/supervise/beamforming.cpp
     src/http/server.cpp
     src/http/handlers.cpp
     src/status.cpp
@@ -50,6 +51,7 @@ enable_testing()
 add_executable(fpvd_tests tests/test_main.cpp)
 target_link_libraries(fpvd_tests PRIVATE fpvd_core)
 target_sources(fpvd_tests PRIVATE
+    tests/unit/test_link_width.cpp
     tests/unit/test_sanity.cpp
     tests/unit/test_schema.cpp
     tests/unit/test_store.cpp
@@ -65,6 +67,7 @@ target_sources(fpvd_tests PRIVATE
     tests/integration/test_supervisor.cpp
     tests/integration/test_orchestrator.cpp
     tests/integration/test_radio.cpp
+    tests/integration/test_beamforming.cpp
     tests/integration/test_daemon.cpp
     tests/integration/test_http_server.cpp
     tests/integration/test_http_handlers.cpp

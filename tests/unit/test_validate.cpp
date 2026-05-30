@@ -10,11 +10,14 @@ TEST_CASE("validate: default config is valid") {
     CHECK(errs.empty());
 }
 
-TEST_CASE("validate: width must be 20 or 40") {
+TEST_CASE("validate: width must be 10, 20, or 40") {
     Config c{}; c.link.width = 80;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "link.width");
+
+    Config ok{}; ok.link.width = 10;
+    CHECK(validate(ok).empty());
 }
 
 TEST_CASE("validate: fec.k must be less than fec.n") {
@@ -119,11 +122,14 @@ TEST_CASE("validate: dynamicLink.safe.depth in [1,8]") {
     CHECK(errs2[0].path == "dynamicLink.safe.depth");
 }
 
-TEST_CASE("validate: dynamicLink.safe.bandwidth must be 20 or 40") {
+TEST_CASE("validate: dynamicLink.safe.bandwidth must be 10, 20, or 40") {
     Config c{}; c.dynamicLink.safe.bandwidth = 80;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.safe.bandwidth");
+
+    Config ok{}; ok.dynamicLink.safe.bandwidth = 10;
+    CHECK(validate(ok).empty());
 }
 
 TEST_CASE("validate: dynamicLink.safe.txPowerDbm in [-10,30]") {
@@ -198,4 +204,53 @@ TEST_CASE("validate: dynamicLink.roiQp.step >= 1") {
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.roiQp.step");
+}
+
+TEST_CASE("validate: beamforming off ignores stale fields") {
+    Config c{};
+    c.link.beamforming.enabled = false;
+    c.link.beamforming.remoteMac = "";   // empty is fine when disabled
+    c.link.stbc = true;                  // irrelevant when disabled
+    CHECK(validate(c).empty());
+}
+
+TEST_CASE("validate: beamforming on requires stbc off") {
+    Config c{};
+    c.link.beamforming.enabled = true;
+    c.link.beamforming.remoteMac = "00:c0:ca:aa:bb:cc";
+    c.link.stbc = true;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "link.beamforming");
+}
+
+TEST_CASE("validate: beamforming on requires a valid remoteMac") {
+    Config c{};
+    c.link.beamforming.enabled = true;
+
+    c.link.beamforming.remoteMac = "";
+    REQUIRE(validate(c).size() == 1);
+    CHECK(validate(c)[0].path == "link.beamforming.remoteMac");
+
+    c.link.beamforming.remoteMac = "not-a-mac";
+    REQUIRE(validate(c).size() == 1);
+    CHECK(validate(c)[0].path == "link.beamforming.remoteMac");
+
+    c.link.beamforming.remoteMac = "00:c0:ca:aa:bb:cc";
+    CHECK(validate(c).empty());
+}
+
+TEST_CASE("validate: beamforming ackTimeout and intervalMs ranges") {
+    Config c{};
+    c.link.beamforming.enabled = true;
+    c.link.beamforming.remoteMac = "00:c0:ca:aa:bb:cc";
+
+    c.link.beamforming.ackTimeout = 32;     // below 33
+    REQUIRE(validate(c).size() == 1);
+    CHECK(validate(c)[0].path == "link.beamforming.ackTimeout");
+
+    c.link.beamforming.ackTimeout = 255;
+    c.link.beamforming.intervalMs = 0;      // below 1
+    REQUIRE(validate(c).size() == 1);
+    CHECK(validate(c)[0].path == "link.beamforming.intervalMs");
 }

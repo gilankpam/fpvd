@@ -3,6 +3,7 @@
 #include "config/schema.hpp"
 #include "config/validate.hpp"
 #include "supervise/orchestrator.hpp"
+#include "supervise/beamforming.hpp"
 #include <chrono>
 #include <mutex>
 #include <optional>
@@ -58,6 +59,7 @@ public:
     int version() const { return version_; }
     const LastApply& lastApply() const { return lastApply_; }
     const RadioInfo& radio() const { return radio_; }
+    BfStatus beamformingStatus() const { return bf_.status(); }
     std::chrono::steady_clock::time_point startedAt() const { return startedAt_; }
 
     PatchResult patchPending(const nlohmann::json& patch);
@@ -69,6 +71,7 @@ public:
 
 private:
     void seedOrchestrator();
+    void reconcileBeamforming();
     void rewriteWaybeamJson();
 
     DaemonPaths paths_;
@@ -78,6 +81,7 @@ private:
     LastApply lastApply_;
     RadioInfo radio_;
     Orchestrator orch_;
+    BeamformingController bf_;
     std::chrono::steady_clock::time_point startedAt_;
     std::mutex mu_;
 };
