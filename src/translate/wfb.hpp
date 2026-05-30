@@ -5,6 +5,9 @@
 
 namespace fpvd {
 
+// wfb_tx control socket port for the video instance (-C). Bound to 127.0.0.1.
+constexpr int kVideoControlPort = 8000;
+
 enum class WfbRole { VideoTx, TunRx, TunTx, TlmRx, TlmTx };
 
 // Build the argv (including argv[0] = binary path) for a wfb-ng role.
