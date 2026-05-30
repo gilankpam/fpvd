@@ -48,6 +48,7 @@ void Daemon::bootstrap(bool startProcesses) {
         radio_ = {rr.driver, rr.iface, rr.adapterId};
         seedOrchestrator();
         orch_.startAll();
+        reconcileBeamforming();
     }
 }
 
@@ -109,6 +110,18 @@ void Daemon::seedOrchestrator() {
     }
 }
 
+void Daemon::reconcileBeamforming() {
+    const auto& bfc = effective_.link.beamforming;
+    BfParams p;
+    p.iface      = radio_.iface.empty() ? "wlan0" : radio_.iface;
+    p.driver     = radio_.driver;
+    p.remoteMac  = bfc.remoteMac;
+    p.width      = effective_.link.width;
+    p.ackTimeout = bfc.ackTimeout;
+    p.intervalMs = bfc.intervalMs;
+    bf_.reconcile(bfc.enabled, p);
+}
+
 void Daemon::rewriteWaybeamJson() {
     atomicWriteJson(paths_.waybeamJsonPath, toWaybeamJson(effective_));
 }
@@ -146,6 +159,12 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     const bool deferRadioRetune =
         effective_.link.channel != pending_.link.channel ||
         effective_.link.width   != pending_.link.width;
+    // Beamforming is reconciled (not exec-supervised); report it as restarted
+    // when its own block or the derived modulation width changed.
+    const bool bfChanged =
+        nlohmann::json(effective_.link.beamforming) !=
+            nlohmann::json(pending_.link.beamforming) ||
+        effective_.link.width != pending_.link.width;
 
     // Persist overlay (sparse diff vs defaults).
     auto defaultsJ = defaultsJson();
@@ -167,6 +186,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         restarted.push_back("dl_applier");
     }
     for (auto& n : subs.servicesAffected) restarted.push_back(n);
+    if (bfChanged) restarted.push_back("beamforming");
 
     if (reallyRestart && deferRadioRetune) {
         // Defer the restart so the HTTP response can flush before the
@@ -189,6 +209,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             radio_ = {rr.driver, rr.iface, rr.adapterId};
             seedOrchestrator();
             orch_.startAll();
+            reconcileBeamforming();
         }).detach();
         return {true, {}, restarted, std::nullopt, version_};
     }
@@ -209,6 +230,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         }
         seedOrchestrator();
         orch_.startAll();
+        reconcileBeamforming();
     } else {
         // Re-seed the orchestrator's specs so introspection
         // (Orchestrator::names()) reflects the new config. Note: assigning
