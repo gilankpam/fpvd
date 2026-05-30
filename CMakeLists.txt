@@ -29,6 +29,7 @@ target_sources(fpvd_core PRIVATE
     src/config/lock.cpp
     src/translate/waybeam.cpp
     src/translate/wfb.cpp
+    src/translate/wfb_control.cpp
     src/translate/telemetry.cpp
     src/translate/dynamic_link.cpp
     src/supervise/process.cpp
@@ -61,6 +62,7 @@ target_sources(fpvd_tests PRIVATE
     tests/unit/test_lock.cpp
     tests/unit/test_translate_waybeam.cpp
     tests/unit/test_translate_wfb.cpp
+    tests/unit/test_wfb_control.cpp
     tests/unit/test_translate_telemetry.cpp
     tests/unit/test_translate_dynamic_link.cpp
     tests/unit/test_dl_applier_cli_assumptions.cpp
