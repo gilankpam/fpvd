@@ -19,4 +19,11 @@ struct RadioResult {
 // (expected key=value lines) and stderr. Returns within ~30 seconds.
 RadioResult bringUpRadio(const std::string& scriptPath, const Config& c);
 
+// Apply a single live radio change via `scriptPath <action>` (channel,
+// txpower, or mtu). Passes the relevant link.* fields plus the already-known
+// iface/driver as env vars. Captures stderr; RadioResult.driver/iface unused.
+RadioResult tuneRadio(const std::string& scriptPath, const std::string& action,
+                      const Config& c, const std::string& iface,
+                      const std::string& driver);
+
 } // namespace fpvd

@@ -80,5 +80,6 @@ add_test(NAME fpvd_tests COMMAND fpvd_tests)
 # Install rules.
 install(TARGETS fpvd RUNTIME DESTINATION bin)
 install(PROGRAMS scripts/radio-up.sh DESTINATION libexec/fpvd)
+install(PROGRAMS scripts/radio-tune.sh DESTINATION libexec/fpvd)
 install(PROGRAMS scripts/S99fpvd DESTINATION ../etc/init.d)
 install(FILES etc/defaults.json DESTINATION ../rom/etc/fpvd)
