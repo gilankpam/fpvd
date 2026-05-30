@@ -57,6 +57,7 @@ target_sources(fpvd_tests PRIVATE
     tests/unit/test_store.cpp
     tests/unit/test_validate.cpp
     tests/unit/test_diff.cpp
+    tests/unit/test_link_classify.cpp
     tests/unit/test_lock.cpp
     tests/unit/test_translate_waybeam.cpp
     tests/unit/test_translate_wfb.cpp

@@ -33,4 +33,24 @@ SubsystemDiff diffSubsystems(const Config& a, const Config& b) {
     return d;
 }
 
+LinkChange classifyLinkChange(const Config& a, const Config& b) {
+    const auto& la = a.link;
+    const auto& lb = b.link;
+    LinkChange c;
+    const bool channel = la.channel != lb.channel;
+    const bool width   = la.width   != lb.width;
+    c.nicChannel    = channel || width;
+    c.nicWidth      = width;
+    c.nicTxpower    = la.txpower != lb.txpower;
+    c.nicMtu        = la.mtu != lb.mtu;
+    c.videoRadiotap = (la.mcs != lb.mcs) || (la.stbc != lb.stbc) ||
+                      (la.ldpc != lb.ldpc) || width;
+    c.videoFec      = (la.fec.k != lb.fec.k) || (la.fec.n != lb.fec.n);
+    c.fullRestart   = (la.linkId != lb.linkId) ||
+                      (la.wlanAdapter != lb.wlanAdapter);
+    // link.beamforming is intentionally not routed here — it is reconciled
+    // separately in Daemon::apply() (bfChanged), not via this hot-apply diff.
+    return c;
+}
+
 } // namespace fpvd
