@@ -263,8 +263,12 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // Encoder restart-class change: waybeam.json was rewritten above; bounce
         // ONLY waybeam (wfb stays up, radio link preserved). On Star6E a /set-
         // driven reinit would self-respawn and race our supervisor, so fpvd owns
-        // the restart. No-op if waybeam is not currently supervised.
-        if (encRestart) orch_.restart("waybeam");
+        // the restart. The settle delay lets the SigmaStar driver drain the old
+        // pipeline before the fresh waybeam re-inits (a video0.size change wedges
+        // the VENC channel otherwise). No-op if waybeam is not currently supervised.
+        if (encRestart)
+            orch_.restart("waybeam",
+                          std::chrono::milliseconds{paths_.waybeamRestartSettleMs});
         // Hot path: no wfb restart. Route the in-process controller before the
         // link hot-apply blocks below, so it
         // runs regardless of which hot return is taken below (the deferred

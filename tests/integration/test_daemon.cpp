@@ -386,6 +386,7 @@ static fpvd::DaemonPaths makeRoutingPaths(const fs::path& tmp, uint16_t listenPo
     paths.dlEndpoints.idrPort = 0;
     paths.dlEndpoints.gsTunnelPort = 0;
     paths.dlEndpoints.osdMsgPath = (tmp / "MSPOSD.msg").string();
+    paths.waybeamRestartSettleMs = 0;  // keep the waybeam-restart tests fast
     return paths;
 }
 

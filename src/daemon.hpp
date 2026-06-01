@@ -22,6 +22,11 @@ struct DaemonPaths {
     std::string waybeamJsonPath; // /etc/waybeam.json
     std::string radioTuneScript{}; // /usr/libexec/fpvd/radio-tune.sh (optional)
     dynlink::Endpoints dlEndpoints{};  // defaults to production endpoints; overridable in tests
+    // Settle delay for the waybeam-only restart (see Orchestrator::restart):
+    // gives the SigmaStar driver time to drain the old pipeline before the fresh
+    // waybeam re-inits, so a video0.size change doesn't wedge the VENC channel.
+    // 700 ms > waybeam's own 500 ms margin. Tests set this to 0 to stay fast.
+    int waybeamRestartSettleMs{700};
 };
 
 struct PatchResult {
