@@ -1,8 +1,16 @@
 #pragma once
+#include "dynlink/dedup.hpp"
+#include "dynlink/encoder_client.hpp"
+#include "dynlink/osd.hpp"
+#include "dynlink/radio_txpower.hpp"
 #include "dynlink/runtime_config.hpp"
+#include "dynlink/watchdog.hpp"
+#include "dynlink/wire.hpp"
+#include "translate/wfb_control.hpp"
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 namespace fpvd::dynlink {
@@ -25,6 +33,10 @@ private:
     void stopLocked();                             // assumes lifetimeMu_ is already held
     void publishStatus(const DlStatus&);
 
+    // Decision dispatch helpers (run on the control thread only — no locking).
+    void dispatchTxApply(const DlRuntimeConfig& cfg, const Decision& d);
+    void dispatchTxSafe(const DlRuntimeConfig& cfg);
+
     Endpoints ep_;
     std::thread thread_;
     std::atomic<bool> running_{false};
@@ -36,6 +48,27 @@ private:
     std::shared_ptr<const DlRuntimeConfig> cfg_;   // guarded by cfgMu_
     mutable std::mutex statusMu_;
     DlStatus status_{};
+
+    // Owned backend clients + control-loop state. Constructed in start()
+    // from the config snapshot + endpoints; used ONLY from run() (the
+    // control thread), so they need no locking. Held by unique_ptr/optional
+    // because their ctors take args and they are (re)constructed per start().
+    std::unique_ptr<WfbControlClient> wfb_;
+    std::optional<EncoderClient>      enc_;
+    std::optional<RadioTxpower>       radio_;
+    std::optional<OsdWriter>          osd_;
+    std::optional<Watchdog>           watchdog_;
+    Dedup                             dedup_;
+
+    // Per-backend prev-state (diff baselines). lastTx_/lastRadio_ are diffed
+    // against new decisions; lastEnc_ tracks bitrate for direction only (the
+    // encoder client owns its own internal diff). A "first/invalid" baseline
+    // is signalled by magic != kWireMagic (port of dl_applier.c).
+    Decision lastTx_{};
+    Decision lastRadio_{};
+    Decision lastEnc_{};
+    Decision lastApplied_{};   // for OSD display only
+    uint64_t lastDecisionMs_{0};
 };
 
 } // namespace fpvd::dynlink
