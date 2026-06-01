@@ -36,6 +36,7 @@ target_sources(fpvd_core PRIVATE
     src/dynlink/idr_listen.cpp
     src/dynlink/runtime_config.cpp
     src/dynlink/osd.cpp
+    src/dynlink/controller.cpp
     src/config/store.cpp
     src/config/validate.cpp
     src/config/diff.cpp
@@ -100,6 +101,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/unit/test_dl_osd.cpp
         tests/unit/test_dl_idr_listen.cpp
         tests/unit/test_dl_runtime_config.cpp
+        tests/integration/test_dl_controller.cpp
     )
     add_test(NAME fpvd_tests COMMAND fpvd_tests)
 endif()
