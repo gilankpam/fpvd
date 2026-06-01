@@ -121,3 +121,35 @@ TEST_CASE("lock: null leaf inside locked subtree is still rejected") {
     REQUIRE(r.lockedPaths.size() == 1);
     CHECK(r.lockedPaths[0] == "link.fec");
 }
+
+TEST_CASE("lock: DL on + body writes link.stbc → rejected") {
+    auto body = nlohmann::json::parse(R"({"link":{"stbc":true}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK_FALSE(r.ok);
+    REQUIRE(r.lockedPaths.size() == 1);
+    CHECK(r.lockedPaths[0] == "link.stbc");
+}
+
+TEST_CASE("lock: DL on + body writes link.ldpc → rejected") {
+    auto body = nlohmann::json::parse(R"({"link":{"ldpc":true}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK_FALSE(r.ok);
+    REQUIRE(r.lockedPaths.size() == 1);
+    CHECK(r.lockedPaths[0] == "link.ldpc");
+}
+
+TEST_CASE("lock: DL off + body writes link.stbc → allowed") {
+    Config off{};
+    auto body = nlohmann::json::parse(R"({"link":{"stbc":true}})");
+    auto r = checkDynamicLinkLock(body, off);
+    CHECK(r.ok);
+    CHECK(r.lockedPaths.empty());
+}
+
+TEST_CASE("lock: DL off + body writes link.ldpc → allowed") {
+    Config off{};
+    auto body = nlohmann::json::parse(R"({"link":{"ldpc":true}})");
+    auto r = checkDynamicLinkLock(body, off);
+    CHECK(r.ok);
+    CHECK(r.lockedPaths.empty());
+}

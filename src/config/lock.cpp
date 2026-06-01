@@ -10,6 +10,8 @@ static const std::vector<std::vector<std::string>> kLockedPaths = {
     {"link", "txpower"},
     {"link", "fec"},
     {"link", "width"},
+    {"link", "stbc"},
+    {"link", "ldpc"},
     {"video", "bitrate"},
     {"video", "qpDelta"},
     {"video", "roi"},
