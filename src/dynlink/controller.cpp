@@ -190,7 +190,11 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
     }
     if (first || lastTx_.mcs != d.mcs || lastTx_.bandwidth != d.bandwidth) {
         if (emitted && paceUs > 0) usleep(paceUs);
-        wfb_->setRadio(/*stbc=*/0, /*ldpc=*/false, /*shortGi=*/false,
+        // stbc/ldpc are preserved from config, not decided by the loop (the GS
+        // decision carries neither). CMD_SET_RADIO is atomic over the whole
+        // radiotap word, so we must restate the configured flags on every push.
+        wfb_->setRadio(/*stbc=*/static_cast<uint8_t>(cfg.stbc ? 1 : 0),
+                       /*ldpc=*/cfg.ldpc, /*shortGi=*/false,
                        /*bandwidth=*/d.bandwidth, /*mcs=*/d.mcs,
                        /*vhtMode=*/false, /*vhtNss=*/1);
     }
@@ -207,7 +211,10 @@ void DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
         wfb_->setInterleaveDepth(cfg.safe.depth);
     }
     if (paceUs > 0) usleep(paceUs);
-    wfb_->setRadio(/*stbc=*/0, /*ldpc=*/false, /*shortGi=*/false,
+    // Safe recovery drops mcs/fec but still preserves the configured stbc/ldpc
+    // (robustness coding is, if anything, helpful during recovery).
+    wfb_->setRadio(/*stbc=*/static_cast<uint8_t>(cfg.stbc ? 1 : 0),
+                   /*ldpc=*/cfg.ldpc, /*shortGi=*/false,
                    /*bandwidth=*/cfg.safe.bandwidth, /*mcs=*/cfg.safe.mcs,
                    /*vhtMode=*/false, /*vhtNss=*/1);
 }
@@ -361,10 +368,30 @@ void DynamicLinkController::run(int evfd) {
                     hello_->setVanilla(!newCfg.interleavingSupported);
                 }
 
+                // stbc/ldpc are preserved, not decided — but a hot change to
+                // them still has to reach the radio. dispatchTxApply only
+                // re-emits CMD_SET_RADIO on an mcs/bandwidth change, so when
+                // ONLY the radiotap flags changed we restate the radio here.
+                const bool radiotapFlagsChanged =
+                    (newCfg.stbc != cfg.stbc) || (newCfg.ldpc != cfg.ldpc);
+
                 // Update the local cfg snapshot. safe.*, applyStaggerMs,
                 // applySubPaceMs, interleavingSupported, and other loop-read
                 // knobs are now live on the next iteration.
                 cfg = newCfg;
+
+                // Restate the radiotap with the controller's CURRENT mcs/bw
+                // (never the config mcs — that would clobber the adaptive
+                // selection). Gated on a decision baseline + idle apply state so
+                // we never race the staggered-apply machine; if non-idle, the
+                // next decision's dispatch carries the new flags.
+                if (radiotapFlagsChanged && lastTx_.magic == kWireMagic &&
+                    applyState == ApplyState::Idle && wfb_) {
+                    wfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0),
+                                   cfg.ldpc, /*shortGi=*/false,
+                                   lastTx_.bandwidth, lastTx_.mcs,
+                                   /*vhtMode=*/false, /*vhtNss=*/1);
+                }
             }
         }
 

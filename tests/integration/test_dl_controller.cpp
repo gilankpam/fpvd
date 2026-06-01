@@ -59,6 +59,7 @@ struct FakeWfbTx {
     std::mutex mu;
     std::vector<std::pair<uint8_t, uint8_t>> fec;     // (k, n)
     std::vector<std::pair<uint8_t, uint8_t>> radio;    // (mcs, bandwidth)
+    std::vector<std::pair<uint8_t, bool>>    radioFlags; // (stbc, ldpc) per setRadio
     std::vector<uint8_t> depth;
 
     FakeWfbTx() {
@@ -102,6 +103,8 @@ struct FakeWfbTx {
                 } else if (req.cmd_id == fpvd::kWfbCmdSetRadio) {
                     radio.emplace_back(req.u.set_radio.mcs_index,
                                        req.u.set_radio.bandwidth);
+                    radioFlags.emplace_back(req.u.set_radio.stbc,
+                                            req.u.set_radio.ldpc);
                 } else if (req.cmd_id == fpvd::kWfbCmdSetInterleaveDepth) {
                     depth.push_back(req.u.set_interleave_depth.depth);
                 }
@@ -124,6 +127,19 @@ struct FakeWfbTx {
         std::lock_guard<std::mutex> lk(mu);
         for (auto& r : radio) if (r.first == mcs && r.second == bw) return true;
         return false;
+    }
+    bool sawRadioFlags(uint8_t stbc, bool ldpc) {
+        std::lock_guard<std::mutex> lk(mu);
+        for (auto& f : radioFlags) if (f.first == stbc && f.second == ldpc) return true;
+        return false;
+    }
+    // True iff EVERY captured setRadio carried these flags (proves the loop
+    // never zeroes them — neither on a decision nor on a watchdog-safe push).
+    bool allRadioFlags(uint8_t stbc, bool ldpc) {
+        std::lock_guard<std::mutex> lk(mu);
+        if (radioFlags.empty()) return false;
+        for (auto& f : radioFlags) if (f.first != stbc || f.second != ldpc) return false;
+        return true;
     }
 };
 
@@ -221,6 +237,8 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     snap.osdDebugLatency       = false;
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
+    snap.stbc                  = true;      // preserved on every setRadio (incl. safe)
+    snap.ldpc                  = true;
     snap.iface                 = "wlan-test-nonexistent";  // iw will fail, not hang
     snap.safe = SafeDefaults{
         /*mcs=*/1, /*k=*/8, /*n=*/12, /*depth=*/0,
@@ -255,6 +273,8 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     CHECK(gotFec);
     CHECK(waitFor([&] { return wfb.sawRadio(7, 40); }, 1000));
     CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=6000"); }, 1000));
+    // Decision push preserved the configured radiotap flags (not hardcoded 0/false).
+    CHECK(wfb.sawRadioFlags(/*stbc=*/1, /*ldpc=*/true));
 
     // 2) Go silent past healthTimeoutMs -> watchdog trips -> safe-defaults push.
     CHECK(waitFor([&] {
@@ -263,6 +283,9 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
                enc.sawContaining("video0.bitrate=2000");
     }, 2000));
     CHECK(waitFor([&] { return c.status().watchdogTripped == true; }, 1000));
+    // Both the decision and the safe push carried stbc=1/ldpc=1 — the loop
+    // never overrides the operator's choice, even during recovery.
+    CHECK(wfb.allRadioFlags(/*stbc=*/1, /*ldpc=*/true));
 
     c.stop();
     CHECK(c.status().running == false);

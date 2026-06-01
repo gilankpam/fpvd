@@ -50,8 +50,8 @@ struct Link {
     int txpower{1};
     int mcs{2};
     Fec fec{};
-    bool stbc{false};
-    bool ldpc{false};
+    bool stbc{true};
+    bool ldpc{true};
     long linkId{7669206};
     int mtu{1500};
     std::optional<std::string> wlanAdapter{};

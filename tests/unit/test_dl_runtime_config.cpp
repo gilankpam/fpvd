@@ -8,11 +8,14 @@ using namespace fpvd::dynlink;
 TEST_CASE("buildDlSnapshot maps schema + derived inputs") {
     Config c{};                       // defaults
     c.link.mtu = 1400; c.video.fps = 90;
+    c.link.stbc = false; c.link.ldpc = true;   // preserved through, not DL-decided
     c.dynamicLink.safe.mcs = 3; c.dynamicLink.healthTimeoutMs = 8000;
     auto s = buildDlSnapshot(c, "wlan1");
     CHECK(s.iface == "wlan1");
     CHECK(s.helloMtuBytes == 1400);
     CHECK(s.helloFps == 90);
+    CHECK(s.stbc == false);
+    CHECK(s.ldpc == true);
     CHECK(s.safe.mcs == 3);
     CHECK(s.healthTimeoutMs == 8000);
     CHECK(s.roiQp.thresholdKbps == 6000);   // default carried through
@@ -94,6 +97,8 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
     // Link/video defaults
     CHECK(s.helloMtuBytes == 1500u);
     CHECK(s.helloFps      == 60u);
+    CHECK(s.stbc          == true);   // link defaults now enable stbc/ldpc
+    CHECK(s.ldpc          == true);
     CHECK(s.iface         == "wlan2");
 
     // RoiQp defaults

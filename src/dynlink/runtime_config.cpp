@@ -37,6 +37,8 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
 
     s.helloMtuBytes = static_cast<uint16_t>(c.link.mtu);
     s.helloFps      = static_cast<uint16_t>(c.video.fps);
+    s.stbc          = c.link.stbc;
+    s.ldpc          = c.link.ldpc;
     s.iface         = iface;
 
     return s;

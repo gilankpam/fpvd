@@ -243,7 +243,10 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             startController();
         else if (enabledOld && !enabledNew)
             dl_.stop();
-        else if (enabledOld && enabledNew && subs.dynamicLink)
+        else if (enabledOld && enabledNew && (subs.dynamicLink || link.videoRadiotap))
+            // A stbc/ldpc retune is the only videoRadiotap change reachable under
+            // DL (mcs/width/fec are locked), so refresh the controller snapshot;
+            // the loop restates the radio with its current mcs (see reconcile).
             dl_.setConfig(dynlink::buildDlSnapshot(effective_, radio_.iface));
 
         // A purely hot-applicable link change — no wfb restart.
@@ -276,8 +279,13 @@ ApplyResult Daemon::apply(bool reallyRestart) {
                 return {false, {}, restarted, rr.error, version_};
             }
         }
-        if (link.videoRadiotap && !link.nicWidth) {
+        if (link.videoRadiotap && !link.nicWidth && !enabledNew) {
             // mcs/stbc/ldpc with no width change — push now (no link drop).
+            // Skipped when DL is enabled: the controller is the sole writer of
+            // the video radiotap there. Pushing the *config* mcs from here would
+            // clobber the loop's adaptive MCS, so a stbc/ldpc retune is instead
+            // routed through the controller (setConfig above), which restates
+            // the radio preserving its current mcs/bw.
             WfbControlClient cli("127.0.0.1", kVideoControlPort);
             auto rr = cli.setRadio(
                 static_cast<uint8_t>(effective_.link.stbc ? 1 : 0),

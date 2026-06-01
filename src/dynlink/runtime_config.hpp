@@ -30,6 +30,11 @@ struct DlRuntimeConfig {
     SafeDefaults safe;
     uint16_t helloMtuBytes;
     uint16_t helloFps;
+    // Static link radiotap flags the controller PRESERVES (never decides). The
+    // GS never sends stbc/ldpc, so every CMD_SET_RADIO the loop emits carries
+    // these config values through unchanged rather than the old hardcoded 0/false.
+    bool     stbc;
+    bool     ldpc;
     std::string  iface;
 };
 

@@ -227,6 +227,7 @@ TEST_CASE("validate: beamforming on requires stbc off") {
 TEST_CASE("validate: beamforming on requires a valid remoteMac") {
     Config c{};
     c.link.beamforming.enabled = true;
+    c.link.stbc = false;                 // stbc defaults true; clear it to isolate the remoteMac rule
 
     c.link.beamforming.remoteMac = "";
     REQUIRE(validate(c).size() == 1);
@@ -243,6 +244,7 @@ TEST_CASE("validate: beamforming on requires a valid remoteMac") {
 TEST_CASE("validate: beamforming ackTimeout and intervalMs ranges") {
     Config c{};
     c.link.beamforming.enabled = true;
+    c.link.stbc = false;                 // stbc defaults true; clear it to isolate the range rules
     c.link.beamforming.remoteMac = "00:c0:ca:aa:bb:cc";
 
     c.link.beamforming.ackTimeout = 32;     // below 33
