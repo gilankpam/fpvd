@@ -12,7 +12,7 @@ public:
     bool isTripped() const { return tripped_; }
 private:
     uint64_t lastDecisionMs_{0};
-    uint32_t timeoutMs_;
+    uint32_t timeoutMs_{0};
     bool everSeen_{false};
     bool tripped_{false};
 };

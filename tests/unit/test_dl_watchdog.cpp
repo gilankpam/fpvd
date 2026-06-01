@@ -51,3 +51,18 @@ TEST_CASE("watchdog: reset clears latch and re-arms") {
     /* And the next silent window will fire again. */
     CHECK(w.tick(1200) == true);
 }
+
+TEST_CASE("watchdog: setTimeout updates timeout without clearing latch") {
+    Watchdog w(1000);
+    w.notifyDecision(0);
+    CHECK(w.tick(500) == false);   /* within the original 1000 ms window */
+
+    /* Shorten the timeout — 300 ms > 200 ms, so now stale. */
+    w.setTimeout(200);
+    CHECK(w.tick(300) == true);    /* first stale tick under new timeout -> trip */
+
+    /* setTimeout must NOT clear an existing latch. */
+    w.setTimeout(5000);
+    CHECK(w.isTripped() == true);  /* still tripped */
+    CHECK(w.tick(400) == false);   /* one-shot already fired, stays silent */
+}
