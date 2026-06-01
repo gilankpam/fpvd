@@ -79,8 +79,8 @@ std::vector<ValidationError> validate(const Config& c) {
     }
 
     // video
-    if (c.video.codec != "h264" && c.video.codec != "h265")
-        errs.push_back({"video.codec", "must be h264 or h265"});
+    if (c.video.codec != "h265")
+        errs.push_back({"video.codec", "must be h265 (hardware is H.265-only)"});
     int w=0, h=0;
     if (!parseResolution(c.video.resolution, w, h))
         errs.push_back({"video.resolution", "must be WxH"});
