@@ -21,15 +21,17 @@ public:
     DlStatus status() const;                       // snapshot of published status
 
 private:
-    void run();                                    // the poll(2) loop (Tasks 14-17)
+    void run(int evfd);                            // the poll(2) loop (Tasks 14-17); evfd passed from start()
+    void stopLocked();                             // assumes lifetimeMu_ is already held
     void publishStatus(const DlStatus&);
 
     Endpoints ep_;
     std::thread thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> stopFlag_{false};
-    int eventFd_{-1};                              // reload/stop wake
-    uint32_t generationId_{0};
+    std::atomic<int> eventFd_{-1};                 // reload/stop wake
+    std::atomic<uint32_t> generationId_{0};
+    std::mutex lifetimeMu_;                          // serializes start/stop/setConfig lifecycle transitions
     mutable std::mutex cfgMu_;
     std::shared_ptr<const DlRuntimeConfig> cfg_;   // guarded by cfgMu_
     mutable std::mutex statusMu_;

@@ -46,73 +46,48 @@ DynamicLinkController::~DynamicLinkController() {
 }
 
 void DynamicLinkController::start(const DlRuntimeConfig& snap, uint32_t generationId) {
-    // If already running, stop first.
-    if (running_.load()) {
-        stop();
-    }
+    std::lock_guard<std::mutex> lk(lifetimeMu_);
+    if (running_.load()) stopLocked();  // NOT stop() — avoid re-locking lifetimeMu_
 
-    // Store config under mutex.
-    {
-        std::lock_guard<std::mutex> lk(cfgMu_);
-        cfg_ = std::make_shared<const DlRuntimeConfig>(snap);
-    }
-    generationId_ = generationId;
-
-    // Create eventfd for stop/reload signalling.
-    eventFd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    if (eventFd_ < 0) {
-        // Non-fatal: the loop can still run (poll will just block on listenFd
-        // only), but stop() will not be able to wake it.  Record failure in
-        // status but mark running anyway so the destructor can join safely.
-    }
-
+    { std::lock_guard<std::mutex> cg(cfgMu_); cfg_ = std::make_shared<const DlRuntimeConfig>(snap); }
+    generationId_.store(generationId);
     stopFlag_.store(false);
+    int efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    eventFd_.store(efd);                // -1 tolerated (run() handles it)
+    { std::lock_guard<std::mutex> sg(statusMu_); status_.running = true; }
     running_.store(true);
-
-    {
-        std::lock_guard<std::mutex> lk(statusMu_);
-        status_.running = true;
-    }
-
-    thread_ = std::thread([this] { run(); });
+    thread_ = std::thread([this, efd]{ run(efd); });
 }
 
 void DynamicLinkController::stop() {
+    std::lock_guard<std::mutex> lk(lifetimeMu_);
+    stopLocked();
+}
+
+void DynamicLinkController::stopLocked() {
     if (!running_.load()) return;
-
     stopFlag_.store(true);
-
-    // Wake the poll loop via eventfd.
-    if (eventFd_ >= 0) {
-        uint64_t one = 1;
-        ssize_t r = write(eventFd_, &one, sizeof(one));
-        (void)r;
-    }
-
-    if (thread_.joinable()) {
-        thread_.join();
-    }
-
-    // eventFd_ is closed by run() on exit; just clear the member.
-    eventFd_ = -1;
-
+    int fd = eventFd_.exchange(-1);  // take ownership of the fd atomically
+    if (fd >= 0) { uint64_t one = 1; ssize_t w = write(fd, &one, sizeof(one)); (void)w; }
+    if (thread_.joinable()) thread_.join();
+    if (fd >= 0) ::close(fd);        // stop() owns the close, AFTER join
     running_.store(false);
-    {
-        std::lock_guard<std::mutex> lk(statusMu_);
-        status_.running = false;
-    }
+    { std::lock_guard<std::mutex> sg(statusMu_); status_.running = false; }
 }
 
 // ---- poll loop --------------------------------------------------------------
 
-void DynamicLinkController::run() {
+void DynamicLinkController::run(int evfd) {
+    // evfd passed by value from start() — captured before thread launch,
+    // so it is immune to the eventFd_.exchange(-1) in stopLocked().
+
     // Open listen socket; tolerate failure — loop still runs for clean stop.
     int listenFd = -1;
     if (ep_.listenPort != 0) {
         listenFd = openListenSocket(ep_.listenAddr, ep_.listenPort);
     }
 
-    // Build pollfd array: [listenFd (optional), eventFd_ (optional)].
+    // Build pollfd array: [listenFd (optional), evfd (optional)].
     struct pollfd pfds[2];
     int nfds = 0;
     int listenIdx = -1;
@@ -123,8 +98,8 @@ void DynamicLinkController::run() {
         pfds[nfds].events = POLLIN;
         listenIdx = nfds++;
     }
-    if (eventFd_ >= 0) {
-        pfds[nfds].fd = eventFd_;
+    if (evfd >= 0) {
+        pfds[nfds].fd = evfd;
         pfds[nfds].events = POLLIN;
         eventIdx = nfds++;
     }
@@ -147,8 +122,8 @@ void DynamicLinkController::run() {
         // Check eventfd first (stop/reload signal).
         if (eventIdx >= 0 && (pfds[eventIdx].revents & POLLIN)) {
             uint64_t val;
-            ssize_t r = read(eventFd_, &val, sizeof(val));
-            (void)r; // drain
+            ssize_t r = read(evfd, &val, sizeof(val));
+            (void)r; // drain; ignore EAGAIN
             if (stopFlag_.load()) break;
         }
 
@@ -164,13 +139,9 @@ void DynamicLinkController::run() {
     }
 
     if (listenFd >= 0) {
-        close(listenFd);
+        ::close(listenFd);  // close ONLY listenFd here
     }
-    if (eventFd_ >= 0) {
-        close(eventFd_);
-        // NOTE: stop() zeroes eventFd_ after join(); we close the fd here
-        // so the fd is closed before join() returns.  stop() will set -1.
-    }
+    // do NOT close evfd/eventFd_ here — stop() owns the close after join()
 }
 
 // ---- status / config --------------------------------------------------------
@@ -188,16 +159,10 @@ void DynamicLinkController::publishStatus(const DlStatus& s) {
 }
 
 void DynamicLinkController::setConfig(const DlRuntimeConfig& snap) {
-    {
-        std::lock_guard<std::mutex> lk(cfgMu_);
-        cfg_ = std::make_shared<const DlRuntimeConfig>(snap);
-    }
-    // Wake the loop so it can act on the new config (Task 17 will use it).
-    if (eventFd_ >= 0) {
-        uint64_t one = 1;
-        ssize_t r = write(eventFd_, &one, sizeof(one));
-        (void)r;
-    }
+    std::lock_guard<std::mutex> lk(lifetimeMu_);  // excludes a concurrent stop closing the fd
+    { std::lock_guard<std::mutex> cg(cfgMu_); cfg_ = std::make_shared<const DlRuntimeConfig>(snap); }
+    int fd = eventFd_.load();
+    if (fd >= 0) { uint64_t one = 1; ssize_t w = write(fd, &one, sizeof(one)); (void)w; }
 }
 
 } // namespace fpvd::dynlink
