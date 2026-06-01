@@ -104,6 +104,7 @@ int EncoderClient::requestIdr(uint64_t nowMs) {
 // applySafe — port of dl_backend_enc_apply_safe
 // ---------------------------------------------------------------------------
 int EncoderClient::applySafe(uint16_t safeBitrateKbps) {
+    // no dedup check: applySafe is always authoritative (matches C apply_safe)
     auto roiQp = static_cast<int8_t>(
         computeRoiQp(safeBitrateKbps,
                      roi_.thresholdKbps,

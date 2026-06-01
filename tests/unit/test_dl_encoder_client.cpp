@@ -3,6 +3,7 @@
 #include "doctest.h"
 #include "dynlink/encoder_client.hpp"
 #include <httplib.h>
+#include <mutex>
 #include <thread>
 using namespace fpvd::dynlink;
 
@@ -12,16 +13,19 @@ using namespace fpvd::dynlink;
 struct FakeSrv {
     httplib::Server srv;
     std::vector<std::string> hits;
+    std::mutex mu;
     int port{0};
     std::thread th;
 
     FakeSrv() {
         srv.Get("/api/v1/set", [&](const httplib::Request& r, httplib::Response& res) {
+            std::lock_guard<std::mutex> lk(mu);
             hits.push_back(r.target);
             res.set_content("ok", "text/plain");
         });
         srv.Get("/request/idr", [&](const httplib::Request& r, httplib::Response& res) {
             (void)r;
+            std::lock_guard<std::mutex> lk(mu);
             hits.push_back("/request/idr");
             res.set_content("ok", "text/plain");
         });
@@ -36,9 +40,9 @@ struct FakeSrv {
     }
 
     // Returns request count
-    size_t count() const { return hits.size(); }
+    size_t count() { std::lock_guard<std::mutex> lk(mu); return hits.size(); }
 
-    const std::string& last() const { return hits.back(); }
+    std::string last() { std::lock_guard<std::mutex> lk(mu); return hits.back(); }
 };
 
 // ---------------------------------------------------------------------------
@@ -57,9 +61,9 @@ TEST_CASE("EncoderClient applies bitrate+roiQp+fps, diffs, throttles IDR") {
     CHECK(f.last().find("fpv.roiQp=0") != std::string::npos);
     CHECK(f.last().find("video0.fps=60") != std::string::npos);
 
-    size_t n = f.hits.size();
+    size_t n = f.count();
     CHECK(enc.apply(6000, 60) == 0);  // identical -> diffed out, no new hit
-    CHECK(f.hits.size() == n);
+    CHECK(f.count() == n);
 
     CHECK(enc.requestIdr(1000) == 0);  // first IDR sent
     CHECK(enc.requestIdr(1100) == 1);  // throttled (<500ms)
@@ -76,7 +80,7 @@ TEST_CASE("EncoderClient emits signed roiQp when starved") {
 
     CHECK(enc.apply(4000, 60) == 0);
     // At 4000 kbps with defaults, roiQp = -12
-    REQUIRE(!f.hits.empty());
+    REQUIRE(f.count() > 0);
     CHECK(f.last().find("fpv.roiQp=-12") != std::string::npos);
     CHECK(f.last().find("video0.bitrate=4000") != std::string::npos);
 }
@@ -88,7 +92,7 @@ TEST_CASE("EncoderClient emits roiQp=0 above threshold") {
 
     CHECK(enc.apply(8000, 60) == 0);
     // Bug-fix assertion: at 8000 kbps roiQp = 0, still send fpv.roiQp=0
-    REQUIRE(!f.hits.empty());
+    REQUIRE(f.count() > 0);
     CHECK(f.last().find("fpv.roiQp=0") != std::string::npos);
 }
 
@@ -103,15 +107,23 @@ TEST_CASE("EncoderClient deduplicates repeat apply") {
     CHECK(f.count() == n1);
 }
 
-TEST_CASE("EncoderClient deduplicates within same bitrate+fps") {
+TEST_CASE("EncoderClient different bitrate same roiQp is NOT deduped") {
+    // Two different raw bitrates that compute to the same roiQp=-12 under
+    // curve {threshold=6000, anchor=2000, floor=-24, step=3}:
+    //   4000: span=4000, delta=2000, raw=(-24*2000)/4000=-12, q=-12
+    //   3950: span=4000, delta=1950, raw=(-24*2050)/4000=-12 (truncated), q=-12
+    // The dedup key includes raw bitrate, so BOTH must produce HTTP hits.
     FakeSrv f;
     EncoderClient enc("127.0.0.1", static_cast<uint16_t>(f.port),
                       500, RoiCurve{6000, 2000, -24, 3});
 
     enc.apply(4000, 60);
     size_t n1 = f.count();
-    enc.apply(4000, 60);  // same bitrate+fps -> no HTTP
-    CHECK(f.count() == n1);
+    REQUIRE(n1 > 0);
+    // Different raw bitrate (3950) -> must NOT be deduped even though roiQp is same
+    enc.apply(3950, 60);
+    CHECK(f.count() == n1 + 1);
+    CHECK(f.last().find("video0.bitrate=3950") != std::string::npos);
 }
 
 TEST_CASE("EncoderClient bitrate=0 is no-op sentinel") {
@@ -130,7 +142,7 @@ TEST_CASE("EncoderClient applySafe uses compute formula") {
                       500, RoiCurve{6000, 2000, -24, 3});
 
     CHECK(enc.applySafe(2000) == 0);
-    REQUIRE(!f.hits.empty());
+    REQUIRE(f.count() > 0);
     CHECK(f.last().find("video0.bitrate=2000") != std::string::npos);
     CHECK(f.last().find("fpv.roiQp=-24") != std::string::npos);
     // fps=0 means no video0.fps in query
@@ -144,15 +156,19 @@ TEST_CASE("EncoderClient fps=0 omits video0.fps from query") {
 
     // fps=0 -> video0.fps not emitted
     CHECK(enc.apply(6000, 0) == 0);
-    REQUIRE(!f.hits.empty());
+    REQUIRE(f.count() > 0);
     CHECK(f.last().find("video0.fps") == std::string::npos);
     CHECK(f.last().find("video0.bitrate=6000") != std::string::npos);
 }
 
 TEST_CASE("EncoderClient IDR throttle arms on any attempt including failure") {
-    // Use a port nothing listens on -> HTTP failure
-    // Throttle should still arm (lastIdrMs set even on failure)
-    EncoderClient enc("127.0.0.1", 19753,  // unused port
+    // Grab a free port via bind_to_any_port, then stop the server immediately
+    // so connections are refused — port is guaranteed free/refused.
+    httplib::Server dead;
+    int dead_port = dead.bind_to_any_port("127.0.0.1");
+    dead.stop();  // stop before listen; connections will be refused
+
+    EncoderClient enc("127.0.0.1", static_cast<uint16_t>(dead_port),
                       500, RoiCurve{6000, 2000, -24, 3});
     enc.setMinIdrInterval(500);
 
