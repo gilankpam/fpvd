@@ -8,16 +8,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <cstdio>   // fprintf / stderr for error logging
-
 namespace fpvd::dynlink {
 
 IdrListener::IdrListener(const std::string& bindAddr, uint16_t port) {
     if (port == 0) return;  // disabled — fd_ stays -1
 
-    int fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+    int fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (fd < 0) {
-        fprintf(stderr, "idr_listen: socket: %s\n", strerror(errno));
         return;
     }
 
@@ -30,23 +27,16 @@ IdrListener::IdrListener(const std::string& bindAddr, uint16_t port) {
     if (bindAddr.empty()) {
         sa.sin_addr.s_addr = htonl(INADDR_ANY);
     } else if (inet_pton(AF_INET, bindAddr.c_str(), &sa.sin_addr) != 1) {
-        fprintf(stderr, "idr_listen: bad bind_addr '%s'\n", bindAddr.c_str());
         close(fd);
         return;
     }
 
     if (bind(fd, reinterpret_cast<struct sockaddr *>(&sa), sizeof(sa)) < 0) {
-        fprintf(stderr, "idr_listen: bind %s:%u: %s\n",
-                bindAddr.empty() ? "0.0.0.0" : bindAddr.c_str(),
-                static_cast<unsigned>(port), strerror(errno));
         close(fd);
         return;
     }
 
     fd_ = fd;
-    fprintf(stderr, "idr_listen: bound %s:%u\n",
-            bindAddr.empty() ? "0.0.0.0" : bindAddr.c_str(),
-            static_cast<unsigned>(port));
 }
 
 IdrListener::~IdrListener() {
@@ -63,7 +53,6 @@ size_t IdrListener::drain() {
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) break;
             if (errno == EINTR) continue;
-            fprintf(stderr, "idr_listen: recvfrom: %s\n", strerror(errno));
             break;
         }
         ++count;
