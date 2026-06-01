@@ -307,3 +307,114 @@ TEST_CASE("handlers: enabling dynamicLink reports dynamicLink in apply restarted
 
     srv.stop(); fs::remove_all(tmp);
 }
+
+// Helper: create a Daemon with ephemeral DL endpoints so the real
+// DynamicLinkController can be started (unreachable backends tolerated).
+static std::unique_ptr<fpvd::Daemon> makeTestDaemonWithDlEndpoints(
+        const fs::path& tmp, uint16_t listenPort) {
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
+                  fs::copy_options::overwrite_existing);
+
+    fpvd::DaemonPaths paths{};
+    paths.defaultsPath    = (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string();
+    paths.overlayPath     = (tmp / "etc" / "fpvd" / "config.json").string();
+    paths.radioUpScript   = "tests/fixtures/fake_radio_up_ok.sh";
+    paths.waybeamJsonPath = (tmp / "etc" / "waybeam.json").string();
+    paths.dlEndpoints.listenAddr   = "127.0.0.1";
+    paths.dlEndpoints.listenPort   = listenPort;
+    paths.dlEndpoints.wfbCtlAddr   = "127.0.0.1";
+    paths.dlEndpoints.wfbCtlPort   = 0;
+    paths.dlEndpoints.encHost      = "127.0.0.1";
+    paths.dlEndpoints.encPort      = 0;
+    paths.dlEndpoints.idrPort      = 0;
+    paths.dlEndpoints.gsTunnelPort = 0;
+    paths.dlEndpoints.osdMsgPath   = (tmp / "MSPOSD.msg").string();
+
+    auto d = std::make_unique<fpvd::Daemon>(paths);
+    d->bootstrap(false);
+    return d;
+}
+
+TEST_CASE("status exposes dynamicLink block; no dl_applier process row") {
+    // ---- Case 1: disabled (default) -----------------------------------------
+    {
+        auto tmp = fs::temp_directory_path() / "fpvd-status-dl-disabled";
+        fs::remove_all(tmp);
+        auto d = makeTestDaemon(tmp);
+        fpvd::HttpServer srv;
+        fpvd::registerHandlers(srv, *d, false);
+        srv.listenInBackground("127.0.0.1", 18097);
+        srv.waitUntilReady(std::chrono::seconds(2));
+
+        httplib::Client c("http://127.0.0.1:18097");
+        auto r = c.Get("/status");
+        REQUIRE(r); CHECK(r->status == 200);
+        auto j = nlohmann::json::parse(r->body);
+
+        // dynamicLink block must exist
+        REQUIRE(j.contains("dynamicLink"));
+        auto dl = j["dynamicLink"];
+        CHECK(dl["enabled"] == false);
+        CHECK(dl["running"] == false);
+        // disabled block must NOT have watchdogTripped / lastDecisionAgeMs / hello
+        CHECK_FALSE(dl.contains("watchdogTripped"));
+        CHECK_FALSE(dl.contains("lastDecisionAgeMs"));
+        CHECK_FALSE(dl.contains("hello"));
+
+        // processes[] must NOT contain dl_applier or dynamicLink
+        bool found = false;
+        for (auto& p : j["processes"])
+            if (p["name"] == "dl_applier" || p["name"] == "dynamicLink") found = true;
+        CHECK_FALSE(found);
+
+        srv.stop(); fs::remove_all(tmp);
+    }
+
+    // ---- Case 2: enabled + running ------------------------------------------
+    {
+        auto tmp = fs::temp_directory_path() / "fpvd-status-dl-enabled";
+        auto d = makeTestDaemonWithDlEndpoints(tmp, 46810);
+        fpvd::HttpServer srv;
+        fpvd::registerHandlers(srv, *d, /*reallyRestart=*/true);
+        srv.listenInBackground("127.0.0.1", 18098);
+        srv.waitUntilReady(std::chrono::seconds(2));
+
+        httplib::Client c("http://127.0.0.1:18098");
+
+        // Enable DL and apply so the controller actually starts.
+        auto pr = c.Patch("/config",
+            R"({"dynamicLink":{"enabled":true}})", "application/json");
+        REQUIRE(pr); CHECK(pr->status == 200);
+        auto ap = c.Post("/apply", "", "application/json");
+        REQUIRE(ap); CHECK(ap->status == 200);
+
+        // Fetch status and verify dynamicLink block.
+        auto r = c.Get("/status");
+        REQUIRE(r); CHECK(r->status == 200);
+        auto j = nlohmann::json::parse(r->body);
+
+        REQUIRE(j.contains("dynamicLink"));
+        auto dl = j["dynamicLink"];
+        CHECK(dl["enabled"] == true);
+        CHECK(dl["running"] == true);
+        // All 5 fields must be present when enabled
+        CHECK(dl.contains("watchdogTripped"));
+        CHECK(dl.contains("lastDecisionAgeMs"));
+        CHECK(dl.contains("hello"));
+        // hello must be a valid string
+        std::string helloVal = dl["hello"];
+        CHECK((helloVal == "disabled" || helloVal == "announcing" || helloVal == "keepalive"));
+
+        // processes[] must NOT contain dl_applier or dynamicLink
+        bool found = false;
+        for (auto& p : j["processes"])
+            if (p["name"] == "dl_applier" || p["name"] == "dynamicLink") found = true;
+        CHECK_FALSE(found);
+
+        srv.stop(); fs::remove_all(tmp);
+    }
+}
