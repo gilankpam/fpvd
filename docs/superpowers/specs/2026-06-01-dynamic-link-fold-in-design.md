@@ -432,6 +432,52 @@ stays pinned.
   drop the deleted translator + obsolete tests. **No new third-party
   deps** — sockets/timerfd/eventfd are libc; `EncoderClient` uses
   `httplib::Client` (cpp-httplib already vendored).
+- **Cross-compile to ssc338q (armv7l / musl / static):** the merged
+  fpvd is now the binary that lands on the drone, so it must build a
+  standalone static target binary the same way the
+  `wfbng-dynamic-link` Makefile's `ssc338q` target does — preserving
+  the dev workflow (build → `scp` to the drone, no Buildroot round-trip
+  needed). Because fpvd is CMake-based, this is a toolchain file
+  (`cmake/toolchain-ssc338q.cmake`) rather than a Make target:
+
+  ```cmake
+  # cmake/toolchain-ssc338q.cmake
+  set(CMAKE_SYSTEM_NAME Linux)
+  set(CMAKE_SYSTEM_PROCESSOR armv7l)
+  set(CMAKE_C_COMPILER   armv7l-unknown-linux-musleabihf-gcc)
+  set(CMAKE_CXX_COMPILER armv7l-unknown-linux-musleabihf-g++)
+  set(_ssc "-march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -Os")
+  set(CMAKE_C_FLAGS_INIT   "${_ssc}")
+  set(CMAKE_CXX_FLAGS_INIT "${_ssc}")
+  set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -static-libstdc++ -static-libgcc")
+  ```
+
+  Built with:
+
+  ```sh
+  cmake -S . -B build/ssc338q -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-ssc338q.cmake
+  cmake --build build/ssc338q --target fpvd
+  ```
+
+  This mirrors the Makefile's `-march=armv7-a -mfpu=neon-vfpv4
+  -mfloat-abi=hard -Os` + static link. The C++ static link adds
+  `-static-libstdc++ -static-libgcc` (the C build did not need these).
+  The cross build produces only the `fpvd` binary; `fpvd_tests` stays a
+  host-build target (doctest runs on the dev machine, or under qemu-arm
+  per the parent spec's smoke plan), so `enable_testing()` and the test
+  executable are guarded to host builds.
+- **Nix dev shell:** `fpvd/shell.nix` gains the musl cross toolchain as
+  a build dep, mirroring `wfbng-dynamic-link/shell.nix`:
+
+  ```nix
+  packages = [
+    pkgs.cmake pkgs.ninja pkgs.pkg-config
+    pkgs.pkgsCross.armv7l-hf-multiplatform.pkgsMusl.stdenv.cc   # ssc338q gcc/g++
+  ];
+  ```
+
+  which supplies the `armv7l-unknown-linux-musleabihf-{gcc,g++}` the
+  toolchain file references.
 - **Buildroot:** `package/wfbng-dynamic-link/` stops building/
   installing `dl-applier` and its init/unit for fpvd targets — the
   logic ships inside `/usr/bin/fpvd`. `S99fpvd` already owns startup.
@@ -484,6 +530,10 @@ stays pinned.
    implementation against captured vectors (GS interop preserved).
 7. `video.codec` change while enabled → orchestrator bounces (as
    today) + controller restart-around (re-HELLO, caches cleared).
+8. The merged fpvd cross-compiles to a static armv7l/musl ssc338q
+   binary via `cmake/toolchain-ssc338q.cmake` (from the nix dev shell)
+   and runs on the drone — same build → `scp` workflow the standalone
+   `dl-applier` had.
 
 ## 15. Open questions / follow-ups
 
