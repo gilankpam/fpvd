@@ -253,10 +253,12 @@ they cannot appear in a diff) and `video.fps`. So `waybeamConfigDiff` **excludes
 the DL-owned fields when DL is enabled**:
 
 - `bitrate`/`qpDelta`/`roi` — locked, never in a diff anyway.
-- `fps` — not locked, but routed to waybeam through the existing
-  `dl_.setConfig()` reconcile (fired by `subs.dynamicLink`, `diff.cpp:20`,
-  `daemon.cpp:246-250`), not a direct `/set`, so fpvd never fights the control
-  loop over fps.
+- `fps` — not locked, but excluded from `waybeamConfigDiff` when DL is enabled.
+  An fps change updates the helloFps advertised to the GS via `dl_.setConfig()`
+  (fired by `subs.dynamicLink`, `diff.cpp:20`, `daemon.cpp:246-250`); the GS
+  then echoes a Decision back which the controller pushes to waybeam — GS-round-
+  trip-mediated, not a direct local `/set`. The new fps value is also committed
+  to `waybeam.json` by `rewriteWaybeamJson()`, so it survives a waybeam restart.
 
 A waybeam-only restart (e.g. a resolution change) while DL runs is safe: the
 controller talks to waybeam over HTTP with short timeouts and simply retries

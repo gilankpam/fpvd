@@ -265,7 +265,8 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // driven reinit would self-respawn and race our supervisor, so fpvd owns
         // the restart. No-op if waybeam is not currently supervised.
         if (encRestart) orch_.restart("waybeam");
-        // Hot path: no wfb restart. Route the in-process controller FIRST, so it
+        // Hot path: no wfb restart. Route the in-process controller before the
+        // link hot-apply blocks below, so it
         // runs regardless of which hot return is taken below (the deferred
         // nicChannel return detaches a worker and returns early). start() binds
         // sockets + launches the thread; setConfig() hot-reloads; stop() joins.

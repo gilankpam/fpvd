@@ -575,6 +575,47 @@ TEST_CASE("apply: RESTART encoder change rewrites file, issues no /set") {
     fs::remove_all(tmp);
 }
 
+TEST_CASE("apply: mixed LIVE+RESTART encoder change bounces only waybeam, no /set") {
+    FakeWbDaemon wb;
+    auto tmp = fs::temp_directory_path() / "fpvd-enc-mixed";
+    auto paths = makeRoutingPaths(tmp, 46813);
+    paths.dlEndpoints.encPort = static_cast<uint16_t>(wb.port);
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // Seed fakes so the waybeam-only bounce is observable.
+    auto& orch = d.orchestrator();
+    orch.add({"wfb_video_tx", {"/bin/sh", "-c", "sleep 30"}, {},
+              fpvd::RestartPolicy::Always, {}});
+    orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {},
+              fpvd::RestartPolicy::Always, {}});
+    orch.startAll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    pid_t wfbPid = orch.get("wfb_video_tx")->pid();
+    pid_t wbPid  = orch.get("waybeam")->pid();
+    REQUIRE(wfbPid > 0);
+    REQUIRE(wbPid > 0);
+
+    // resolution (RESTART) + gopSize (LIVE) in one apply, DL off. RESTART wins:
+    // the whole file is rewritten and only waybeam is bounced; no /set is issued.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"video":{"resolution":"1280x720","gopSize":2.0}})")).ok);
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    CHECK(wb.count() == 0);                                 // no /api/v1/set
+    std::ifstream wf(paths.waybeamJsonPath);
+    nlohmann::json wj; wf >> wj;
+    CHECK(wj["video0"]["size"] == "1280x720");             // RESTART field in file
+    CHECK(wj["video0"]["gopSize"] == 2.0);                 // LIVE field also in file
+    CHECK(orch.get("waybeam")->pid() != wbPid);            // waybeam bounced
+    CHECK(orch.get("wfb_video_tx")->pid() == wfbPid);      // wfb untouched
+
+    orch.stopAll();
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("apply: failed /api/v1/set fails the apply with effective unchanged") {
     auto tmp = fs::temp_directory_path() / "fpvd-enc-fail";
     auto paths = makeRoutingPaths(tmp, 46812);
