@@ -254,7 +254,7 @@ TEST_CASE("handlers: GET /status returns expected shape") {
     srv.stop(); fs::remove_all(tmp);
 }
 
-TEST_CASE("handlers: enabling dynamicLink surfaces dl_applier in /status") {
+TEST_CASE("handlers: enabling dynamicLink reports dl_applier in apply restarted; not in /status.processes") {
     auto tmp = fs::temp_directory_path() / "fpvd-handlers-dl-e2e";
     fs::remove_all(tmp);
     auto d = makeTestDaemon(tmp);
@@ -265,7 +265,7 @@ TEST_CASE("handlers: enabling dynamicLink surfaces dl_applier in /status") {
 
     httplib::Client c("http://127.0.0.1:18096");
 
-    // Before enabling: dl_applier not in /status.processes.
+    // Before enabling: dl_applier not in /status.processes (never a child process).
     auto s0 = c.Get("/status");
     REQUIRE(s0); CHECK(s0->status == 200);
     auto j0 = nlohmann::json::parse(s0->body);
@@ -273,7 +273,7 @@ TEST_CASE("handlers: enabling dynamicLink surfaces dl_applier in /status") {
     for (auto& p : j0["processes"]) if (p["name"] == "dl_applier") found0 = true;
     CHECK_FALSE(found0);
 
-    // PATCH + apply.
+    // PATCH + apply — dl_applier appears in restarted list (config change reported).
     c.Patch("/config", R"({"dynamicLink":{"enabled":true}})",
             "application/json");
     auto ap = c.Post("/apply", "", "application/json");
@@ -285,14 +285,14 @@ TEST_CASE("handlers: enabling dynamicLink surfaces dl_applier in /status") {
         if (r == "dl_applier") restartedDl = true;
     CHECK(restartedDl);
 
-    // After: dl_applier visible.
+    // After: dl_applier is in-process, NOT in /status.processes.
     auto s1 = c.Get("/status");
     auto j1 = nlohmann::json::parse(s1->body);
     bool found1 = false;
     for (auto& p : j1["processes"]) if (p["name"] == "dl_applier") found1 = true;
-    CHECK(found1);
+    CHECK_FALSE(found1);
 
-    // Flip back off + apply — dl_applier disappears.
+    // Flip back off + apply — still not in processes.
     c.Patch("/config", R"({"dynamicLink":{"enabled":false}})",
             "application/json");
     c.Post("/apply", "", "application/json");

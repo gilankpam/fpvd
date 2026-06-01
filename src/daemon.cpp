@@ -3,7 +3,6 @@
 #include "config/store.hpp"
 #include "config/validate.hpp"
 #include "supervise/radio.hpp"
-#include "translate/dynamic_link.hpp"
 #include "translate/telemetry.hpp"
 #include "translate/waybeam.hpp"
 #include "translate/wfb.hpp"
@@ -13,6 +12,7 @@
 #include <ctime>
 #include <fstream>
 #include <filesystem>
+#include <random>
 #include <thread>
 
 namespace fpvd {
@@ -24,8 +24,13 @@ static std::string nowIso() {
     return buf;
 }
 
-Daemon::Daemon(DaemonPaths paths) : paths_(std::move(paths)) {
+Daemon::Daemon(DaemonPaths paths) : paths_(std::move(paths)), dl_(paths_.dlEndpoints) {
+    dlGenerationId_ = std::random_device{}();
     startedAt_ = std::chrono::steady_clock::now();
+}
+
+Daemon::~Daemon() {
+    dl_.stop();
 }
 
 nlohmann::json Daemon::defaultsJson() {
@@ -51,6 +56,9 @@ void Daemon::bootstrap(bool startProcesses) {
         seedOrchestrator();
         orch_.startAll();
         reconcileBeamforming();
+        if (effective_.dynamicLink.enabled) {
+            dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface), dlGenerationId_);
+        }
     }
 }
 
@@ -101,16 +109,8 @@ void Daemon::seedOrchestrator() {
                      : RestartPolicy::Never;
         orch_.add(std::move(spec));
     }
-    if (effective_.dynamicLink.enabled) {
-        SupervisedSpec dl{};
-        dl.name = "dl_applier";
-        dl.argv = dynamicLinkArgs(effective_, iface);
-        dl.restart = RestartPolicy::Always;
-        dl.startAfter = {"wfb_video_tx", "wfb_tun", "waybeam"};
-        if (!telemetryName.empty()) dl.startAfter.push_back(telemetryName);
-        orch_.add(std::move(dl));
-    }
 }
+
 
 void Daemon::reconcileBeamforming() {
     const auto& bfc = effective_.link.beamforming;

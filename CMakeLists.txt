@@ -45,7 +45,7 @@ target_sources(fpvd_core PRIVATE
     src/translate/wfb.cpp
     src/translate/wfb_control.cpp
     src/translate/telemetry.cpp
-    src/translate/dynamic_link.cpp
+
     src/supervise/process.cpp
     src/supervise/supervisor.cpp
     src/supervise/orchestrator.cpp
@@ -82,8 +82,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/unit/test_translate_wfb.cpp
         tests/unit/test_wfb_control.cpp
         tests/unit/test_translate_telemetry.cpp
-        tests/unit/test_translate_dynamic_link.cpp
-        tests/unit/test_dl_applier_cli_assumptions.cpp
+
         tests/unit/test_dl_apply_direction.cpp
         tests/unit/test_dl_roi_qp.cpp
         tests/integration/test_process.cpp

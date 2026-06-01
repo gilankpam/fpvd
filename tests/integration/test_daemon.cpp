@@ -99,7 +99,7 @@ TEST_CASE("daemon: reset clears overlay") {
     fs::remove_all(tmp);
 }
 
-TEST_CASE("daemon: enabling dynamicLink seeds dl_applier in orchestrator") {
+TEST_CASE("daemon: dl_applier never in orchestrator (DynamicLinkController is in-process)") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-seed";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "rom" / "etc" / "fpvd");
@@ -116,21 +116,19 @@ TEST_CASE("daemon: enabling dynamicLink seeds dl_applier in orchestrator") {
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
-    // dl_applier is NOT present when disabled.
+    // dl_applier is never a supervised process; the controller is in-process.
     auto names = d.orchestrator().names();
     CHECK(std::find(names.begin(), names.end(), "dl_applier") == names.end());
 
-    // Enable + apply (without really restarting; we only need the orch
-    // re-seeded).
+    // Enable + apply — dl_applier still NOT in orchestrator.
     auto pr = d.patchPending(nlohmann::json::parse(
         R"({"dynamicLink":{"enabled":true}})"));
     CHECK(pr.ok);
     auto ar = d.apply(/*reallyRestart=*/false);
     CHECK(ar.ok);
 
-    // Now dl_applier should be in the orchestrator.
     names = d.orchestrator().names();
-    CHECK(std::find(names.begin(), names.end(), "dl_applier") != names.end());
+    CHECK(std::find(names.begin(), names.end(), "dl_applier") == names.end());
 
     fs::remove_all(tmp);
 }
