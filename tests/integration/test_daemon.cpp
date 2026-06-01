@@ -458,20 +458,38 @@ TEST_CASE("apply: restart-class encoder change while enabled bounces only waybea
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     REQUIRE(d.dynamicLinkStatus().running);
 
-    auto namesBefore = d.orchestrator().names();
+    // Seed the orchestrator with fakes so the waybeam-only bounce is observable:
+    // a real full rebuild would wipe/replace these; a hot apply preserves them,
+    // and the restart-class path bounces only "waybeam".
+    auto& orch = d.orchestrator();
+    orch.add({"wfb_video_tx", {"/bin/sh", "-c", "sleep 30"}, {},
+              fpvd::RestartPolicy::Always, {}});
+    orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {},
+              fpvd::RestartPolicy::Always, {}});
+    orch.startAll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    auto namesBefore = orch.names();
+    pid_t wfbPid = orch.get("wfb_video_tx")->pid();
+    pid_t wbPid  = orch.get("waybeam")->pid();
+    REQUIRE(wfbPid > 0);
+    REQUIRE(wbPid > 0);
 
     // A resolution change is a RESTART-class encoder field, NOT dynamic-link-
-    // locked and NOT a dynamicLink input -- so it no longer rebuilds the
-    // orchestrator and the controller is never bounced.
+    // locked and NOT a dynamicLink input -- it bounces only waybeam, no rebuild.
     REQUIRE(d.patchPending(nlohmann::json::parse(
         R"({"video":{"resolution":"1280x720"}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
     CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder")
           != ar.restarted.end());
-    CHECK(d.orchestrator().names() == namesBefore);   // no full rebuild
-    CHECK(d.dynamicLinkStatus().running);             // controller untouched
+    CHECK(orch.names() == namesBefore);                    // no full rebuild
+    CHECK(orch.get("waybeam")->pid() != wbPid);            // waybeam bounced
+    CHECK(orch.get("wfb_video_tx")->pid() == wfbPid);      // wfb untouched
+    CHECK(d.dynamicLinkStatus().running);                  // controller untouched
 
+    orch.stopAll();
     fs::remove_all(tmp);
 }
 
@@ -506,7 +524,16 @@ TEST_CASE("apply: LIVE encoder change pushes /api/v1/set, no rebuild") {
     paths.dlEndpoints.encPort = static_cast<uint16_t>(wb.port);  // point at fake waybeam
     fpvd::Daemon d(paths);
     d.bootstrap(false);
-    auto namesBefore = d.orchestrator().names();
+
+    // Seed a fake "waybeam" so we can prove the LIVE path does NOT bounce it.
+    auto& orch = d.orchestrator();
+    orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {},
+              fpvd::RestartPolicy::Always, {}});
+    orch.startAll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    auto namesBefore = orch.names();
+    pid_t wbPid = orch.get("waybeam")->pid();
+    REQUIRE(wbPid > 0);
 
     // DL disabled -> bitrate is fpvd-owned and LIVE.
     REQUIRE(d.patchPending(nlohmann::json::parse(
@@ -516,9 +543,11 @@ TEST_CASE("apply: LIVE encoder change pushes /api/v1/set, no rebuild") {
 
     REQUIRE(wb.count() == 1);
     CHECK(wb.last().find("video0.bitrate=4096") != std::string::npos);
-    CHECK(d.orchestrator().names() == namesBefore);   // no rebuild
+    CHECK(orch.names() == namesBefore);                 // no rebuild
+    CHECK(orch.get("waybeam")->pid() == wbPid);         // LIVE push does not bounce waybeam
     CHECK(d.effective().video.bitrate == 4096);
 
+    orch.stopAll();
     fs::remove_all(tmp);
 }
 

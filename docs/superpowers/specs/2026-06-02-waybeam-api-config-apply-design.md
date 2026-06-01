@@ -265,6 +265,19 @@ decisions are unaffected. The DL controller is **not** bounced on a waybeam-only
 restart (unlike the full-rebuild path's restart-around, which is needed only
 because wfb bounces there).
 
+**Accepted limitation — disable-transition clobber window.** An apply that
+*both* disables dynamic-link and changes a DL-owned LIVE field in one request
+(e.g. `{"dynamicLink":{"enabled":false},"video":{"bitrate":X}}`) is allowed (the
+PATCH lock keys on `enabled`, so it passes once `enabled:false`). In `apply()`
+the LIVE `/set` of `X` runs pre-commit while the controller is still running, and
+`dl_.stop()` runs in the post-commit hot path — so a GS decision arriving in that
+microsecond window can momentarily overwrite `X`. This is self-healing: the
+committed `waybeam.json` holds `X`, so the next waybeam restart restores it, and
+the controller is gone thereafter. We deliberately do NOT stop the controller
+before the pre-commit push: doing so would, on a push failure, leave the
+controller stopped while `effective_.dynamicLink.enabled` stays true (a
+persistent inconsistency strictly worse than the transient, self-healing race).
+
 ## Testing
 
 - Unit — `waybeamConfigDiff`: live/restart bucketing; codec excluded; DL-owned

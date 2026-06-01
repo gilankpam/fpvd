@@ -219,12 +219,15 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     for (auto& n : subs.servicesAffected) restarted.push_back(n);
     if (bfChanged) restarted.push_back("beamforming");
 
-    // A rebuild bounces the whole orchestrator (including wfb). It is needed
-    // only when a non-link subsystem changes, or when a link change cannot be
-    // hot-applied (linkId / wlanAdapter). A dynamicLink-only change (or an
-    // mtu-only change consumed by the controller) is NOT a rebuild: it hot-
-    // reloads the controller. A video.fps change still rebuilds via subs.encoder
-    // (the restart-around re-snapshots the controller after startAll).
+    // A rebuild bounces the whole orchestrator (including wfb). It is needed only
+    // when a non-link subsystem changes (telemetry/services), or when a link
+    // change cannot be hot-applied (linkId / wlanAdapter). A dynamicLink-only
+    // change (or an mtu-only change consumed by the controller) is NOT a rebuild:
+    // it hot-reloads the controller. Encoder changes are NOT rebuilds either —
+    // LIVE fields are pushed to waybeam (/api/v1/set) and restart-class fields
+    // bounce only waybeam (see encRestart). A video.fps change is a LIVE /set
+    // when DL is off, and is routed through dl_.setConfig() when DL is on (fps is
+    // excluded from waybeamConfigDiff there).
 
     if (reallyRestart && needsRebuild) {
         // Full-restart path: rebuild orchestrator + radio bring-up. The in-process
