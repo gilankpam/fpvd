@@ -27,6 +27,7 @@ target_include_directories(fpvd_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(fpvd_core PUBLIC third_party Threads::Threads)
 target_sources(fpvd_core PRIVATE
     src/dynlink/dedup.cpp
+    src/dynlink/roi_qp.cpp
     src/dynlink/watchdog.cpp
     src/dynlink/wire.cpp
     src/config/store.cpp
@@ -76,6 +77,8 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/unit/test_translate_telemetry.cpp
         tests/unit/test_translate_dynamic_link.cpp
         tests/unit/test_dl_applier_cli_assumptions.cpp
+        tests/unit/test_dl_apply_direction.cpp
+        tests/unit/test_dl_roi_qp.cpp
         tests/integration/test_process.cpp
         tests/integration/test_supervisor.cpp
         tests/integration/test_orchestrator.cpp
