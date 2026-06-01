@@ -94,7 +94,19 @@ void Daemon::seedOrchestrator() {
               wfbArgs(effective_, WfbRole::TlmRx, iface, key), {}));
     orch_.add(wfbSpec("wfb_tlm_tx",
               wfbArgs(effective_, WfbRole::TlmTx, iface, key), {}));
-    orch_.add(wfbSpec("waybeam", {"/usr/bin/waybeam"}, {"wfb_video_tx"}));
+    // Launch waybeam through a guard that first kills any stray /usr/bin/waybeam
+    // fpvd does not own — e.g. one that self-respawned out of supervision when an
+    // operator manually hit waybeam's /api/v1/restart (the new process reparents
+    // to init). Without this, fpvd loses the live process and crash-loops doomed
+    // replacements that collide with the orphan over the SoC video hardware, and
+    // never recovers without a reboot. The guard runs as the child before exec,
+    // so its own (sh) comm never matches "waybeam"; the 1s pause after a kill
+    // lets the SigmaStar driver release the orphan's pipeline before re-init.
+    orch_.add(wfbSpec("waybeam",
+        {"/bin/sh", "-c",
+         "K=0; for p in $(pidof waybeam); do kill -9 \"$p\" 2>/dev/null && K=1; done; "
+         "[ \"$K\" = 1 ] && sleep 1; exec /usr/bin/waybeam"},
+        {"wfb_video_tx"}));
     auto tArgs = telemetryArgs(effective_);
     if (!tArgs.empty() && !telemetryName.empty()) {
         orch_.add(wfbSpec(telemetryName, std::move(tArgs),
