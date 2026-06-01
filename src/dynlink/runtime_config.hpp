@@ -44,7 +44,12 @@ struct DlStatus {                         // published by the loop, read by HTTP
 
 // Pinned production endpoints; overridable in tests.
 struct Endpoints {
-    std::string  listenAddr{"0.0.0.0"};    uint16_t listenPort{5800};
+    // listenPort is 9999 (not the dynamic-link drone.conf sample's 5800):
+    // wfb_tun's default listen_port is 5800, so binding 5800 here collides
+    // with the wfb tunnel — both bind 0.0.0.0:5800, the kernel splits the
+    // tunnel frames, and wfb_tun aborts on a corrupted packet. The standalone
+    // dl-applier used 9999 for exactly this reason.
+    std::string  listenAddr{"0.0.0.0"};    uint16_t listenPort{9999};
     std::string  wfbCtlAddr{"127.0.0.1"};  uint16_t wfbCtlPort{8000};
     std::string  encHost{"127.0.0.1"};     uint16_t encPort{80};
     std::string  idrAddr{"0.0.0.0"};       uint16_t idrPort{11223};
