@@ -27,6 +27,7 @@ target_include_directories(fpvd_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(fpvd_core PUBLIC third_party Threads::Threads)
 target_sources(fpvd_core PRIVATE
     src/dynlink/dedup.cpp
+    src/dynlink/watchdog.cpp
     src/dynlink/wire.cpp
     src/config/store.cpp
     src/config/validate.cpp
@@ -59,6 +60,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_link_libraries(fpvd_tests PRIVATE fpvd_core)
     target_sources(fpvd_tests PRIVATE
         tests/unit/test_dl_dedup.cpp
+        tests/unit/test_dl_watchdog.cpp
         tests/unit/test_dl_wire.cpp
         tests/unit/test_link_width.cpp
         tests/unit/test_sanity.cpp
