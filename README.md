@@ -69,12 +69,20 @@ controller mutates them at runtime: `link.mcs`, `link.txpower`,
 `video.roi`. To edit a baseline, disable `dynamicLink.enabled`, PATCH
 the field, then re-enable.
 
-**Hot-reloadable knobs.** All `dynamicLink.*` knobs (`dynamicLink.safe`,
-`dynamicLink.roiQp`, etc.) as well as `link.mtu` and `video.fps` are
-hot-reloadable: changing them and calling `POST /apply` applies the new
-values live **without bouncing wfb or waybeam** (no video blackout).
-Toggling `dynamicLink.enabled` via `/apply` starts or stops the
-in-process loop without restarting the rest of the stack.
+**Hot-reloadable knobs (no bounce).** All `dynamicLink.*` knobs
+(`dynamicLink.safe`, `dynamicLink.roiQp`, timeouts, stagger/pacing,
+OSD toggle, etc.) and `link.mtu` apply live via `POST /apply` —
+re-snapshotting the in-process controller **without bouncing wfb or
+waybeam** (no video blackout). Toggling `dynamicLink.enabled` via
+`/apply` starts or stops the in-process loop without restarting the
+rest of the stack.
+
+**Baseline video changes (brief bounce).** `video.fps` and other
+`video.*` baseline changes still trigger a full encoder rebuild (a
+brief wfb/waybeam bounce, as before). When `dynamicLink.enabled` is
+true the controller is stopped and restarted around the bounce
+(restart-around) and re-announces HELLO with the updated parameters.
+`video.fps` is **not** in the no-bounce list.
 
 **`/status` block.** `GET /status` includes a `dynamicLink` key:
 
