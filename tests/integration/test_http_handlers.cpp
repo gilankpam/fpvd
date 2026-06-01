@@ -254,7 +254,7 @@ TEST_CASE("handlers: GET /status returns expected shape") {
     srv.stop(); fs::remove_all(tmp);
 }
 
-TEST_CASE("handlers: enabling dynamicLink reports dl_applier in apply restarted; not in /status.processes") {
+TEST_CASE("handlers: enabling dynamicLink reports dynamicLink in apply restarted; not in /status.processes") {
     auto tmp = fs::temp_directory_path() / "fpvd-handlers-dl-e2e";
     fs::remove_all(tmp);
     auto d = makeTestDaemon(tmp);
@@ -265,15 +265,16 @@ TEST_CASE("handlers: enabling dynamicLink reports dl_applier in apply restarted;
 
     httplib::Client c("http://127.0.0.1:18096");
 
-    // Before enabling: dl_applier not in /status.processes (never a child process).
+    // Before enabling: the controller is never surfaced as a /status process.
     auto s0 = c.Get("/status");
     REQUIRE(s0); CHECK(s0->status == 200);
     auto j0 = nlohmann::json::parse(s0->body);
     bool found0 = false;
-    for (auto& p : j0["processes"]) if (p["name"] == "dl_applier") found0 = true;
+    for (auto& p : j0["processes"])
+        if (p["name"] == "dl_applier" || p["name"] == "dynamicLink") found0 = true;
     CHECK_FALSE(found0);
 
-    // PATCH + apply — dl_applier appears in restarted list (config change reported).
+    // PATCH + apply — "dynamicLink" appears in restarted list (config reported).
     c.Patch("/config", R"({"dynamicLink":{"enabled":true}})",
             "application/json");
     auto ap = c.Post("/apply", "", "application/json");
@@ -282,14 +283,15 @@ TEST_CASE("handlers: enabling dynamicLink reports dl_applier in apply restarted;
     CHECK(japp["applied"] == true);
     bool restartedDl = false;
     for (auto& r : japp["restarted"])
-        if (r == "dl_applier") restartedDl = true;
+        if (r == "dynamicLink") restartedDl = true;
     CHECK(restartedDl);
 
-    // After: dl_applier is in-process, NOT in /status.processes.
+    // After: the controller is in-process, NOT in /status.processes.
     auto s1 = c.Get("/status");
     auto j1 = nlohmann::json::parse(s1->body);
     bool found1 = false;
-    for (auto& p : j1["processes"]) if (p["name"] == "dl_applier") found1 = true;
+    for (auto& p : j1["processes"])
+        if (p["name"] == "dl_applier" || p["name"] == "dynamicLink") found1 = true;
     CHECK_FALSE(found1);
 
     // Flip back off + apply — still not in processes.
@@ -299,7 +301,8 @@ TEST_CASE("handlers: enabling dynamicLink reports dl_applier in apply restarted;
     auto s2 = c.Get("/status");
     auto j2 = nlohmann::json::parse(s2->body);
     bool found2 = false;
-    for (auto& p : j2["processes"]) if (p["name"] == "dl_applier") found2 = true;
+    for (auto& p : j2["processes"])
+        if (p["name"] == "dl_applier" || p["name"] == "dynamicLink") found2 = true;
     CHECK_FALSE(found2);
 
     srv.stop(); fs::remove_all(tmp);

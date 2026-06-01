@@ -156,7 +156,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
 
     auto subs = diffSubsystems(effective_, pending_);
     auto link = classifyLinkChange(effective_, pending_);
-    const bool wasDlEnabled = effective_.dynamicLink.enabled;
+    const bool enabledOld = effective_.dynamicLink.enabled;
 
     // Beamforming is reconciled (not exec-supervised); report it as restarted
     // when its own block or the derived modulation width changed.
@@ -173,26 +173,36 @@ ApplyResult Daemon::apply(bool reallyRestart) {
 
     effective_ = pending_;
     rewriteWaybeamJson();
+    const bool enabledNew = effective_.dynamicLink.enabled;
 
     std::vector<std::string> restarted;
     if (subs.radio) restarted.push_back("radio");
     if (subs.encoder) restarted.push_back("encoder");
     if (subs.telemetry) restarted.push_back("telemetry");
+    // The in-process DynamicLinkController is hot-reloaded (start/stop/setConfig)
+    // — never bounced with wfb. Report it as "dynamicLink" when its config moves
+    // while it is (or becomes) active, or when it is being toggled on/off.
     const bool dlAffects =
-        subs.dynamicLink && (wasDlEnabled || effective_.dynamicLink.enabled);
-    if (dlAffects) restarted.push_back("dl_applier");
+        subs.dynamicLink && (enabledOld || enabledNew);
+    if (dlAffects) restarted.push_back("dynamicLink");
     for (auto& n : subs.servicesAffected) restarted.push_back(n);
     if (bfChanged) restarted.push_back("beamforming");
 
     // A rebuild bounces the whole orchestrator (including wfb). It is needed
     // only when a non-link subsystem changes, or when a link change cannot be
-    // hot-applied (linkId / wlanAdapter). dlAffects keeps an mtu-only change
-    // on the hot path when DL is off, but rebuilds when DL consumes it.
-    const bool needsRebuild = subs.encoder || subs.telemetry || dlAffects ||
+    // hot-applied (linkId / wlanAdapter). A dynamicLink-only change (or an
+    // mtu-only change consumed by the controller) is NOT a rebuild: it hot-
+    // reloads the controller. A video.fps change still rebuilds via subs.encoder
+    // (the restart-around re-snapshots the controller after startAll).
+    const bool needsRebuild = subs.encoder || subs.telemetry ||
         !subs.servicesAffected.empty() || link.fullRestart;
 
     if (reallyRestart && needsRebuild) {
-        // Full-restart path (unchanged): rebuild orchestrator + radio bring-up.
+        // Full-restart path: rebuild orchestrator + radio bring-up. The in-process
+        // controller is stopped first (clean stop while wfb is still up) and
+        // restarted after startAll() — a "restart-around" so a rebuild for a
+        // non-DL reason (e.g. encoder/fps) does not leave the controller dead.
+        if (enabledOld) dl_.stop();
         orch_.stopAll();
         orch_ = Orchestrator{};
         if (subs.radio) {
@@ -207,13 +217,29 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         seedOrchestrator();
         orch_.startAll();
         reconcileBeamforming();
+        // Start AFTER radio_ is refreshed so the snapshot's iface is fresh.
+        if (enabledNew)
+            dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface),
+                      dlGenerationId_);
         version_++;
         lastApply_ = {nowIso(), true, restarted, std::nullopt};
         return {true, {}, restarted, std::nullopt, version_};
     }
 
     if (reallyRestart) {
-        // Hot path: a purely hot-applicable link change — no wfb restart.
+        // Hot path: no wfb restart. Route the in-process controller FIRST, so it
+        // runs regardless of which hot return is taken below (the deferred
+        // nicChannel return detaches a worker and returns early). start() binds
+        // sockets + launches the thread; setConfig() hot-reloads; stop() joins.
+        if (!enabledOld && enabledNew)
+            dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface),
+                      dlGenerationId_);
+        else if (enabledOld && !enabledNew)
+            dl_.stop();
+        else if (enabledOld && enabledNew && subs.dynamicLink)
+            dl_.setConfig(dynlink::buildDlSnapshot(effective_, radio_.iface));
+
+        // A purely hot-applicable link change — no wfb restart.
         // (A) Immediate, non-link-dropping changes.
         if (link.nicTxpower) {
             auto rr = tuneRadio(paths_.radioTuneScript, "txpower", effective_,

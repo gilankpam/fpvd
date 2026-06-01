@@ -133,7 +133,7 @@ TEST_CASE("daemon: dl_applier never in orchestrator (DynamicLinkController is in
     fs::remove_all(tmp);
 }
 
-TEST_CASE("daemon: dl_applier in restarted-list when safe.* changes while DL is enabled") {
+TEST_CASE("daemon: dynamicLink in restarted-list when safe.* changes while DL is enabled") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-restarted";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "rom" / "etc" / "fpvd");
@@ -154,18 +154,18 @@ TEST_CASE("daemon: dl_applier in restarted-list when safe.* changes while DL is 
     d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})"));
     REQUIRE(d.apply(/*reallyRestart=*/false).ok);
 
-    // Now change a safe.* knob: dl_applier should appear in restarted.
+    // Now change a safe.* knob: dynamicLink should appear in restarted.
     d.patchPending(nlohmann::json::parse(
         R"({"dynamicLink":{"safe":{"mcs":3}}})"));
     auto ar = d.apply(/*reallyRestart=*/false);
     REQUIRE(ar.ok);
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dl_applier")
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink")
           != ar.restarted.end());
 
     fs::remove_all(tmp);
 }
 
-TEST_CASE("daemon: dl_applier NOT in restarted-list when safe.* changes while DL is disabled") {
+TEST_CASE("daemon: dynamicLink NOT in restarted-list when safe.* changes while DL is disabled") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-not-restarted";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "rom" / "etc" / "fpvd");
@@ -182,18 +182,18 @@ TEST_CASE("daemon: dl_applier NOT in restarted-list when safe.* changes while DL
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
-    // DL stays disabled. Change a safe knob: dl_applier should NOT be reported.
+    // DL stays disabled. Change a safe knob: dynamicLink should NOT be reported.
     d.patchPending(nlohmann::json::parse(
         R"({"dynamicLink":{"safe":{"mcs":3}}})"));
     auto ar = d.apply(/*reallyRestart=*/false);
     REQUIRE(ar.ok);
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dl_applier")
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink")
           == ar.restarted.end());
 
     fs::remove_all(tmp);
 }
 
-TEST_CASE("daemon: dl_applier IN restarted-list when DL is being disabled (transition)") {
+TEST_CASE("daemon: dynamicLink IN restarted-list when DL is being disabled (transition)") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-disable-restart";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "rom" / "etc" / "fpvd");
@@ -214,11 +214,11 @@ TEST_CASE("daemon: dl_applier IN restarted-list when DL is being disabled (trans
     d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})"));
     REQUIRE(d.apply(/*reallyRestart=*/false).ok);
 
-    // Now disable DL — the apply still touches dl_applier (it stops).
+    // Now disable DL — the apply still touches dynamicLink (it stops).
     d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":false}})"));
     auto ar = d.apply(/*reallyRestart=*/false);
     REQUIRE(ar.ok);
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dl_applier")
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink")
           != ar.restarted.end());
 
     fs::remove_all(tmp);
@@ -345,5 +345,128 @@ TEST_CASE("daemon: width change defers channel retune via tune script") {
     std::getline(f, line);
     CHECK(line.find("action=channel") != std::string::npos);
     CHECK(line.find("width=40") != std::string::npos);
+    fs::remove_all(tmp);
+}
+
+// ---- apply() controller routing (Task 20) ----------------------------------
+//
+// These exercise POST /apply with reallyRestart=true so the in-process
+// DynamicLinkController is actually started/stopped/hot-reloaded. The endpoints
+// are pinned to ephemeral test ports so the controller thread binds without
+// colliding with prod ports; unreachable backends are tolerated (decisions fail
+// soft). Assertions are on dynamicLinkStatus().running and orchestrator process
+// identity (orchestrator().names()), not on real wfb_tx dispatch.
+
+// Build a DaemonPaths whose dlEndpoints use harmless ephemeral test ports.
+static fpvd::DaemonPaths makeRoutingPaths(const fs::path& tmp, uint16_t listenPort) {
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
+                  fs::copy_options::overwrite_existing);
+
+    fpvd::DaemonPaths paths{};
+    paths.defaultsPath = (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string();
+    paths.overlayPath = (tmp / "etc" / "fpvd" / "config.json").string();
+    paths.radioUpScript = "tests/fixtures/fake_radio_up_ok.sh";
+    paths.waybeamJsonPath = (tmp / "etc" / "waybeam.json").string();
+    paths.radioTuneScript = "tests/fixtures/fake_radio_tune.sh";
+    // Ephemeral test endpoints: listen on a free high port, IDR disabled (0),
+    // GS tunnel off (0), backends point at unbound ports (connect fails soft).
+    paths.dlEndpoints.listenAddr = "127.0.0.1";
+    paths.dlEndpoints.listenPort = listenPort;
+    paths.dlEndpoints.wfbCtlAddr = "127.0.0.1";
+    paths.dlEndpoints.wfbCtlPort = 0;
+    paths.dlEndpoints.encHost = "127.0.0.1";
+    paths.dlEndpoints.encPort = 0;
+    paths.dlEndpoints.idrPort = 0;
+    paths.dlEndpoints.gsTunnelPort = 0;
+    paths.dlEndpoints.osdMsgPath = (tmp / "MSPOSD.msg").string();
+    return paths;
+}
+
+TEST_CASE("apply: dynamicLink knob change hot-reloads, no orchestrator rebuild") {
+    auto tmp = fs::temp_directory_path() / "fpvd-route-knob";
+    auto paths = makeRoutingPaths(tmp, 46800);
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // Enable DL and apply for real so the controller is running.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+    REQUIRE(d.dynamicLinkStatus().running);
+
+    // Record orchestrator process identity before the knob change.
+    auto namesBefore = d.orchestrator().names();
+
+    // Change a safe.* knob — a pure dynamicLink change.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"safe":{"mcs":3}}})")).ok);
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);
+
+    // Orchestrator NOT rebuilt: process set unchanged.
+    auto namesAfter = d.orchestrator().names();
+    CHECK(namesAfter == namesBefore);
+    // Controller still running (hot setConfig, not stop/start).
+    CHECK(d.dynamicLinkStatus().running);
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("apply: enabled false->true starts controller; true->false stops it") {
+    auto tmp = fs::temp_directory_path() / "fpvd-route-toggle";
+    auto paths = makeRoutingPaths(tmp, 46801);
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // Initially disabled, not running.
+    CHECK_FALSE(d.dynamicLinkStatus().running);
+    auto namesBefore = d.orchestrator().names();
+
+    // false -> true: starts the controller, no full rebuild needed for this alone.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+    CHECK(d.dynamicLinkStatus().running);
+    CHECK(d.orchestrator().names() == namesBefore);  // no rebuild
+
+    // true -> false: stops the controller.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":false}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+    CHECK_FALSE(d.dynamicLinkStatus().running);
+    CHECK(d.orchestrator().names() == namesBefore);  // still no rebuild
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("apply: encoder change while enabled rebuilds + restart-around") {
+    auto tmp = fs::temp_directory_path() / "fpvd-route-encoder";
+    auto paths = makeRoutingPaths(tmp, 46802);
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // Enable DL and apply so the controller is running, then seed orchestrator.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+    REQUIRE(d.dynamicLinkStatus().running);
+
+    // An encoder change forces a rebuild. The controller is stopped before
+    // stopAll and restarted after startAll; it ends running. video.codec is an
+    // encoder-only change that is NOT dynamic-link-locked (unlike video.bitrate)
+    // and is NOT a dynamicLink input (only video.fps is).
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"video":{"codec":"h264"}})")).ok);
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder")
+          != ar.restarted.end());
+    // Controller survived the restart-around and is running again.
+    CHECK(d.dynamicLinkStatus().running);
+
     fs::remove_all(tmp);
 }
