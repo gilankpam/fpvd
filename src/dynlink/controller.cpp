@@ -104,7 +104,7 @@ static int disarmGap(int gapFd) {
 // ---- lifecycle --------------------------------------------------------------
 
 DynamicLinkController::DynamicLinkController(Endpoints ep)
-    : ep_(std::move(ep)) {}
+    : ep_(std::move(ep)), wb_(ep_.encHost, ep_.encPort) {}
 
 DynamicLinkController::~DynamicLinkController() {
     stop();
@@ -121,7 +121,7 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap, uint32_t generati
     // Construct backend clients fresh from the snapshot + endpoints. They are
     // used only from the run() thread, so no locking is needed on them.
     wfb_      = std::make_unique<WfbControlClient>(ep_.wfbCtlAddr, ep_.wfbCtlPort);
-    enc_.emplace(ep_.encHost, ep_.encPort, snap.minIdrIntervalMs, snap.roiQp);
+    enc_.emplace(wb_, snap.minIdrIntervalMs, snap.roiQp);
     radio_.emplace(snap.iface);
     osd_.emplace(ep_.osdMsgPath, snap.osdEnabled, ep_.osdUpdateIntervalMs, snap.osdDebugLatency);
     watchdog_.emplace(snap.healthTimeoutMs);

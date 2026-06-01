@@ -2,6 +2,7 @@
  * Defaults: threshold=6000, anchor=2000, floor=-24, step=3. */
 #include "doctest.h"
 #include "dynlink/encoder_client.hpp"
+#include "waybeam/client.hpp"
 #include <httplib.h>
 #include <mutex>
 #include <thread>
@@ -51,9 +52,8 @@ struct FakeSrv {
 TEST_CASE("EncoderClient applies bitrate+roiQp+fps, diffs, throttles IDR") {
     FakeSrv f;
 
-    EncoderClient enc("127.0.0.1", static_cast<uint16_t>(f.port),
-                      /*minIdrIntervalMs=*/500,
-                      RoiCurve{6000, 2000, -24, 3});
+    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
+    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
 
     // bitrate 6000 -> roiQp 0; fps 60
     CHECK(enc.apply(6000, 60) == 0);
@@ -75,8 +75,8 @@ TEST_CASE("EncoderClient applies bitrate+roiQp+fps, diffs, throttles IDR") {
 // ---------------------------------------------------------------------------
 TEST_CASE("EncoderClient emits signed roiQp when starved") {
     FakeSrv f;
-    EncoderClient enc("127.0.0.1", static_cast<uint16_t>(f.port),
-                      500, RoiCurve{6000, 2000, -24, 3});
+    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
+    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
 
     CHECK(enc.apply(4000, 60) == 0);
     // At 4000 kbps with defaults, roiQp = -12
@@ -87,8 +87,8 @@ TEST_CASE("EncoderClient emits signed roiQp when starved") {
 
 TEST_CASE("EncoderClient emits roiQp=0 above threshold") {
     FakeSrv f;
-    EncoderClient enc("127.0.0.1", static_cast<uint16_t>(f.port),
-                      500, RoiCurve{6000, 2000, -24, 3});
+    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
+    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
 
     CHECK(enc.apply(8000, 60) == 0);
     // Bug-fix assertion: at 8000 kbps roiQp = 0, still send fpv.roiQp=0
@@ -98,8 +98,8 @@ TEST_CASE("EncoderClient emits roiQp=0 above threshold") {
 
 TEST_CASE("EncoderClient deduplicates repeat apply") {
     FakeSrv f;
-    EncoderClient enc("127.0.0.1", static_cast<uint16_t>(f.port),
-                      500, RoiCurve{6000, 2000, -24, 3});
+    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
+    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
 
     enc.apply(4000, 60);
     size_t n1 = f.count();
@@ -114,8 +114,8 @@ TEST_CASE("EncoderClient different bitrate same roiQp is NOT deduped") {
     //   3950: span=4000, delta=1950, raw=(-24*2050)/4000=-12 (truncated), q=-12
     // The dedup key includes raw bitrate, so BOTH must produce HTTP hits.
     FakeSrv f;
-    EncoderClient enc("127.0.0.1", static_cast<uint16_t>(f.port),
-                      500, RoiCurve{6000, 2000, -24, 3});
+    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
+    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
 
     enc.apply(4000, 60);
     size_t n1 = f.count();
@@ -128,8 +128,8 @@ TEST_CASE("EncoderClient different bitrate same roiQp is NOT deduped") {
 
 TEST_CASE("EncoderClient bitrate=0 is no-op sentinel") {
     FakeSrv f;
-    EncoderClient enc("127.0.0.1", static_cast<uint16_t>(f.port),
-                      500, RoiCurve{6000, 2000, -24, 3});
+    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
+    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
 
     CHECK(enc.apply(0, 60) == 0);
     CHECK(f.count() == 0);  // no HTTP request
@@ -138,8 +138,8 @@ TEST_CASE("EncoderClient bitrate=0 is no-op sentinel") {
 TEST_CASE("EncoderClient applySafe uses compute formula") {
     FakeSrv f;
     // safe bitrate 2000 -> floor -24
-    EncoderClient enc("127.0.0.1", static_cast<uint16_t>(f.port),
-                      500, RoiCurve{6000, 2000, -24, 3});
+    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
+    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
 
     CHECK(enc.applySafe(2000) == 0);
     REQUIRE(f.count() > 0);
@@ -151,8 +151,8 @@ TEST_CASE("EncoderClient applySafe uses compute formula") {
 
 TEST_CASE("EncoderClient fps=0 omits video0.fps from query") {
     FakeSrv f;
-    EncoderClient enc("127.0.0.1", static_cast<uint16_t>(f.port),
-                      500, RoiCurve{6000, 2000, -24, 3});
+    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
+    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
 
     // fps=0 -> video0.fps not emitted
     CHECK(enc.apply(6000, 0) == 0);
@@ -168,8 +168,8 @@ TEST_CASE("EncoderClient IDR throttle arms on any attempt including failure") {
     int dead_port = dead.bind_to_any_port("127.0.0.1");
     dead.stop();  // stop before listen; connections will be refused
 
-    EncoderClient enc("127.0.0.1", static_cast<uint16_t>(dead_port),
-                      500, RoiCurve{6000, 2000, -24, 3});
+    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(dead_port));
+    EncoderClient enc(wb, 500, RoiCurve{6000, 2000, -24, 3});
     enc.setMinIdrInterval(500);
 
     (void)enc.requestIdr(1000);  // may fail (-1) but arms throttle
@@ -180,8 +180,8 @@ TEST_CASE("EncoderClient IDR throttle arms on any attempt including failure") {
 
 TEST_CASE("EncoderClient setRoiCurve hot reconcile") {
     FakeSrv f;
-    EncoderClient enc("127.0.0.1", static_cast<uint16_t>(f.port),
-                      500, RoiCurve{6000, 2000, -24, 3});
+    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
+    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
 
     enc.apply(4000, 60);  // roiQp=-12 cached
     size_t n1 = f.count();
