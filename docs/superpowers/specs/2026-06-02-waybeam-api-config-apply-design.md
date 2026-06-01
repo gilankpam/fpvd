@@ -166,8 +166,8 @@ diff-suppression, IDR throttle) but stops owning host/port/httplib. It takes a
 `WaybeamClient&`; `apply`/`applySafe` build the `{video0.bitrate, fpv.roiQp,
 [video0.fps]}` map → `client.setFields(...)`; `requestIdr` → `client.get(
 "/request/idr")`. Query strings, timeouts, and dedup are unchanged, so existing
-DL tests stay green. Removes the duplicated `encHost/encPort` constants
-(`dynlink/runtime_config.hpp:59`) in favor of the single daemon-owned endpoint.
+DL tests stay green. The controller owns a `WaybeamClient` (built from its
+`Endpoints`, `encHost/encPort`) and passes it by reference to its `EncoderClient`.
 
 ### Translator + diff (`src/translate/waybeam.{hpp,cpp}`)
 
@@ -192,9 +192,11 @@ running. waybeam's `startAfter wfb_video_tx` dependency is already satisfied
 
 ### Daemon (`src/daemon.cpp`)
 
-`Daemon` constructs the single `WaybeamClient` (endpoint default `127.0.0.1:80`,
-one config source) and injects it into the DL controller's `EncoderClient`.
-`apply()` is restructured (see below). `validate()` gains the `codec == "h265"`
+`Daemon` owns its own `WaybeamClient` for the apply path (endpoint from
+`DaemonPaths.dlEndpoints`, default `127.0.0.1:80`) — the same shared transport
+class the controller uses, as two cheap stateless instances reading one endpoint
+definition. `apply()` is restructured (see below). `validate()` gains the
+`codec == "h265"`
 check.
 
 ## `apply()` control flow (restructured)
