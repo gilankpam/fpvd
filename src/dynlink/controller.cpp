@@ -2,6 +2,7 @@
 
 #include "dynlink/apply_direction.hpp"
 
+#include <cassert>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <poll.h>
@@ -190,10 +191,12 @@ void DynamicLinkController::run(int evfd) {
     // so it is immune to the eventFd_.exchange(-1) in stopLocked().
 
     // Snapshot the config once for the lifetime of this run() (Task 17 will
-    // add hot-reconcile on the eventfd wake). cfg_ is stable across start().
+    // add hot-reconcile on the eventfd wake). cfg_ is always set in start()
+    // before this thread is launched, so cfgPtr must never be null here.
     std::shared_ptr<const DlRuntimeConfig> cfgPtr;
     { std::lock_guard<std::mutex> cg(cfgMu_); cfgPtr = cfg_; }
-    const DlRuntimeConfig cfg = cfgPtr ? *cfgPtr : DlRuntimeConfig{};
+    assert(cfgPtr && "controller started without config");
+    const DlRuntimeConfig cfg = *cfgPtr;
 
     // Open listen socket; tolerate failure — loop still runs for clean stop.
     int listenFd = -1;
@@ -268,7 +271,7 @@ void DynamicLinkController::run(int evfd) {
                     // New decision supersedes any in-flight phase 2; the
                     // per-backend diff below reapplies anything that differs.
                     if (applyState != ApplyState::Idle) {
-                        disarmGap(gapFd);
+                        if (gapFd >= 0) disarmGap(gapFd);
                         applyState = ApplyState::Idle;
                     }
 
@@ -279,7 +282,13 @@ void DynamicLinkController::run(int evfd) {
                     useconds_t subPaceUs =
                         static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
 
-                    if (cfg.applyStaggerMs == 0 || dir == ApplyDir::Equal) {
+                    // canStagger: staggered dispatch requires both a non-zero
+                    // gap interval AND a live gap timerfd. If the fd failed to
+                    // open (gapFd < 0) we must fall back to single-shot so that
+                    // the deferred phase-2 is not silently lost.
+                    const bool canStagger = (cfg.applyStaggerMs != 0) && (gapFd >= 0);
+
+                    if (!canStagger || dir == ApplyDir::Equal) {
                         // Single shot: all backends fire now.
                         dispatchTxApply(cfg, d);
                         radio_->apply(d.txPowerDbm);
@@ -327,7 +336,7 @@ void DynamicLinkController::run(int evfd) {
             if (watchdog_->tick(now)) {
                 // Drop any queued phase 2 — safe values supersede.
                 if (applyState != ApplyState::Idle) {
-                    disarmGap(gapFd);
+                    if (gapFd >= 0) disarmGap(gapFd);
                     applyState = ApplyState::Idle;
                 }
                 dispatchTxSafe(cfg);
@@ -337,10 +346,11 @@ void DynamicLinkController::run(int evfd) {
                 // Invalidate last-states so the next fresh decision emits
                 // everything; reset dedup so a restarted GS recovers.
                 // (Port of dl_applier.c's memset(&last_tx/radio/enc, 0).)
-                // RadioTxpower keeps its own internal diff baseline, so also
-                // invalidate it here — setIface(cfg.iface) resets current_ to
-                // nullopt, forcing the next decision to re-run iw even if its
-                // txpower equals the safe value just pushed.
+                // NOTE: lastRadio_ is reset here for C-reference parity only —
+                // it is NOT the txpower diff baseline (see hpp comment). The
+                // real diff lives in RadioTxpower::current_; setIface() below
+                // resets that to nullopt, forcing the next decision to re-run
+                // iw even if its txpower equals the safe value just pushed.
                 lastTx_ = Decision{};
                 lastRadio_ = Decision{};
                 lastEnc_ = Decision{};

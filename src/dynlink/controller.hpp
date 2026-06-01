@@ -60,10 +60,17 @@ private:
     std::optional<Watchdog>           watchdog_;
     Dedup                             dedup_;
 
-    // Per-backend prev-state (diff baselines). lastTx_/lastRadio_ are diffed
-    // against new decisions; lastEnc_ tracks bitrate for direction only (the
-    // encoder client owns its own internal diff). A "first/invalid" baseline
-    // is signalled by magic != kWireMagic (port of dl_applier.c).
+    // Per-backend prev-state (diff baselines). lastTx_ is diffed against new
+    // decisions inside dispatchTxApply. lastEnc_ tracks bitrate for direction
+    // only (the encoder client owns its own internal diff). A "first/invalid"
+    // baseline is signalled by magic != kWireMagic (port of dl_applier.c).
+    //
+    // lastRadio_ is maintained for structural parity with the C reference's
+    // last_radio but is NOT the diff baseline for txpower decisions — the real
+    // txpower diff lives inside RadioTxpower::current_, which setIface() resets
+    // to nullopt on a watchdog trip, forcing the next decision to re-run iw
+    // even if its txpower equals the safe value just pushed. Do NOT use
+    // lastRadio_ for diffing; do NOT remove it (keep C-reference parity).
     Decision lastTx_{};
     Decision lastRadio_{};
     Decision lastEnc_{};
