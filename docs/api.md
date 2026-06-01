@@ -99,9 +99,8 @@ curl http://127.0.0.1:8080/defaults
             "roi": {"enabled": true, "qp": 0, "center": 0.4, "steps": 2}},
   "image": {"mirror": false, "flip": false, "rotate": 0},
   "telemetry": {"router": "msposd", "serial": "ttyS2", "osdFps": 20, "baud": 115200},
-  "recording": {"enabled": false, "dir": "/mnt/mmcblk0p1", "format": "ts",
+  "recording": {"enabled": false, "format": "ts",
                 "mode": "mirror", "maxSeconds": 300, "maxMB": 500},
-  "snapshot": {"enabled": true, "quality": 80},
   "dynamicLink": {
     "enabled": false, "healthTimeoutMs": 10000,
     "interleavingSupported": true, "minIdrIntervalMs": 500,
@@ -223,7 +222,7 @@ Commits the pending configuration to effective, persists the user overlay, and r
 Affected subsystems are determined by which fields changed:
 
 - `link.*` changes restart the radio (re-runs `radio-up.sh`) and all wfb processes.
-- `video.*`, `image.*`, `snapshot.*`, `recording.*` changes restart the encoder (waybeam).
+- `video.*`, `image.*`, `recording.*` changes restart the encoder (waybeam).
 - `telemetry.*` changes restart the telemetry router.
 - `dynamicLink.*` changes restart the adaptive-link controller (`dl_applier`).
 - `services.<name>.*` changes restart that named service.
@@ -488,7 +487,6 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 ```jsonc
 "recording": {
   "enabled": false,            // boolean — enable SD card recording
-  "dir": "/mnt/mmcblk0p1",    // string — destination directory
   "format": "ts",              // string — container format
   "mode": "mirror",            // string — recording mode
   "maxSeconds": 300,           // integer — maximum clip length in seconds
@@ -499,25 +497,10 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 | Field | Type | Default | Valid values |
 |-------|------|---------|--------------|
 | `enabled` | boolean | `false` | — |
-| `dir` | string | `"/mnt/mmcblk0p1"` | — |
 | `format` | string | `"ts"` | — |
 | `mode` | string | `"mirror"` | — |
 | `maxSeconds` | integer | `300` | — |
 | `maxMB` | integer | `500` | — |
-
-### `snapshot` — JPEG snapshot service
-
-```jsonc
-"snapshot": {
-  "enabled": true,  // boolean — enable snapshot endpoint in waybeam
-  "quality": 80     // integer — JPEG quality (0–100)
-}
-```
-
-| Field | Type | Default | Valid values |
-|-------|------|---------|--------------|
-| `enabled` | boolean | `true` | — |
-| `quality` | integer | `80` | — |
 
 ### `dynamicLink` — adaptive link controller
 
