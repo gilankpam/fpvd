@@ -298,6 +298,40 @@ persistent inconsistency strictly worse than the transient, self-healing race).
 - Regression — existing dynamic-link `EncoderClient` tests pass unchanged after
   the transport refactor (identical query strings/timeouts/dedup).
 
+## Hardware finding — `video0.size` restart needs a settle delay
+
+Verified on the ssc338q drone after deployment. The waybeam-only restart works
+for same-geometry restart-class changes (image flip, recording, rcMode), but a
+`video0.size` change **wedged the VENC pipeline**: dmesg showed
+`MI_VENC_IMPL_Query: CH 0 is not created` and the encode loop spun on
+`MI_VENC_Query failed` — frozen video that never recovered (reverting to the
+native 1080p recovered, because the native geometry tolerates the half-released
+driver state).
+
+Root cause: `Orchestrator::restart` forked the fresh waybeam with **zero delay**
+after reaping the old one. On Star6E the SigmaStar driver releases pipeline state
+(MI_VENC channel teardown, DMA drain, sensor-mode release) asynchronously *after*
+the process exits, so a fresh waybeam that re-inits a *different* geometry too
+early fails to create the VENC channel. waybeam's own self-respawn waits 500 ms
+for exactly this (`venc_respawn.c:113-126`); fpvd's restart skipped it. (fpvd's
+fresh fork already inits VIF/VPE cold — it inherits none of waybeam's fds — so
+the settle delay was the only missing piece.)
+
+Fix: a configurable settle delay (`DaemonPaths.waybeamRestartSettleMs`, default
+**700 ms**) inserted in `Orchestrator::restart` between `shutdown()` and
+`start()`. Confirmed on hardware: a clean 1080p→720p→1080p cycle restarts waybeam
+(fpvd-owned) and applies the size with **zero** new `MI_VENC_Query` failures and
+no `CH 0 is not created` — no freeze.
+
+**Known follow-up (not yet fixed):** if waybeam ever escapes fpvd's supervision
+(self-respawn reparents it to init — e.g. an operator manually hits
+`/api/v1/restart` or SIGHUPs it), fpvd loses the live process and crash-loops
+doomed replacements that collide with the orphan over the SoC hardware (observed:
+supervisor went `state:failed` after 41 restarts), unrecoverable without a
+reboot. Harden by having fpvd kill any stray `/usr/bin/waybeam` it does not own
+before (re)starting one. Operationally: never call waybeam's `/api/v1/restart`
+while fpvd supervises it — fpvd owns the restart.
+
 ## Out of scope / risks
 
 - The `EncoderClient` refactor touches recently-shipped DL code. It is a
