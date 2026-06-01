@@ -218,13 +218,13 @@ void DynamicLinkController::run(int evfd) {
     // evfd passed by value from start() — captured before thread launch,
     // so it is immune to the eventFd_.exchange(-1) in stopLocked().
 
-    // Snapshot the config once for the lifetime of this run() (Task 17 will
-    // add hot-reconcile on the eventfd wake). cfg_ is always set in start()
-    // before this thread is launched, so cfgPtr must never be null here.
+    // Snapshot the config once at start; hot-reconcile on eventfd wakes updates
+    // the local `cfg` in-place (Task 17). cfg_ is always set in start() before
+    // this thread is launched, so cfgPtr must never be null here.
     std::shared_ptr<const DlRuntimeConfig> cfgPtr;
     { std::lock_guard<std::mutex> cg(cfgMu_); cfgPtr = cfg_; }
     assert(cfgPtr && "controller started without config");
-    const DlRuntimeConfig cfg = *cfgPtr;
+    DlRuntimeConfig cfg = *cfgPtr;  // mutable: hot-reconcile updates this in-place
 
     // Open listen socket; tolerate failure — loop still runs for clean stop.
     int listenFd = -1;
@@ -234,9 +234,14 @@ void DynamicLinkController::run(int evfd) {
 
     // Tick timer: interval = min(osdUpdateIntervalMs, healthTimeoutMs/2),
     // floored at 100 ms (same math as dl_applier.c).
-    uint32_t tickMs = ep_.osdUpdateIntervalMs;
-    if (cfg.healthTimeoutMs / 2 < tickMs) tickMs = cfg.healthTimeoutMs / 2;
-    if (tickMs < 100) tickMs = 100;
+    // tickMs is kept as a local so hot-reconcile can detect changes and re-arm.
+    auto computeTickMs = [&](const DlRuntimeConfig& c) -> uint32_t {
+        uint32_t t = ep_.osdUpdateIntervalMs;
+        if (c.healthTimeoutMs / 2 < t) t = c.healthTimeoutMs / 2;
+        if (t < 100) t = 100;
+        return t;
+    };
+    uint32_t tickMs = computeTickMs(cfg);
     int tickFd = openTickTimer(tickMs);
 
     // Gap timer (single-shot, armed on demand for staggered apply).
@@ -316,7 +321,51 @@ void DynamicLinkController::run(int evfd) {
             ssize_t r = read(evfd, &val, sizeof(val));
             (void)r; // drain; ignore EAGAIN
             if (stopFlag_.load()) break;
-            // (Task 17 will reconcile cfg_ here on a reload wake.)
+
+            // Hot-reload reconcile: load the latest cfg_ snapshot and apply
+            // structural changes that the components hold their own copies of.
+            // The bulk of cfg knobs (safe.*, applyStaggerMs, applySubPaceMs,
+            // interleavingSupported) are picked up automatically on the next
+            // iteration via the now-mutable local `cfg`.
+            std::shared_ptr<const DlRuntimeConfig> newCfgPtr;
+            { std::lock_guard<std::mutex> cg(cfgMu_); newCfgPtr = cfg_; }
+            if (newCfgPtr) {
+                const DlRuntimeConfig& newCfg = *newCfgPtr;
+
+                // Watchdog: update its internal timeout copy.
+                if (watchdog_) watchdog_->setTimeout(newCfg.healthTimeoutMs);
+
+                // Tick timer: re-arm if the interval changed.
+                uint32_t newTickMs = computeTickMs(newCfg);
+                if (newTickMs != tickMs && tickFd >= 0) {
+                    struct itimerspec ts{};
+                    ts.it_value.tv_sec  = newTickMs / 1000;
+                    ts.it_value.tv_nsec = static_cast<long>(newTickMs % 1000) * 1000000L;
+                    ts.it_interval = ts.it_value;
+                    timerfd_settime(tickFd, 0, &ts, nullptr);
+                    tickMs = newTickMs;
+                }
+
+                // Encoder: update ROI curve and IDR throttle window.
+                if (enc_) {
+                    enc_->setRoiCurve(newCfg.roiQp);
+                    enc_->setMinIdrInterval(newCfg.minIdrIntervalMs);
+                }
+
+                // OSD: update enabled flag.
+                if (osd_) osd_->setEnabled(newCfg.osdEnabled);
+
+                // HelloSm: update mtu/fps (silent) and vanilla bit (re-announces if changed).
+                if (hello_) {
+                    hello_->setMtuFps(newCfg.helloMtuBytes, newCfg.helloFps);
+                    hello_->setVanilla(!newCfg.interleavingSupported);
+                }
+
+                // Update the local cfg snapshot. safe.*, applyStaggerMs,
+                // applySubPaceMs, interleavingSupported, and other loop-read
+                // knobs are now live on the next iteration.
+                cfg = newCfg;
+            }
         }
 
         // ---- listenFd readable: decode + dispatch a decision/ack ----------------

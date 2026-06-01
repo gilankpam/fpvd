@@ -526,3 +526,92 @@ TEST_CASE("controller HELLO: sends DLHE to gs-tunnel sink and transitions to Kee
     sinkThread.join();
     ::close(sinkFd);
 }
+
+// ---------------------------------------------------------------------------
+// Hot config reload: setConfig applies new knobs without restart
+// ---------------------------------------------------------------------------
+
+TEST_CASE("setConfig hot-reloads knobs without restart") {
+    FakeWfbTx wfb;
+    FakeEnc enc;
+
+    Endpoints ep;
+    ep.listenAddr        = "127.0.0.1";
+    ep.listenPort        = 45805;           // fixed test port
+    ep.wfbCtlAddr        = "127.0.0.1";
+    ep.wfbCtlPort        = wfb.port;
+    ep.encHost           = "127.0.0.1";
+    ep.encPort           = static_cast<uint16_t>(enc.port);
+    ep.idrPort           = 0;
+    ep.gsTunnelPort      = 0;
+    ep.osdMsgPath        = "/tmp/fpvd_test_osd_hotreload.msg";
+    ep.osdUpdateIntervalMs = 1000;
+
+    // Start with a long watchdog timeout and safe.mcs=1
+    DlRuntimeConfig snap{};
+    snap.healthTimeoutMs       = 10000;     // long -> won't trip during setup
+    snap.minIdrIntervalMs      = 500;
+    snap.applyStaggerMs        = 0;
+    snap.applySubPaceMs        = 0;
+    snap.interleavingSupported = false;
+    snap.osdEnabled            = false;
+    snap.osdDebugLatency       = false;
+    snap.debug                 = false;
+    snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
+    snap.iface                 = "wlan-test-nonexistent";
+    snap.safe = SafeDefaults{
+        /*mcs=*/1, /*k=*/8, /*n=*/12, /*depth=*/0,
+        /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
+
+    DynamicLinkController c(ep);
+    c.start(snap, /*generationId=*/0x6666);
+    CHECK(c.status().running == true);
+
+    // Inject one decision so the watchdog's everSeen_ becomes true. We must
+    // send repeatedly until the controller's listen socket is bound.
+    {
+        Decision d{};
+        d.magic = kWireMagic; d.version = kWireVersion;
+        d.sequence = 1; d.timestampMs = 1;
+        d.mcs = 3; d.bandwidth = 20; d.txPowerDbm = 10;
+        d.k = 4; d.n = 6; d.depth = 0;
+        d.bitrateKbps = 4000; d.fps = 60;
+        bool gotFec = waitFor([&] {
+            sendDecision(ep.listenPort, d);
+            return wfb.sawFec(4, 6);
+        }, 1000);
+        CHECK(gotFec);  // decision was accepted; watchdog.everSeen_ = true
+    }
+
+    // Assert still running with original long timeout (watchdog won't trip yet)
+    CHECK(c.status().running == true);
+
+    // Hot-reload: shorten watchdog timeout to 400 ms and change safe.mcs=5
+    DlRuntimeConfig snap2 = snap;
+    snap2.healthTimeoutMs = 400;             // shorter -> will trip faster
+    snap2.safe.mcs = 5;                      // new safe mcs
+
+    c.setConfig(snap2);
+
+    // Assert still running (no restart)
+    CHECK(c.status().running == true);
+
+    // After the reload, the watchdog should trip at ~400 ms (not 10000 ms),
+    // and the safe push must use mcs=5 (not the original mcs=1).
+    // The watchdog timeout is now 400 ms, tick = min(1000, 200) = 200 ms,
+    // so it should trip within ~400 + 200 ms = ~600 ms from last decision.
+    //
+    // Wait up to 2 s for safe FEC (8/12) and safe radio (mcs=5, bw=20).
+    CHECK(waitFor([&] {
+        return wfb.sawFec(8, 12) && wfb.sawRadio(5, 20);
+    }, 2000));
+
+    // Confirm watchdog actually tripped in status
+    CHECK(waitFor([&] { return c.status().watchdogTripped == true; }, 1000));
+
+    // Confirm still running (setConfig did NOT restart the loop)
+    CHECK(c.status().running == true);
+
+    c.stop();
+    CHECK(c.status().running == false);
+}
