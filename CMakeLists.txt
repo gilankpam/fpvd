@@ -33,6 +33,7 @@ target_sources(fpvd_core PRIVATE
     src/dynlink/watchdog.cpp
     src/dynlink/wire.cpp
     src/dynlink/hello.cpp
+    src/dynlink/osd.cpp
     src/config/store.cpp
     src/config/validate.cpp
     src/config/diff.cpp
@@ -94,6 +95,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/unit/test_dl_encoder_client.cpp
         tests/unit/test_dl_radio_txpower.cpp
         tests/unit/test_dl_hello.cpp
+        tests/unit/test_dl_osd.cpp
     )
     add_test(NAME fpvd_tests COMMAND fpvd_tests)
 endif()
