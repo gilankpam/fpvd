@@ -1,10 +1,13 @@
 #include "doctest.h"
 #include "daemon.hpp"
 #include "status.hpp"
+#include <httplib.h>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -443,30 +446,121 @@ TEST_CASE("apply: enabled false->true starts controller; true->false stops it") 
     fs::remove_all(tmp);
 }
 
-TEST_CASE("apply: encoder change while enabled rebuilds + restart-around") {
+TEST_CASE("apply: restart-class encoder change while enabled bounces only waybeam") {
     auto tmp = fs::temp_directory_path() / "fpvd-route-encoder";
     auto paths = makeRoutingPaths(tmp, 46802);
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
-    // Enable DL and apply so the controller is running, then seed orchestrator.
+    // Enable DL and apply so the controller is running.
     REQUIRE(d.patchPending(nlohmann::json::parse(
         R"({"dynamicLink":{"enabled":true}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     REQUIRE(d.dynamicLinkStatus().running);
 
-    // An encoder change forces a rebuild. The controller is stopped before
-    // stopAll and restarted after startAll; it ends running. video.codec is an
-    // encoder-only change that is NOT dynamic-link-locked (unlike video.bitrate)
-    // and is NOT a dynamicLink input (only video.fps is).
+    auto namesBefore = d.orchestrator().names();
+
+    // A resolution change is a RESTART-class encoder field, NOT dynamic-link-
+    // locked and NOT a dynamicLink input -- so it no longer rebuilds the
+    // orchestrator and the controller is never bounced.
     REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"video":{"codec":"h264"}})")).ok);
+        R"({"video":{"resolution":"1280x720"}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
     CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder")
           != ar.restarted.end());
-    // Controller survived the restart-around and is running again.
-    CHECK(d.dynamicLinkStatus().running);
+    CHECK(d.orchestrator().names() == namesBefore);   // no full rebuild
+    CHECK(d.dynamicLinkStatus().running);             // controller untouched
+
+    fs::remove_all(tmp);
+}
+
+// Fake waybeam HTTP server for the encoder-apply path.
+namespace {
+struct FakeWbDaemon {
+    httplib::Server srv;
+    std::vector<std::string> hits;
+    std::mutex mu;
+    int port{0};
+    std::thread th;
+    FakeWbDaemon() {
+        srv.Get("/api/v1/set", [&](const httplib::Request& r, httplib::Response& res) {
+            std::lock_guard<std::mutex> lk(mu);
+            hits.push_back(r.target);
+            res.set_content("ok", "text/plain");
+        });
+        port = srv.bind_to_any_port("127.0.0.1");
+        th = std::thread([&] { srv.listen_after_bind(); });
+        srv.wait_until_ready();
+    }
+    ~FakeWbDaemon() { srv.stop(); th.join(); }
+    size_t count() { std::lock_guard<std::mutex> lk(mu); return hits.size(); }
+    std::string last() { std::lock_guard<std::mutex> lk(mu); return hits.back(); }
+};
+} // namespace
+
+TEST_CASE("apply: LIVE encoder change pushes /api/v1/set, no rebuild") {
+    FakeWbDaemon wb;
+    auto tmp = fs::temp_directory_path() / "fpvd-enc-live";
+    auto paths = makeRoutingPaths(tmp, 46810);
+    paths.dlEndpoints.encPort = static_cast<uint16_t>(wb.port);  // point at fake waybeam
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+    auto namesBefore = d.orchestrator().names();
+
+    // DL disabled -> bitrate is fpvd-owned and LIVE.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"video":{"bitrate":4096}})")).ok);
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);
+
+    REQUIRE(wb.count() == 1);
+    CHECK(wb.last().find("video0.bitrate=4096") != std::string::npos);
+    CHECK(d.orchestrator().names() == namesBefore);   // no rebuild
+    CHECK(d.effective().video.bitrate == 4096);
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("apply: RESTART encoder change rewrites file, issues no /set") {
+    FakeWbDaemon wb;
+    auto tmp = fs::temp_directory_path() / "fpvd-enc-restart";
+    auto paths = makeRoutingPaths(tmp, 46811);
+    paths.dlEndpoints.encPort = static_cast<uint16_t>(wb.port);
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"video":{"resolution":"1280x720"}})")).ok);
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);
+
+    // Restart-class path uses the file + waybeam bounce, never /api/v1/set.
+    CHECK(wb.count() == 0);
+    std::ifstream wf(paths.waybeamJsonPath);
+    nlohmann::json wj; wf >> wj;
+    CHECK(wj["video0"]["size"] == "1280x720");
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder")
+          != ar.restarted.end());
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("apply: failed /api/v1/set fails the apply with effective unchanged") {
+    auto tmp = fs::temp_directory_path() / "fpvd-enc-fail";
+    auto paths = makeRoutingPaths(tmp, 46812);
+    // encPort 0 -> connection refused; the LIVE push must fail.
+    paths.dlEndpoints.encPort = 0;
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+    int before = d.effective().video.bitrate;
+
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"video":{"bitrate":4096}})")).ok);
+    auto ar = d.apply(/*reallyRestart=*/true);
+    CHECK_FALSE(ar.ok);
+    CHECK(d.effective().video.bitrate == before);   // not committed
+    CHECK(d.version() == 0);                         // no version bump
 
     fs::remove_all(tmp);
 }

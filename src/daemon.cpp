@@ -26,6 +26,7 @@ static std::string nowIso() {
 
 Daemon::Daemon(DaemonPaths paths)
     : paths_(std::move(paths)),
+      waybeam_(paths_.dlEndpoints.encHost, paths_.dlEndpoints.encPort),
       dl_(paths_.dlEndpoints),
       dlGenerationId_(std::random_device{}()),
       startedAt_(std::chrono::steady_clock::now()) {
@@ -173,6 +174,29 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             nlohmann::json(pending_.link.beamforming) ||
         effective_.link.width != pending_.link.width;
 
+    // Encoder reconcile (computed from the pre-commit diff). codec is excluded;
+    // dynamic-link-owned fields are excluded while DL is enabled.
+    auto wbDiff = waybeamConfigDiff(effective_, pending_, enabledNew);
+    const bool encRestart = !wbDiff.restart.empty();   // any restart field => restart
+    const bool encLive    = !encRestart && !wbDiff.live.empty();
+    const bool encChanged = encRestart || encLive;
+
+    // A full orchestrator rebuild is needed only for non-encoder subsystems.
+    const bool needsRebuild = subs.telemetry ||
+        !subs.servicesAffected.empty() || link.fullRestart;
+
+    // Transactional LIVE push: apply before committing so a failed push fails the
+    // apply with nothing changed and the radio link untouched. Skipped under a
+    // full rebuild (it restarts waybeam + reloads the file) and on the dry path.
+    if (reallyRestart && !needsRebuild && encLive) {
+        if (!waybeam_.setFields(wbDiff.live)) {
+            lastApply_ = {nowIso(), false, {},
+                          std::string("waybeam: /api/v1/set failed")};
+            return {false, {}, {}, std::string("waybeam: /api/v1/set failed"),
+                    version_};
+        }
+    }
+
     // Persist overlay (sparse diff vs defaults).
     auto defaultsJ = defaultsJson();
     auto pendingJ = nlohmann::json(pending_);
@@ -184,7 +208,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
 
     std::vector<std::string> restarted;
     if (subs.radio) restarted.push_back("radio");
-    if (subs.encoder) restarted.push_back("encoder");
+    if (encChanged) restarted.push_back("encoder");
     if (subs.telemetry) restarted.push_back("telemetry");
     // The in-process DynamicLinkController is hot-reloaded (start/stop/setConfig)
     // — never bounced with wfb. Report it as "dynamicLink" when its config moves
@@ -201,8 +225,6 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     // mtu-only change consumed by the controller) is NOT a rebuild: it hot-
     // reloads the controller. A video.fps change still rebuilds via subs.encoder
     // (the restart-around re-snapshots the controller after startAll).
-    const bool needsRebuild = subs.encoder || subs.telemetry ||
-        !subs.servicesAffected.empty() || link.fullRestart;
 
     if (reallyRestart && needsRebuild) {
         // Full-restart path: rebuild orchestrator + radio bring-up. The in-process
@@ -235,6 +257,11 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     }
 
     if (reallyRestart) {
+        // Encoder restart-class change: waybeam.json was rewritten above; bounce
+        // ONLY waybeam (wfb stays up, radio link preserved). On Star6E a /set-
+        // driven reinit would self-respawn and race our supervisor, so fpvd owns
+        // the restart. No-op if waybeam is not currently supervised.
+        if (encRestart) orch_.restart("waybeam");
         // Hot path: no wfb restart. Route the in-process controller FIRST, so it
         // runs regardless of which hot return is taken below (the deferred
         // nicChannel return detaches a worker and returns early). start() binds

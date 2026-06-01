@@ -4,6 +4,7 @@
 #include "config/validate.hpp"
 #include "dynlink/controller.hpp"
 #include "dynlink/runtime_config.hpp"
+#include "waybeam/client.hpp"
 #include "supervise/orchestrator.hpp"
 #include "supervise/beamforming.hpp"
 #include <chrono>
@@ -90,6 +91,7 @@ private:
     int version_{0};
     LastApply lastApply_;
     RadioInfo radio_;
+    WaybeamClient waybeam_;   // declared before dl_/orch_ for init order
     Orchestrator orch_;
     BeamformingController bf_;
     dynlink::DynamicLinkController dl_;
