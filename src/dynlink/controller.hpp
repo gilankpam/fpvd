@@ -2,6 +2,7 @@
 #include "dynlink/dedup.hpp"
 #include "dynlink/encoder_client.hpp"
 #include "dynlink/hello.hpp"
+#include "dynlink/idr_listen.hpp"
 #include "dynlink/osd.hpp"
 #include "dynlink/radio_txpower.hpp"
 #include "dynlink/runtime_config.hpp"
@@ -59,7 +60,8 @@ private:
     std::optional<RadioTxpower>       radio_;
     std::optional<OsdWriter>          osd_;
     std::optional<Watchdog>           watchdog_;
-    std::optional<HelloSm>            hello_;   // constructed in start(); used only from run()
+    std::optional<HelloSm>            hello_;      // constructed in start(); used only from run()
+    std::optional<IdrListener>        idr_;        // constructed in start(); fd owned by IdrListener
     Dedup                             dedup_;
 
     // Per-backend prev-state (diff baselines). lastTx_ is diffed against new

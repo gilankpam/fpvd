@@ -127,6 +127,10 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap, uint32_t generati
     watchdog_.emplace(snap.healthTimeoutMs);
     hello_.emplace(generationId, snap.helloMtuBytes, snap.helloFps, HelloCadence{});
     hello_->setVanilla(!snap.interleavingSupported);
+    // IdrListener: port==0 self-disables (fd()==-1); (re)constructed on every start()
+    // so it is reset before emplace to ensure proper close/reopen across start/stop/start.
+    idr_.reset();
+    idr_.emplace(ep_.idrAddr, ep_.idrPort);
     dedup_.reset();
 
     // Reset diff baselines to "first/invalid" so the first decision re-emits all.
@@ -259,15 +263,18 @@ void DynamicLinkController::run(int evfd) {
                                          &gsTunnelDst);
     }
 
-    // Build pollfd array: [listenFd?, tickFd?, gapFd?, helloTimerFd?, evfd?].
+    // Build pollfd array: [listenFd?, tickFd?, gapFd?, helloTimerFd?, idrFd?, evfd?].
+    // idr_ fd is owned by the IdrListener object — do NOT ::close it in run()'s cleanup.
     struct pollfd pfds[6];
     int nfds = 0;
-    int listenIdx = -1, tickIdx = -1, gapIdx = -1, helloIdx = -1, eventIdx = -1;
+    int listenIdx = -1, tickIdx = -1, gapIdx = -1, helloIdx = -1, idrIdx = -1, eventIdx = -1;
 
     if (listenFd    >= 0) { pfds[nfds].fd = listenFd;    pfds[nfds].events = POLLIN; listenIdx = nfds++; }
     if (tickFd      >= 0) { pfds[nfds].fd = tickFd;      pfds[nfds].events = POLLIN; tickIdx   = nfds++; }
     if (gapFd       >= 0) { pfds[nfds].fd = gapFd;       pfds[nfds].events = POLLIN; gapIdx    = nfds++; }
     if (helloTimerFd >= 0){ pfds[nfds].fd = helloTimerFd;pfds[nfds].events = POLLIN; helloIdx  = nfds++; }
+    // IDR listener: add to poll set only when enabled (fd >= 0). Port 0 disables.
+    if (idr_ && idr_->fd() >= 0) { pfds[nfds].fd = idr_->fd(); pfds[nfds].events = POLLIN; idrIdx = nfds++; }
     if (evfd        >= 0) { pfds[nfds].fd = evfd;        pfds[nfds].events = POLLIN; eventIdx  = nfds++; }
 
     // Helper: map HelloSm state -> HelloPub for status publication.
@@ -463,6 +470,18 @@ void DynamicLinkController::run(int evfd) {
             // Idle here means a stale expiration the kernel queued before
             // disarm landed — drained, ignore.
             applyState = ApplyState::Idle;
+        }
+
+        // ---- IDR token listener: drain -> osd bump + encoder IDR request ----
+        // Port of dl_applier.c pfds[4] branch. IdrListener owns its fd;
+        // do NOT ::close it here.
+        if (idrIdx >= 0 && (pfds[idrIdx].revents & POLLIN)) {
+            size_t got = idr_->drain();
+            if (got > 0) {
+                uint64_t nowMs = nowMonotonicMs();
+                osd_->bumpIdr();
+                enc_->requestIdr(nowMs);
+            }
         }
 
         // ---- hello timer: build + send DLHE, re-arm -------------------------

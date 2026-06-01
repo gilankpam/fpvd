@@ -331,6 +331,93 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
 }
 
 // ---------------------------------------------------------------------------
+// IDR token listener -> encoder requestIdr
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Send a short UDP datagram to localhost:<port> (simulates a PixelPilot IDR token).
+void sendIdrToken(uint16_t port) {
+    int s = ::socket(AF_INET, SOCK_DGRAM, 0);
+    REQUIRE(s >= 0);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    dst.sin_port = htons(port);
+    const char tok[] = "IDR";  // 3-byte token (mimics PixelPilot_rk)
+    ssize_t w = ::sendto(s, tok, sizeof(tok) - 1, 0,
+                         reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
+    CHECK(w == 3);
+    ::close(s);
+}
+
+} // namespace (anonymous, IDR helpers)
+
+TEST_CASE("controller IDR: datagram -> requestIdr; second immediate datagram is throttled") {
+    FakeWfbTx wfb;
+    FakeEnc enc;
+
+    const uint16_t kIdrPort = 41223;
+
+    Endpoints ep;
+    ep.listenAddr        = "127.0.0.1";
+    ep.listenPort        = 45804;           // fixed test port
+    ep.wfbCtlAddr        = "127.0.0.1";
+    ep.wfbCtlPort        = wfb.port;
+    ep.encHost           = "127.0.0.1";
+    ep.encPort           = static_cast<uint16_t>(enc.port);
+    ep.idrAddr           = "127.0.0.1";
+    ep.idrPort           = kIdrPort;        // IDR listener enabled
+    ep.gsTunnelPort      = 0;
+    ep.osdMsgPath        = "/tmp/fpvd_test_osd_idr.msg";
+    ep.osdUpdateIntervalMs = 1000;
+
+    DlRuntimeConfig snap{};
+    snap.healthTimeoutMs       = 10000;     // won't trip during test
+    snap.minIdrIntervalMs      = 500;       // 500 ms throttle window
+    snap.applyStaggerMs        = 0;
+    snap.applySubPaceMs        = 0;
+    snap.interleavingSupported = false;
+    snap.osdEnabled            = false;
+    snap.osdDebugLatency       = false;
+    snap.debug                 = false;
+    snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
+    snap.iface                 = "wlan-test-nonexistent";
+    snap.safe = SafeDefaults{1, 8, 12, 0, 20, 5, 2000};
+
+    DynamicLinkController c(ep);
+    c.start(snap, /*generationId=*/0x5555);
+    CHECK(c.status().running == true);
+
+    // 1) Send an IDR token; assert the controller forwards it to the encoder.
+    //    Re-send in a loop (controller binds idr socket asynchronously).
+    bool gotIdr = waitFor([&] {
+        sendIdrToken(kIdrPort);
+        return enc.sawContaining("/request/idr");
+    }, 2000);
+    CHECK(gotIdr);
+
+    // 2) Count how many /request/idr hits arrived so far.
+    auto countIdr = [&] {
+        std::lock_guard<std::mutex> lk(enc.mu);
+        int n = 0;
+        for (auto& h : enc.hits) if (h == "/request/idr") ++n;
+        return n;
+    };
+    int firstCount = countIdr();
+    CHECK(firstCount >= 1);
+
+    // 3) Send a second token immediately — must be throttled (minIdrIntervalMs=500 ms).
+    //    Wait 100 ms and assert no new /request/idr was added.
+    sendIdrToken(kIdrPort);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    CHECK(countIdr() == firstCount);   // throttled: encoder count unchanged
+
+    c.stop();
+    CHECK(c.status().running == false);
+}
+
+// ---------------------------------------------------------------------------
 // HELLO announce/keepalive + GS-tunnel socket
 // ---------------------------------------------------------------------------
 
