@@ -55,6 +55,9 @@ public:
     explicit Daemon(DaemonPaths paths);
     ~Daemon();
 
+    Daemon(const Daemon&) = delete;
+    Daemon& operator=(const Daemon&) = delete;
+
     // Load defaults and overlay, write initial /etc/waybeam.json,
     // configure orchestrator, optionally start processes.
     void bootstrap(bool startProcesses);
@@ -89,7 +92,7 @@ private:
     Orchestrator orch_;
     BeamformingController bf_;
     dynlink::DynamicLinkController dl_;
-    uint32_t dlGenerationId_{0};
+    uint32_t dlGenerationId_;
     std::chrono::steady_clock::time_point startedAt_;
     std::mutex mu_;
 };

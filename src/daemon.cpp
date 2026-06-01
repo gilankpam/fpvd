@@ -24,12 +24,15 @@ static std::string nowIso() {
     return buf;
 }
 
-Daemon::Daemon(DaemonPaths paths) : paths_(std::move(paths)), dl_(paths_.dlEndpoints) {
-    dlGenerationId_ = std::random_device{}();
-    startedAt_ = std::chrono::steady_clock::now();
+Daemon::Daemon(DaemonPaths paths)
+    : paths_(std::move(paths)),
+      dl_(paths_.dlEndpoints),
+      dlGenerationId_(std::random_device{}()),
+      startedAt_(std::chrono::steady_clock::now()) {
 }
 
 Daemon::~Daemon() {
+    // Stop the in-process control loop (joins its thread) before any member is destroyed.
     dl_.stop();
 }
 
