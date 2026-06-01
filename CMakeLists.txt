@@ -4,7 +4,10 @@ project(fpvd CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# PIC for host builds; disabled for the fully-static cross target.
+if(NOT CMAKE_CROSSCOMPILING)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
 
 add_compile_options(-Wall -Wextra -Wpedantic)
 
