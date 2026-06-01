@@ -133,6 +133,21 @@ TEST_CASE("RadioTxpower: failed apply does not cache value (retry runs iw again)
     fs::remove_all(tmp);
 }
 
+TEST_CASE("RadioTxpower: negative dBm produces negative mBm") {
+    auto tmp = fs::temp_directory_path() / "fpvd-txpower-neg";
+    fs::remove_all(tmp);
+    auto rec = setupIwStub(tmp, 0);
+
+    fpvd::dynlink::RadioTxpower r("wlan0");
+
+    // -5 dBm -> mBm = -5 * 100 = -500
+    CHECK(r.apply(-5) == 0);
+    auto out = readAllText(rec);
+    CHECK(out.find("txpower fixed -500") != std::string::npos);
+
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("RadioTxpower: setIface resets diff state") {
     auto tmp = fs::temp_directory_path() / "fpvd-txpower-setiface";
     fs::remove_all(tmp);

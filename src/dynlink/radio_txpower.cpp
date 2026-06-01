@@ -6,9 +6,7 @@
  */
 #include "dynlink/radio_txpower.hpp"
 
-#include <cerrno>
 #include <cstdio>
-#include <cstring>
 #include <spawn.h>
 #include <sys/wait.h>
 
