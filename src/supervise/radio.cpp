@@ -62,4 +62,35 @@ RadioResult bringUpRadio(const std::string& scriptPath, const Config& c) {
     return r;
 }
 
+RadioResult tuneRadio(const std::string& scriptPath, const std::string& action,
+                      const Config& c, const std::string& iface,
+                      const std::string& driver) {
+    RadioResult r{};
+    int errPipe[2];
+    if (::pipe(errPipe) < 0) { r.ok = false; r.exitCode = -1; return r; }
+    pid_t pid = ::fork();
+    if (pid == 0) {
+        ::dup2(errPipe[1], 2);
+        ::close(errPipe[0]); ::close(errPipe[1]);
+        setenv("FPVD_IFACE",   iface.c_str(),  1);
+        setenv("FPVD_DRIVER",  driver.c_str(), 1);
+        setenv("FPVD_CHANNEL", std::to_string(c.link.channel).c_str(), 1);
+        setenv("FPVD_WIDTH",   std::to_string(c.link.width).c_str(),   1);
+        setenv("FPVD_TXPOWER", std::to_string(c.link.txpower).c_str(), 1);
+        setenv("FPVD_MTU",     std::to_string(c.link.mtu).c_str(),     1);
+        ::execl(scriptPath.c_str(), scriptPath.c_str(), action.c_str(),
+                static_cast<char*>(nullptr));
+        _exit(127);
+    }
+    ::close(errPipe[1]);
+    readAll(errPipe[0], r.stderrText);
+    ::close(errPipe[0]);
+
+    int status = 0;
+    ::waitpid(pid, &status, 0);
+    r.exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : 128;
+    r.ok = (r.exitCode == 0);
+    return r;
+}
+
 } // namespace fpvd

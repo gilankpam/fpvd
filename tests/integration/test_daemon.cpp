@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -274,5 +275,77 @@ TEST_CASE("status: includes beamforming block") {
     REQUIRE(j.contains("beamforming"));
     CHECK(j["beamforming"]["state"] == "disabled");
     CHECK(j["beamforming"].contains("localMac"));
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("daemon: txpower change takes hot path (tuneRadio, no rebuild)") {
+    auto tmp = fs::temp_directory_path() / "fpvd-hot-txpower";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+    auto rec = tmp / "tune-record.txt";
+    ::setenv("FPVD_TEST_RECORD", rec.string().c_str(), 1);
+
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string(),
+        "tests/fixtures/fake_radio_tune.sh"
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"link":{"txpower":5}})")).ok);
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);
+
+    std::ifstream f(rec);
+    std::string line;
+    std::getline(f, line);
+    CHECK(line.find("action=txpower") != std::string::npos);
+    CHECK(line.find("txpower=5") != std::string::npos);
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("daemon: width change defers channel retune via tune script") {
+    auto tmp = fs::temp_directory_path() / "fpvd-hot-width";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+    auto rec = tmp / "tune-record.txt";
+    ::setenv("FPVD_TEST_RECORD", rec.string().c_str(), 1);
+
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string(),
+        "tests/fixtures/fake_radio_tune.sh"
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"link":{"width":40}})")).ok);
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);   // returns immediately; channel retune is deferred
+
+    // The detached worker sleeps 200ms, runs the channel tune, then attempts a
+    // video setRadio to 127.0.0.1:8000 which is not listening (~500ms timeout).
+    // Wait long enough for the worker to finish before `d` is destroyed, so the
+    // thread (capturing `this`) does not outlive the Daemon.
+    std::this_thread::sleep_for(std::chrono::milliseconds(900));
+
+    std::ifstream f(rec);
+    std::string line;
+    std::getline(f, line);
+    CHECK(line.find("action=channel") != std::string::npos);
+    CHECK(line.find("width=40") != std::string::npos);
     fs::remove_all(tmp);
 }

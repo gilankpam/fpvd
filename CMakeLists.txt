@@ -29,6 +29,7 @@ target_sources(fpvd_core PRIVATE
     src/config/lock.cpp
     src/translate/waybeam.cpp
     src/translate/wfb.cpp
+    src/translate/wfb_control.cpp
     src/translate/telemetry.cpp
     src/translate/dynamic_link.cpp
     src/supervise/process.cpp
@@ -57,9 +58,11 @@ target_sources(fpvd_tests PRIVATE
     tests/unit/test_store.cpp
     tests/unit/test_validate.cpp
     tests/unit/test_diff.cpp
+    tests/unit/test_link_classify.cpp
     tests/unit/test_lock.cpp
     tests/unit/test_translate_waybeam.cpp
     tests/unit/test_translate_wfb.cpp
+    tests/unit/test_wfb_control.cpp
     tests/unit/test_translate_telemetry.cpp
     tests/unit/test_translate_dynamic_link.cpp
     tests/unit/test_dl_applier_cli_assumptions.cpp
@@ -67,6 +70,7 @@ target_sources(fpvd_tests PRIVATE
     tests/integration/test_supervisor.cpp
     tests/integration/test_orchestrator.cpp
     tests/integration/test_radio.cpp
+    tests/integration/test_radio_tune_script.cpp
     tests/integration/test_beamforming.cpp
     tests/integration/test_daemon.cpp
     tests/integration/test_http_server.cpp
@@ -77,5 +81,6 @@ add_test(NAME fpvd_tests COMMAND fpvd_tests)
 # Install rules.
 install(TARGETS fpvd RUNTIME DESTINATION bin)
 install(PROGRAMS scripts/radio-up.sh DESTINATION libexec/fpvd)
+install(PROGRAMS scripts/radio-tune.sh DESTINATION libexec/fpvd)
 install(PROGRAMS scripts/S99fpvd DESTINATION ../etc/init.d)
 install(FILES etc/defaults.json DESTINATION ../rom/etc/fpvd)

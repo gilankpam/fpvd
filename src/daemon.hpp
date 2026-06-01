@@ -17,6 +17,7 @@ struct DaemonPaths {
     std::string overlayPath;     // /etc/fpvd/config.json
     std::string radioUpScript;   // /usr/libexec/fpvd/radio-up.sh
     std::string waybeamJsonPath; // /etc/waybeam.json
+    std::string radioTuneScript{}; // /usr/libexec/fpvd/radio-tune.sh (optional)
 };
 
 struct PatchResult {

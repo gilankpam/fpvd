@@ -7,6 +7,8 @@
 #include "translate/telemetry.hpp"
 #include "translate/waybeam.hpp"
 #include "translate/wfb.hpp"
+#include "translate/wfb_control.hpp"
+#include "link_width.hpp"
 #include <chrono>
 #include <ctime>
 #include <fstream>
@@ -149,16 +151,10 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     auto errs = validate(pending_);
     if (!errs.empty()) return {false, std::move(errs), {}, std::nullopt, version_};
 
-    // Compute diff before overwriting effective.
     auto subs = diffSubsystems(effective_, pending_);
+    auto link = classifyLinkChange(effective_, pending_);
     const bool wasDlEnabled = effective_.dynamicLink.enabled;
-    // Channel/bandwidth retune drops the over-the-air link (and the
-    // wfb_tun tunnel carrying this HTTP session) until the client also
-    // retunes — defer the restart so the response can flush first.
-    // Other link changes (mcs/txpower/fec/...) don't drop the air link.
-    const bool deferRadioRetune =
-        effective_.link.channel != pending_.link.channel ||
-        effective_.link.width   != pending_.link.width;
+
     // Beamforming is reconciled (not exec-supervised); report it as restarted
     // when its own block or the derived modulation width changed.
     const bool bfChanged =
@@ -179,46 +175,23 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     if (subs.radio) restarted.push_back("radio");
     if (subs.encoder) restarted.push_back("encoder");
     if (subs.telemetry) restarted.push_back("telemetry");
-    // Only report dl_applier as restarted when the process existed before
-    // the apply or will exist after; pure baseline edits while DL is off
-    // don't restart anything.
-    if (subs.dynamicLink && (wasDlEnabled || effective_.dynamicLink.enabled)) {
-        restarted.push_back("dl_applier");
-    }
+    const bool dlAffects =
+        subs.dynamicLink && (wasDlEnabled || effective_.dynamicLink.enabled);
+    if (dlAffects) restarted.push_back("dl_applier");
     for (auto& n : subs.servicesAffected) restarted.push_back(n);
     if (bfChanged) restarted.push_back("beamforming");
 
-    if (reallyRestart && deferRadioRetune) {
-        // Defer the restart so the HTTP response can flush before the
-        // channel/bandwidth change drops the client's wfb_tun session.
-        // lastApply_.ok is set to true optimistically; the deferred
-        // worker flips it to false (with .error) if radio bring-up fails.
-        version_++;
-        lastApply_ = {nowIso(), true, restarted, std::nullopt};
-        std::thread([this]{
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            std::lock_guard<std::mutex> g2(mu_);
-            orch_.stopAll();
-            orch_ = Orchestrator{};
-            auto rr = bringUpRadio(paths_.radioUpScript, effective_);
-            if (!rr.ok) {
-                lastApply_.ok = false;
-                lastApply_.error = std::string("radio: ") + rr.stderrText;
-                return;
-            }
-            radio_ = {rr.driver, rr.iface, rr.adapterId};
-            seedOrchestrator();
-            orch_.startAll();
-            reconcileBeamforming();
-        }).detach();
-        return {true, {}, restarted, std::nullopt, version_};
-    }
+    // A rebuild bounces the whole orchestrator (including wfb). It is needed
+    // only when a non-link subsystem changes, or when a link change cannot be
+    // hot-applied (linkId / wlanAdapter). dlAffects keeps an mtu-only change
+    // on the hot path when DL is off, but rebuilds when DL consumes it.
+    const bool needsRebuild = subs.encoder || subs.telemetry || dlAffects ||
+        !subs.servicesAffected.empty() || link.fullRestart;
 
-    if (reallyRestart) {
-        // Subsystem-level restart: rebuild orchestrator (simple v1).
+    if (reallyRestart && needsRebuild) {
+        // Full-restart path (unchanged): rebuild orchestrator + radio bring-up.
         orch_.stopAll();
         orch_ = Orchestrator{};
-        // Re-run radio bring-up if link changed.
         if (subs.radio) {
             auto rr = bringUpRadio(paths_.radioUpScript, effective_);
             if (!rr.ok) {
@@ -231,16 +204,100 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         seedOrchestrator();
         orch_.startAll();
         reconcileBeamforming();
-    } else {
-        // Re-seed the orchestrator's specs so introspection
-        // (Orchestrator::names()) reflects the new config. Note: assigning
-        // a fresh Orchestrator here destroys any existing Supervisor
-        // unique_ptrs, which would also shutdown() their children — this
-        // is safe today only because every caller pairs bootstrap(false)
-        // with apply(false), so no live children exist.
-        orch_ = Orchestrator{};
-        seedOrchestrator();
+        version_++;
+        lastApply_ = {nowIso(), true, restarted, std::nullopt};
+        return {true, {}, restarted, std::nullopt, version_};
     }
+
+    if (reallyRestart) {
+        // Hot path: a purely hot-applicable link change — no wfb restart.
+        // (A) Immediate, non-link-dropping changes.
+        if (link.nicTxpower) {
+            auto rr = tuneRadio(paths_.radioTuneScript, "txpower", effective_,
+                                radio_.iface, radio_.driver);
+            if (!rr.ok) {
+                lastApply_ = {nowIso(), false, restarted,
+                              std::string("txpower: ") + rr.stderrText};
+                return {false, {}, restarted, rr.stderrText, version_};
+            }
+        }
+        if (link.nicMtu) {
+            auto rr = tuneRadio(paths_.radioTuneScript, "mtu", effective_,
+                                radio_.iface, radio_.driver);
+            if (!rr.ok) {
+                lastApply_ = {nowIso(), false, restarted,
+                              std::string("mtu: ") + rr.stderrText};
+                return {false, {}, restarted, rr.stderrText, version_};
+            }
+        }
+        if (link.videoFec) {
+            WfbControlClient cli("127.0.0.1", kVideoControlPort);
+            auto rr = cli.setFec(static_cast<uint8_t>(effective_.link.fec.k),
+                                 static_cast<uint8_t>(effective_.link.fec.n));
+            if (!rr.ok) {
+                lastApply_ = {nowIso(), false, restarted,
+                              std::string("fec: ") + rr.error};
+                return {false, {}, restarted, rr.error, version_};
+            }
+        }
+        if (link.videoRadiotap && !link.nicWidth) {
+            // mcs/stbc/ldpc with no width change — push now (no link drop).
+            WfbControlClient cli("127.0.0.1", kVideoControlPort);
+            auto rr = cli.setRadio(
+                static_cast<uint8_t>(effective_.link.stbc ? 1 : 0),
+                effective_.link.ldpc, false,
+                static_cast<uint8_t>(modulationWidth(effective_.link.width)),
+                static_cast<uint8_t>(effective_.link.mcs), false, 1);
+            if (!rr.ok) {
+                lastApply_ = {nowIso(), false, restarted,
+                              std::string("radio: ") + rr.error};
+                return {false, {}, restarted, rr.error, version_};
+            }
+        }
+
+        // (B) Link-dropping change (channel and/or width) — defer ~200ms so the
+        // HTTP response flushes before the air link (and wfb_tun session) drops.
+        if (link.nicChannel) {
+            version_++;
+            lastApply_ = {nowIso(), true, restarted, std::nullopt};
+            const bool pushWidth = link.nicWidth;
+            // restarted is already recorded in lastApply_ above; the worker
+            // only flips ok/error, so it need not capture it.
+            std::thread([this, pushWidth] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                std::lock_guard<std::mutex> g2(mu_);
+                auto rr = tuneRadio(paths_.radioTuneScript, "channel", effective_,
+                                    radio_.iface, radio_.driver);
+                if (!rr.ok) {
+                    lastApply_.ok = false;
+                    lastApply_.error = std::string("channel: ") + rr.stderrText;
+                    return;
+                }
+                if (pushWidth) {
+                    // NIC retuned first; now bump the video radiotap bandwidth.
+                    WfbControlClient cli("127.0.0.1", kVideoControlPort);
+                    auto cr = cli.setRadio(
+                        static_cast<uint8_t>(effective_.link.stbc ? 1 : 0),
+                        effective_.link.ldpc, false,
+                        static_cast<uint8_t>(modulationWidth(effective_.link.width)),
+                        static_cast<uint8_t>(effective_.link.mcs), false, 1);
+                    if (!cr.ok) {
+                        lastApply_.ok = false;
+                        lastApply_.error = std::string("radio: ") + cr.error;
+                    }
+                }
+            }).detach();
+            return {true, {}, restarted, std::nullopt, version_};
+        }
+
+        version_++;
+        lastApply_ = {nowIso(), true, restarted, std::nullopt};
+        return {true, {}, restarted, std::nullopt, version_};
+    }
+
+    // reallyRestart == false: re-seed orchestrator specs only (dry config load).
+    orch_ = Orchestrator{};
+    seedOrchestrator();
     version_++;
     lastApply_ = {nowIso(), true, restarted, std::nullopt};
     return {true, {}, restarted, std::nullopt, version_};

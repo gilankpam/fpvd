@@ -40,8 +40,19 @@ TEST_CASE("translate.wfb: tunnel rx and tx argv") {
     CHECK(tx[0] == "/usr/bin/wfb_tx");
     CHECK(contains(tx, "-p")); CHECK(contains(tx, "32"));
     CHECK(contains(tx, "-u")); CHECK(contains(tx, "5801"));
-    // tunnel uses M=1 not user mcs
-    CHECK(contains(tx, "-M")); CHECK(contains(tx, "1"));
+    // tun/tlm are boot-once with fixed robust params, independent of link.*
+    auto at = [&](const std::string& flag){
+        auto it = std::find(tx.begin(), tx.end(), flag);
+        REQUIRE(it != tx.end());
+        return *(it + 1);
+    };
+    CHECK(at("-M") == "0");   // robust mcs=0
+    CHECK(at("-k") == "3");   // fec 3/5
+    CHECK(at("-n") == "5");
+    CHECK(at("-B") == "20");  // HT20
+    CHECK(at("-S") == "0");
+    CHECK(at("-L") == "0");
+    CHECK(at("-i") == "7669206");  // shared linkId
 }
 
 TEST_CASE("translate.wfb: telemetry rx and tx argv") {
@@ -56,6 +67,14 @@ TEST_CASE("translate.wfb: telemetry rx and tx argv") {
     auto tx = wfbArgs(c, fpvd::WfbRole::TlmTx, "wlan0", "/etc/drone.key");
     CHECK(contains(tx, "16"));
     CHECK(contains(tx, "14551"));
+    auto att = [&](const std::string& flag){
+        auto it = std::find(tx.begin(), tx.end(), flag);
+        REQUIRE(it != tx.end());
+        return *(it + 1);
+    };
+    CHECK(att("-M") == "0");
+    CHECK(att("-k") == "3");
+    CHECK(att("-n") == "5");
 }
 
 TEST_CASE("translate.wfb: wfb_tun argv") {
