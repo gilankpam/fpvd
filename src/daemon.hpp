@@ -82,6 +82,7 @@ private:
     void seedOrchestrator();
     void reconcileBeamforming();
     void rewriteWaybeamJson();
+    void startController();
 
     DaemonPaths paths_;
     Config effective_;

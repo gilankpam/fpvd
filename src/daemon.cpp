@@ -60,7 +60,7 @@ void Daemon::bootstrap(bool startProcesses) {
         orch_.startAll();
         reconcileBeamforming();
         if (effective_.dynamicLink.enabled) {
-            dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface), dlGenerationId_);
+            startController();
         }
     }
 }
@@ -131,6 +131,12 @@ void Daemon::rewriteWaybeamJson() {
     atomicWriteJson(paths_.waybeamJsonPath, toWaybeamJson(effective_));
 }
 
+void Daemon::startController() {
+    // Builds a fresh snapshot from the current effective_ config + detected iface,
+    // and starts the in-process control loop.
+    dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface), dlGenerationId_);
+}
+
 PatchResult Daemon::patchPending(const nlohmann::json& patch) {
     std::lock_guard<std::mutex> g(mu_);
     nlohmann::json next = deepMergeJson(nlohmann::json(pending_), patch);
@@ -156,7 +162,9 @@ ApplyResult Daemon::apply(bool reallyRestart) {
 
     auto subs = diffSubsystems(effective_, pending_);
     auto link = classifyLinkChange(effective_, pending_);
+    // enabledOld from effective_ (pre-commit), enabledNew from pending_ (the about-to-be-committed config).
     const bool enabledOld = effective_.dynamicLink.enabled;
+    const bool enabledNew = pending_.dynamicLink.enabled;
 
     // Beamforming is reconciled (not exec-supervised); report it as restarted
     // when its own block or the derived modulation width changed.
@@ -173,7 +181,6 @@ ApplyResult Daemon::apply(bool reallyRestart) {
 
     effective_ = pending_;
     rewriteWaybeamJson();
-    const bool enabledNew = effective_.dynamicLink.enabled;
 
     std::vector<std::string> restarted;
     if (subs.radio) restarted.push_back("radio");
@@ -202,6 +209,8 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // controller is stopped first (clean stop while wfb is still up) and
         // restarted after startAll() — a "restart-around" so a rebuild for a
         // non-DL reason (e.g. encoder/fps) does not leave the controller dead.
+        // On radio bring-up failure below, the controller stays stopped (safe state:
+        // no wfb, no decisions); the operator retries POST /apply.
         if (enabledOld) dl_.stop();
         orch_.stopAll();
         orch_ = Orchestrator{};
@@ -219,8 +228,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         reconcileBeamforming();
         // Start AFTER radio_ is refreshed so the snapshot's iface is fresh.
         if (enabledNew)
-            dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface),
-                      dlGenerationId_);
+            startController();
         version_++;
         lastApply_ = {nowIso(), true, restarted, std::nullopt};
         return {true, {}, restarted, std::nullopt, version_};
@@ -232,8 +240,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // nicChannel return detaches a worker and returns early). start() binds
         // sockets + launches the thread; setConfig() hot-reloads; stop() joins.
         if (!enabledOld && enabledNew)
-            dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface),
-                      dlGenerationId_);
+            startController();
         else if (enabledOld && !enabledNew)
             dl_.stop();
         else if (enabledOld && enabledNew && subs.dynamicLink)
