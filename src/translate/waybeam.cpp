@@ -66,17 +66,11 @@ nlohmann::json toWaybeamJson(const Config& c) {
         }},
         {"record", {
             {"enabled", c.recording.enabled},
-            {"dir", c.recording.dir},
             {"format", c.recording.format},
             {"mode", c.recording.mode},
             {"maxSeconds", c.recording.maxSeconds},
             {"maxMB", c.recording.maxMB},
             {"bitrate", 0}, {"fps", 0}, {"gopSize", 0.0}, {"server", ""}
-        }},
-        {"snapshot", {
-            {"enabled", c.snapshot.enabled},
-            {"quality", c.snapshot.quality},
-            {"channel", 7}, {"width", 0}, {"height", 0}
         }},
         {"debug", {{"showOsd", false}}}
     };

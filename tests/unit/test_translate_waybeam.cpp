@@ -22,8 +22,6 @@ TEST_CASE("translate.waybeam: default config produces expected JSON") {
     CHECK(out["outgoing"]["enabled"] == true);
     CHECK(out["outgoing"]["server"] == "unix://venc_wfb");
     CHECK(out["outgoing"]["streamMode"] == "rtp");
-    CHECK(out["snapshot"]["enabled"] == true);
-    CHECK(out["snapshot"]["quality"] == 80);
     CHECK(out["record"]["enabled"] == false);
 }
 
@@ -34,7 +32,6 @@ TEST_CASE("translate.waybeam: changes propagate") {
     c.video.bitrate = 4000;
     c.video.resolution = "1280x720";
     c.image.rotate = 180;
-    c.snapshot.enabled = false;
 
     auto out = fpvd::toWaybeamJson(c);
     CHECK(out["video0"]["codec"] == "h264");
@@ -42,5 +39,4 @@ TEST_CASE("translate.waybeam: changes propagate") {
     CHECK(out["video0"]["bitrate"] == 4000);
     CHECK(out["video0"]["size"] == "1280x720");
     CHECK(out["image"]["rotate"] == 180);
-    CHECK(out["snapshot"]["enabled"] == false);
 }

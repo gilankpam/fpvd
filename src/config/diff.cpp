@@ -9,7 +9,7 @@ SubsystemDiff diffSubsystems(const Config& a, const Config& b) {
     json ja = a, jb = b;
     if (ja["link"] != jb["link"]) d.radio = true;
     if (ja["video"] != jb["video"] || ja["image"] != jb["image"] ||
-        ja["recording"] != jb["recording"] || ja["snapshot"] != jb["snapshot"])
+        ja["recording"] != jb["recording"])
         d.encoder = true;
     if (ja["telemetry"] != jb["telemetry"]) d.telemetry = true;
 

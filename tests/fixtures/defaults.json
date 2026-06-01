@@ -8,9 +8,8 @@
             "roi": {"enabled": true, "qp": 0, "center": 0.4, "steps": 2}},
   "image": {"mirror": false, "flip": false, "rotate": 0},
   "telemetry": {"router": "msposd", "serial": "ttyS2", "osdFps": 20, "baud": 115200},
-  "recording": {"enabled": false, "dir": "/mnt/mmcblk0p1", "format": "ts",
+  "recording": {"enabled": false, "format": "ts",
                 "mode": "mirror", "maxSeconds": 300, "maxMB": 500},
-  "snapshot": {"enabled": true, "quality": 80},
   "dynamicLink": {
     "enabled": false,
     "healthTimeoutMs": 10000,

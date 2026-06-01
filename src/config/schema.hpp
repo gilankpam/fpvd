@@ -95,17 +95,13 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Telemetry, router, serial, osdFps, baud)
 
 struct Recording {
     bool enabled{false};
-    std::string dir{"/mnt/mmcblk0p1"};
     std::string format{"ts"};
     std::string mode{"mirror"};
     int maxSeconds{300};
     int maxMB{500};
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Recording, enabled, dir, format, mode,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Recording, enabled, format, mode,
                                    maxSeconds, maxMB)
-
-struct Snapshot { bool enabled{true}; int quality{80}; };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Snapshot, enabled, quality)
 
 struct DynamicLinkSafe {
     int mcs{1};
@@ -172,12 +168,11 @@ struct Config {
     Image image{};
     Telemetry telemetry{};
     Recording recording{};
-    Snapshot snapshot{};
     DynamicLink dynamicLink{};
     std::map<std::string, Service> services{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, link, video, image,
-                                               telemetry, recording, snapshot,
+                                               telemetry, recording,
                                                dynamicLink, services)
 
 } // namespace fpvd
