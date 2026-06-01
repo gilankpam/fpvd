@@ -26,6 +26,7 @@ add_library(fpvd_core STATIC src/placeholder.cpp)
 target_include_directories(fpvd_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(fpvd_core PUBLIC third_party Threads::Threads)
 target_sources(fpvd_core PRIVATE
+    src/dynlink/wire.cpp
     src/config/store.cpp
     src/config/validate.cpp
     src/config/diff.cpp
@@ -56,6 +57,7 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_executable(fpvd_tests tests/test_main.cpp)
     target_link_libraries(fpvd_tests PRIVATE fpvd_core)
     target_sources(fpvd_tests PRIVATE
+        tests/unit/test_dl_wire.cpp
         tests/unit/test_link_width.cpp
         tests/unit/test_sanity.cpp
         tests/unit/test_schema.cpp
