@@ -19,6 +19,13 @@ void Orchestrator::remove(const std::string& name) {
     specs_.erase(name);
 }
 
+void Orchestrator::restart(const std::string& name) {
+    auto it = sups_.find(name);
+    if (it == sups_.end()) return;
+    it->second->shutdown();   // SIGTERM + join (no reinit flag -> no self-respawn)
+    it->second->start();      // fresh supervision loop, immediate restart
+}
+
 Supervisor* Orchestrator::get(const std::string& name) {
     auto it = sups_.find(name);
     return it == sups_.end() ? nullptr : it->second.get();

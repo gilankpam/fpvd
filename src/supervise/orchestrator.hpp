@@ -16,6 +16,7 @@ class Orchestrator {
 public:
     void add(SupervisedSpec spec);
     void remove(const std::string& name);  // shuts down if running
+    void restart(const std::string& name);  // bounce one process; no-op if absent
     Supervisor* get(const std::string& name);
 
     // Topologically ordered names. Throws OrchestrationError on cycle.
