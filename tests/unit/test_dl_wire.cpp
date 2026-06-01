@@ -190,6 +190,44 @@ TEST_CASE("wire: ping rejects bad crc") {
     CHECK(decodePing(buf, sizeof(buf), r) == DecodeResult::BadCrc);
 }
 
+TEST_CASE("wire: ping rejects short buffer") {
+    Ping p{};
+    p.gsSeq    = 0xCAFEBABEu;
+    p.gsMonoUs = 0x0102030405060708ull;
+    uint8_t buf[kPingOnWire];
+    encodePing(p, buf, sizeof(buf));
+    Ping r{};
+    CHECK(decodePing(buf, kPingOnWire - 1, r) == DecodeResult::Short);
+}
+
+TEST_CASE("wire: ping rejects bad magic") {
+    Ping p{};
+    p.gsSeq    = 0xCAFEBABEu;
+    p.gsMonoUs = 0x0102030405060708ull;
+    uint8_t buf[kPingOnWire];
+    encodePing(p, buf, sizeof(buf));
+    buf[0] ^= 0xFF;
+    Ping r{};
+    CHECK(decodePing(buf, sizeof(buf), r) == DecodeResult::BadMagic);
+}
+
+TEST_CASE("wire: ping rejects bad version") {
+    Ping p{};
+    p.gsSeq    = 0xCAFEBABEu;
+    p.gsMonoUs = 0x0102030405060708ull;
+    uint8_t buf[kPingOnWire];
+    encodePing(p, buf, sizeof(buf));
+    buf[4] = kWireVersion + 1;
+    // Recompute CRC so we test bad-version, not bad-crc
+    uint32_t new_crc = crc32(buf, kPingPayloadSize);
+    buf[kPingPayloadSize]     = static_cast<uint8_t>((new_crc >> 24) & 0xFF);
+    buf[kPingPayloadSize + 1] = static_cast<uint8_t>((new_crc >> 16) & 0xFF);
+    buf[kPingPayloadSize + 2] = static_cast<uint8_t>((new_crc >>  8) & 0xFF);
+    buf[kPingPayloadSize + 3] = static_cast<uint8_t>(new_crc & 0xFF);
+    Ping r{};
+    CHECK(decodePing(buf, sizeof(buf), r) == DecodeResult::BadVersion);
+}
+
 // ---------------------------------------------------------------------------
 // Pong
 // ---------------------------------------------------------------------------
@@ -218,6 +256,63 @@ TEST_CASE("wire: pong round trip") {
     CHECK(r.gsMonoUsEcho    == p.gsMonoUsEcho);
     CHECK(r.droneMonoRecvUs == p.droneMonoRecvUs);
     CHECK(r.droneMonoSendUs == p.droneMonoSendUs);
+}
+
+TEST_CASE("wire: pong rejects short buffer") {
+    Pong p{};
+    p.gsSeq            = 7;
+    p.gsMonoUsEcho     = 1000000ull;
+    p.droneMonoRecvUs  = 2000000ull;
+    p.droneMonoSendUs  = 2000050ull;
+    uint8_t buf[kPongOnWire];
+    encodePong(p, buf, sizeof(buf));
+    Pong r{};
+    CHECK(decodePong(buf, kPongOnWire - 1, r) == DecodeResult::Short);
+}
+
+TEST_CASE("wire: pong rejects bad magic") {
+    Pong p{};
+    p.gsSeq            = 7;
+    p.gsMonoUsEcho     = 1000000ull;
+    p.droneMonoRecvUs  = 2000000ull;
+    p.droneMonoSendUs  = 2000050ull;
+    uint8_t buf[kPongOnWire];
+    encodePong(p, buf, sizeof(buf));
+    buf[0] ^= 0xFF;
+    Pong r{};
+    CHECK(decodePong(buf, sizeof(buf), r) == DecodeResult::BadMagic);
+}
+
+TEST_CASE("wire: pong rejects bad version") {
+    Pong p{};
+    p.gsSeq            = 7;
+    p.gsMonoUsEcho     = 1000000ull;
+    p.droneMonoRecvUs  = 2000000ull;
+    p.droneMonoSendUs  = 2000050ull;
+    uint8_t buf[kPongOnWire];
+    encodePong(p, buf, sizeof(buf));
+    buf[4] = kWireVersion + 1;
+    // Recompute CRC so we test bad-version, not bad-crc
+    uint32_t new_crc = crc32(buf, kPongPayloadSize);
+    buf[kPongPayloadSize]     = static_cast<uint8_t>((new_crc >> 24) & 0xFF);
+    buf[kPongPayloadSize + 1] = static_cast<uint8_t>((new_crc >> 16) & 0xFF);
+    buf[kPongPayloadSize + 2] = static_cast<uint8_t>((new_crc >>  8) & 0xFF);
+    buf[kPongPayloadSize + 3] = static_cast<uint8_t>(new_crc & 0xFF);
+    Pong r{};
+    CHECK(decodePong(buf, sizeof(buf), r) == DecodeResult::BadVersion);
+}
+
+TEST_CASE("wire: pong rejects bad crc") {
+    Pong p{};
+    p.gsSeq            = 7;
+    p.gsMonoUsEcho     = 1000000ull;
+    p.droneMonoRecvUs  = 2000000ull;
+    p.droneMonoSendUs  = 2000050ull;
+    uint8_t buf[kPongOnWire];
+    encodePong(p, buf, sizeof(buf));
+    buf[kPongOnWire - 1] ^= 0x01;  // corrupt last CRC byte
+    Pong r{};
+    CHECK(decodePong(buf, sizeof(buf), r) == DecodeResult::BadCrc);
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +353,7 @@ TEST_CASE("wire: peekKind dispatches correctly") {
 TEST_CASE("wire: hello encode/decode round trip") {
     // Mirrors wire_hello_encode_decode_roundtrip
     Hello in{};
-    in.version         = static_cast<uint8_t>(kWireVersion);
+    in.version         = kWireVersion;
     in.flags           = 0;
     in.generationId    = 0xCAFEBABEu;
     in.mtuBytes        = 3994;
@@ -280,7 +375,7 @@ TEST_CASE("wire: hello encode/decode round trip") {
 TEST_CASE("wire: hello rejects bad crc") {
     // Mirrors wire_hello_bad_crc_rejected
     Hello in{};
-    in.version      = static_cast<uint8_t>(kWireVersion);
+    in.version      = kWireVersion;
     in.generationId = 1;
     in.mtuBytes     = 1400;
     in.fps          = 30;
@@ -301,7 +396,7 @@ TEST_CASE("wire: hello rejects bad magic") {
 TEST_CASE("wire: hello rejects short buffer") {
     // Mirrors wire_hello_short_buffer_rejected
     Hello in{};
-    in.version      = static_cast<uint8_t>(kWireVersion);
+    in.version      = kWireVersion;
     in.generationId = 1;
     in.mtuBytes     = 1400;
     in.fps          = 30;
@@ -314,7 +409,7 @@ TEST_CASE("wire: hello rejects short buffer") {
 TEST_CASE("wire: hello rejects bad version") {
     // Mirrors wire_hello_bad_version_rejected
     Hello in{};
-    in.version      = static_cast<uint8_t>(kWireVersion);
+    in.version      = kWireVersion;
     in.generationId = 1;
     in.mtuBytes     = 1400;
     in.fps          = 30;
@@ -338,7 +433,7 @@ TEST_CASE("wire: hello rejects bad version") {
 TEST_CASE("wire: hello_ack encode/decode round trip") {
     // Mirrors wire_hello_ack_encode_decode_roundtrip
     HelloAck in{};
-    in.version          = static_cast<uint8_t>(kWireVersion);
+    in.version          = kWireVersion;
     in.generationIdEcho = 0x12345678u;
 
     uint8_t buf[kHelloAckOnWire];
@@ -401,7 +496,7 @@ TEST_CASE("wire: hello_ack rejects bad version") {
 TEST_CASE("wire: peekKind identifies hello_ack") {
     // Mirrors wire_peek_kind_hello_ack
     HelloAck in{};
-    in.version          = static_cast<uint8_t>(kWireVersion);
+    in.version          = kWireVersion;
     in.generationIdEcho = 7;
     uint8_t buf[kHelloAckOnWire];
     encodeHelloAck(in, buf, sizeof(buf));
@@ -411,7 +506,7 @@ TEST_CASE("wire: peekKind identifies hello_ack") {
 TEST_CASE("wire: peekKind identifies hello") {
     // Mirrors wire_peek_kind_hello
     Hello in{};
-    in.version      = static_cast<uint8_t>(kWireVersion);
+    in.version      = kWireVersion;
     in.generationId = 1;
     in.mtuBytes     = 1400;
     in.fps          = 30;

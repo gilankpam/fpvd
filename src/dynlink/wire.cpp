@@ -158,7 +158,7 @@ size_t encodeDecision(const Decision& d, uint8_t* buf, size_t buflen) {
 
     std::memset(buf, 0, kWireOnWire);
     put_u32(&buf[0],  kWireMagic);
-    buf[4] = static_cast<uint8_t>(kWireVersion);
+    buf[4] = kWireVersion;
     buf[5] = d.flags;
     /* buf[6..7] = _pad */
     put_u32(&buf[8],  d.sequence);
@@ -184,7 +184,7 @@ DecodeResult decodeDecision(const uint8_t* buf, size_t len, Decision& d) {
     if (magic != kWireMagic) return DecodeResult::BadMagic;
 
     uint8_t version = buf[4];
-    if (version != static_cast<uint8_t>(kWireVersion)) return DecodeResult::BadVersion;
+    if (version != kWireVersion) return DecodeResult::BadVersion;
 
     uint32_t crc_wire = get_u32(&buf[kWirePayloadSize]);
     uint32_t crc_calc = crc32(buf, kWirePayloadSize);
@@ -215,7 +215,7 @@ size_t encodePing(const Ping& p, uint8_t* buf, size_t buflen) {
     if (buflen < kPingOnWire) return 0;
     std::memset(buf, 0, kPingOnWire);
     put_u32(&buf[0],  kPingMagic);
-    buf[4] = static_cast<uint8_t>(kWireVersion);
+    buf[4] = kWireVersion;
     buf[5] = p.flags;
     /* buf[6..7] = _pad */
     put_u32(&buf[8],  p.gsSeq);
@@ -228,7 +228,7 @@ size_t encodePing(const Ping& p, uint8_t* buf, size_t buflen) {
 DecodeResult decodePing(const uint8_t* buf, size_t len, Ping& p) {
     if (len < kPingOnWire) return DecodeResult::Short;
     if (get_u32(&buf[0]) != kPingMagic) return DecodeResult::BadMagic;
-    if (buf[4] != static_cast<uint8_t>(kWireVersion)) return DecodeResult::BadVersion;
+    if (buf[4] != kWireVersion) return DecodeResult::BadVersion;
     uint32_t crc_wire = get_u32(&buf[kPingPayloadSize]);
     uint32_t crc_calc = crc32(buf, kPingPayloadSize);
     if (crc_wire != crc_calc) return DecodeResult::BadCrc;
@@ -250,7 +250,7 @@ size_t encodePong(const Pong& p, uint8_t* buf, size_t buflen) {
     if (buflen < kPongOnWire) return 0;
     std::memset(buf, 0, kPongOnWire);
     put_u32(&buf[0],  kPongMagic);
-    buf[4] = static_cast<uint8_t>(kWireVersion);
+    buf[4] = kWireVersion;
     buf[5] = p.flags;
     /* buf[6..7] = _pad */
     put_u32(&buf[8],  p.gsSeq);
@@ -265,7 +265,7 @@ size_t encodePong(const Pong& p, uint8_t* buf, size_t buflen) {
 DecodeResult decodePong(const uint8_t* buf, size_t len, Pong& p) {
     if (len < kPongOnWire) return DecodeResult::Short;
     if (get_u32(&buf[0]) != kPongMagic) return DecodeResult::BadMagic;
-    if (buf[4] != static_cast<uint8_t>(kWireVersion)) return DecodeResult::BadVersion;
+    if (buf[4] != kWireVersion) return DecodeResult::BadVersion;
     uint32_t crc_wire = get_u32(&buf[kPongPayloadSize]);
     uint32_t crc_calc = crc32(buf, kPongPayloadSize);
     if (crc_wire != crc_calc) return DecodeResult::BadCrc;
@@ -290,7 +290,7 @@ size_t encodeHello(const Hello& h, uint8_t* buf, size_t buflen) {
     std::memset(buf, 0, kHelloOnWire);
     put_u32(&buf[0],  kHelloMagic);
     /* Always emit current version; caller-supplied .version is ignored. */
-    buf[4] = static_cast<uint8_t>(kWireVersion);
+    buf[4] = kWireVersion;
     buf[5] = h.flags;
     /* buf[6..7] = _pad */
     put_u32(&buf[8],  h.generationId);
@@ -307,7 +307,7 @@ DecodeResult decodeHello(const uint8_t* buf, size_t len, Hello& h) {
     if (len < kHelloOnWire) return DecodeResult::Short;
     uint32_t magic = get_u32(&buf[0]);
     if (magic != kHelloMagic) return DecodeResult::BadMagic;
-    if (buf[4] != static_cast<uint8_t>(kWireVersion)) return DecodeResult::BadVersion;
+    if (buf[4] != kWireVersion) return DecodeResult::BadVersion;
     uint32_t crc_wire = get_u32(&buf[kHelloPayloadSize]);
     uint32_t crc_calc = crc32(buf, kHelloPayloadSize);
     if (crc_wire != crc_calc) return DecodeResult::BadCrc;
@@ -332,7 +332,7 @@ size_t encodeHelloAck(const HelloAck& h, uint8_t* buf, size_t buflen) {
     std::memset(buf, 0, kHelloAckOnWire);
     put_u32(&buf[0], kHelloAckMagic);
     /* Always emit current version; caller-supplied .version is ignored. */
-    buf[4] = static_cast<uint8_t>(kWireVersion);
+    buf[4] = kWireVersion;
     /* buf[5..7] = _pad */
     put_u32(&buf[8], h.generationIdEcho);
     /* buf[12..27] = reserved (zero) */
@@ -345,7 +345,7 @@ DecodeResult decodeHelloAck(const uint8_t* buf, size_t len, HelloAck& h) {
     if (len < kHelloAckOnWire) return DecodeResult::Short;
     uint32_t magic = get_u32(&buf[0]);
     if (magic != kHelloAckMagic) return DecodeResult::BadMagic;
-    if (buf[4] != static_cast<uint8_t>(kWireVersion)) return DecodeResult::BadVersion;
+    if (buf[4] != kWireVersion) return DecodeResult::BadVersion;
     uint32_t crc_wire = get_u32(&buf[kHelloAckPayloadSize]);
     uint32_t crc_calc = crc32(buf, kHelloAckPayloadSize);
     if (crc_wire != crc_calc) return DecodeResult::BadCrc;

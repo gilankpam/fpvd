@@ -1,12 +1,11 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 
 namespace fpvd::dynlink {
 
 inline constexpr uint32_t kWireMagic        = 0x444C4B31u;  // "DLK1"
-inline constexpr int      kWireVersion      = 2;
+inline constexpr uint8_t  kWireVersion      = 2;
 inline constexpr size_t   kWirePayloadSize  = 27;
 inline constexpr size_t   kWireOnWire       = 31;           // 27 payload + 4 CRC
 
