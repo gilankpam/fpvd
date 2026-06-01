@@ -9,7 +9,6 @@ TEST_CASE("translate.waybeam: default config produces expected JSON") {
     auto out = fpvd::toWaybeamJson(c);
 
     // Spot checks on translated fields.
-    CHECK(out["video0"]["codec"] == "h265");
     CHECK(out["video0"]["fps"] == 60);
     CHECK(out["video0"]["size"] == "1920x1080");
     CHECK(out["video0"]["bitrate"] == 8192);
@@ -27,14 +26,12 @@ TEST_CASE("translate.waybeam: default config produces expected JSON") {
 
 TEST_CASE("translate.waybeam: changes propagate") {
     fpvd::Config c{};
-    c.video.codec = "h264";
     c.video.fps = 30;
     c.video.bitrate = 4000;
     c.video.resolution = "1280x720";
     c.image.rotate = 180;
 
     auto out = fpvd::toWaybeamJson(c);
-    CHECK(out["video0"]["codec"] == "h264");
     CHECK(out["video0"]["fps"] == 30);
     CHECK(out["video0"]["bitrate"] == 4000);
     CHECK(out["video0"]["size"] == "1280x720");

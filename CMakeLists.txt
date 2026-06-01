@@ -80,6 +80,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/unit/test_link_classify.cpp
         tests/unit/test_lock.cpp
         tests/unit/test_translate_waybeam.cpp
+        tests/unit/test_waybeam_diff.cpp
         tests/unit/test_waybeam_client.cpp
         tests/unit/test_translate_wfb.cpp
         tests/unit/test_wfb_control.cpp
