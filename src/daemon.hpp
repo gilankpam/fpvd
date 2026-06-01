@@ -2,6 +2,8 @@
 #include "config/diff.hpp"
 #include "config/schema.hpp"
 #include "config/validate.hpp"
+#include "dynlink/controller.hpp"
+#include "dynlink/runtime_config.hpp"
 #include "supervise/orchestrator.hpp"
 #include "supervise/beamforming.hpp"
 #include <chrono>
@@ -18,6 +20,7 @@ struct DaemonPaths {
     std::string radioUpScript;   // /usr/libexec/fpvd/radio-up.sh
     std::string waybeamJsonPath; // /etc/waybeam.json
     std::string radioTuneScript{}; // /usr/libexec/fpvd/radio-tune.sh (optional)
+    dynlink::Endpoints dlEndpoints{};  // defaults to production endpoints; overridable in tests
 };
 
 struct PatchResult {
@@ -50,6 +53,10 @@ struct RadioInfo {
 class Daemon {
 public:
     explicit Daemon(DaemonPaths paths);
+    ~Daemon();
+
+    Daemon(const Daemon&) = delete;
+    Daemon& operator=(const Daemon&) = delete;
 
     // Load defaults and overlay, write initial /etc/waybeam.json,
     // configure orchestrator, optionally start processes.
@@ -61,6 +68,7 @@ public:
     const LastApply& lastApply() const { return lastApply_; }
     const RadioInfo& radio() const { return radio_; }
     BfStatus beamformingStatus() const { return bf_.status(); }
+    dynlink::DlStatus dynamicLinkStatus() const { return dl_.status(); }
     std::chrono::steady_clock::time_point startedAt() const { return startedAt_; }
 
     PatchResult patchPending(const nlohmann::json& patch);
@@ -74,6 +82,7 @@ private:
     void seedOrchestrator();
     void reconcileBeamforming();
     void rewriteWaybeamJson();
+    void startController();
 
     DaemonPaths paths_;
     Config effective_;
@@ -83,6 +92,8 @@ private:
     RadioInfo radio_;
     Orchestrator orch_;
     BeamformingController bf_;
+    dynlink::DynamicLinkController dl_;
+    uint32_t dlGenerationId_;
     std::chrono::steady_clock::time_point startedAt_;
     std::mutex mu_;
 };

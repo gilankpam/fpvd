@@ -41,7 +41,7 @@ void registerHandlers(HttpServer& srv, Daemon& d, bool reallyRestart) {
                 nlohmann::json details = {{"locked", pr.lockedPaths}};
                 res.status = 400;
                 res.set_content(errBody("dynamic_link_locked",
-                    "fields owned by dl-applier while dynamicLink.enabled",
+                    "fields owned by the dynamic-link controller while dynamicLink.enabled",
                     details).dump(), "application/json");
                 return;
             }

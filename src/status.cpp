@@ -1,4 +1,5 @@
 #include "status.hpp"
+#include "dynlink/runtime_config.hpp"
 #include <chrono>
 
 namespace fpvd {
@@ -61,6 +62,24 @@ nlohmann::json buildStatus(Daemon& d) {
 
     auto bf = d.beamformingStatus();
 
+    auto dls = d.dynamicLinkStatus();
+    nlohmann::json dlj;
+    if (!d.effective().dynamicLink.enabled) {
+        dlj = {{"enabled", false}, {"running", false}};
+    } else {
+        const char* hello = dls.hello == dynlink::HelloPub::Keepalive  ? "keepalive"
+                          : dls.hello == dynlink::HelloPub::Announcing ? "announcing"
+                          : "disabled";
+        dlj = {
+            {"enabled", true},
+            {"running", dls.running},
+            {"watchdogTripped", dls.watchdogTripped},
+            {"lastDecisionAgeMs", dls.lastDecisionAgeMs < 0
+                ? nlohmann::json(nullptr) : nlohmann::json(dls.lastDecisionAgeMs)},
+            {"hello", hello}
+        };
+    }
+
     return {
         {"uptime", uptimeSec},
         {"version", d.version()},
@@ -84,7 +103,8 @@ nlohmann::json buildStatus(Daemon& d) {
                          ? nlohmann::json(bf.lastCbr.value())
                          : nlohmann::json(nullptr)}
         }},
-        {"processes", procs}
+        {"processes", procs},
+        {"dynamicLink", dlj}
     };
 }
 

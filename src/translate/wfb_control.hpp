@@ -24,6 +24,7 @@ public:
                           uint8_t bandwidth, uint8_t mcs,
                           bool vhtMode, uint8_t vhtNss);
     WfbCtlResult setFec(uint8_t k, uint8_t n);
+    WfbCtlResult setInterleaveDepth(uint8_t depth);
 
 private:
     WfbCtlResult sendAndRecv(const void* req, size_t reqLen,

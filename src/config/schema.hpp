@@ -50,8 +50,8 @@ struct Link {
     int txpower{1};
     int mcs{2};
     Fec fec{};
-    bool stbc{false};
-    bool ldpc{false};
+    bool stbc{true};
+    bool ldpc{true};
     long linkId{7669206};
     int mtu{1500};
     std::optional<std::string> wlanAdapter{};
@@ -144,7 +144,6 @@ struct DynamicLink {
     int minIdrIntervalMs{500};
     int applyStaggerMs{50};
     int applySubPaceMs{5};
-    bool mavlinkEnable{true};
     DynamicLinkOsd osd{};
     DynamicLinkRoiQp roiQp{};
     DynamicLinkSafe safe{};
@@ -153,7 +152,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled,
                                                healthTimeoutMs,
                                                interleavingSupported,
                                                minIdrIntervalMs, applyStaggerMs,
-                                               applySubPaceMs, mavlinkEnable,
+                                               applySubPaceMs,
                                                osd, roiQp, safe)
 
 struct Service {

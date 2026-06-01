@@ -8,8 +8,8 @@
       "k": 8,
       "n": 12
     },
-    "stbc": false,
-    "ldpc": false,
+    "stbc": true,
+    "ldpc": true,
     "linkId": 7669206,
     "mtu": 1500,
     "wlanAdapter": null,
@@ -60,7 +60,6 @@
     "minIdrIntervalMs": 500,
     "applyStaggerMs": 50,
     "applySubPaceMs": 5,
-    "mavlinkEnable": true,
     "osd": {
       "enabled": true,
       "debugLatency": false

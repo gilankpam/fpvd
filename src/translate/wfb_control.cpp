@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <cerrno>
 #include <cstddef>
@@ -96,6 +97,17 @@ WfbCtlResult WfbControlClient::setFec(uint8_t k, uint8_t n) {
     req.u.set_fec.n = n;
     return sendAndRecv(&req, offsetof(WfbCmdReq, u) + sizeof(req.u.set_fec),
                        id, "set_fec");
+}
+
+WfbCtlResult WfbControlClient::setInterleaveDepth(uint8_t depth) {
+    uint32_t id = reqId_++;
+    WfbCmdReq req{};
+    req.req_id = htonl(id);
+    req.cmd_id = kWfbCmdSetInterleaveDepth;
+    req.u.set_interleave_depth.depth = depth;
+    return sendAndRecv(&req,
+                       offsetof(WfbCmdReq, u) + sizeof(req.u.set_interleave_depth),
+                       id, "set_interleave_depth");
 }
 
 } // namespace fpvd
