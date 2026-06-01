@@ -5,6 +5,7 @@
 namespace fpvd {
 
 nlohmann::json toWaybeamJson(const Config& c) {
+    // Keep the fpvd-managed field set in sync with waybeamConfigDiff().
     return {
         {"system", {{"webPort", 80}, {"overclockLevel", 1}, {"verbose", false}}},
         {"sensor", {
@@ -79,6 +80,9 @@ nlohmann::json toWaybeamJson(const Config& c) {
 
 static std::string fmtBool(bool b) { return b ? "true" : "false"; }
 
+// Formats a double for a waybeam query value. Assumes the C locale (fpvd never
+// calls setlocale) so the separator is '.'; waybeam parses these fields as
+// floats, so an integral value renders without a decimal (e.g. 2.0 -> "2").
 static std::string fmtDouble(double d) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%g", d);
@@ -87,6 +91,7 @@ static std::string fmtDouble(double d) {
 
 WaybeamFieldDiff waybeamConfigDiff(const Config& a, const Config& b,
                                    bool dlEnabled) {
+    // Keep the fpvd-managed field set in sync with toWaybeamJson().
     WaybeamFieldDiff d;
     const auto& va = a.video; const auto& vb = b.video;
 

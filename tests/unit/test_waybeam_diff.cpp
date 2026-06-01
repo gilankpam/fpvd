@@ -61,3 +61,18 @@ TEST_CASE("waybeamConfigDiff: no change yields empty diff") {
     CHECK(d.live.empty());
     CHECK(d.restart.empty());
 }
+
+TEST_CASE("waybeamConfigDiff: RESTART field still emitted when DL enabled") {
+    Config a{}, b{};
+    b.video.resolution = "1280x720";   // RESTART, not DL-owned
+    auto d = waybeamConfigDiff(a, b, /*dlEnabled=*/true);
+    CHECK(d.restart.at("video0.size") == "1280x720");
+}
+
+TEST_CASE("waybeamConfigDiff: fractional roi.center formats with a decimal") {
+    Config a{}, b{};
+    a.video.roi.center = 0.0;   // default center is 0.4, so explicitly set a to 0.0 for a genuine change
+    b.video.roi.center = 0.4;
+    auto d = waybeamConfigDiff(a, b, /*dlEnabled=*/false);
+    CHECK(d.live.at("fpv.roi_center") == "0.4");
+}
