@@ -21,7 +21,7 @@ TEST_CASE("dl-applier --help references every flag the translator emits") {
         "--wfb-tx-ctrl-addr", "--wfb-tx-ctrl-port",
         "--encoder-kind", "--encoder-host", "--encoder-port",
         "--idr-listen-addr", "--idr-listen-port",
-        "--mavlink-addr", "--mavlink-port", "--mavlink-enable",
+        "--mavlink-addr", "--mavlink-port",
         "--osd-msg-path", "--osd-update-interval-ms",
         "--osd-enable", "--osd-debug-latency",
         // schema-driven scalars and toggles

@@ -18,7 +18,6 @@
     "minIdrIntervalMs": 500,
     "applyStaggerMs": 50,
     "applySubPaceMs": 5,
-    "mavlinkEnable": true,
     "osd": {"enabled": true, "debugLatency": false},
     "roiQp": {"thresholdKbps": 6000, "lowAnchorKbps": 2000, "floor": -24, "step": 3},
     "safe": {"mcs": 1, "k": 8, "n": 12, "depth": 1, "bandwidth": 20, "txPowerDbm": 20, "bitrateKbps": 2000}

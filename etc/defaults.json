@@ -60,7 +60,6 @@
     "minIdrIntervalMs": 500,
     "applyStaggerMs": 50,
     "applySubPaceMs": 5,
-    "mavlinkEnable": true,
     "osd": {
       "enabled": true,
       "debugLatency": false

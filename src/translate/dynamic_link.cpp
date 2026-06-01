@@ -43,7 +43,6 @@ std::vector<std::string> dynamicLinkArgs(const Config& c,
         "--min-idr-interval-ms", to_string(dl.minIdrIntervalMs),
         "--apply-stagger-ms", to_string(dl.applyStaggerMs),
         "--apply-sub-pace-ms", to_string(dl.applySubPaceMs),
-        "--mavlink-enable", b01(dl.mavlinkEnable),
         "--osd-enable", b01(dl.osd.enabled),
         "--osd-debug-latency", b01(dl.osd.debugLatency),
 

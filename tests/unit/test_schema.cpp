@@ -23,7 +23,6 @@ TEST_CASE("schema: round-trip a minimal config through json") {
             "enabled":false,"healthTimeoutMs":10000,
             "interleavingSupported":true,
             "minIdrIntervalMs":500,"applyStaggerMs":50,"applySubPaceMs":5,
-            "mavlinkEnable":true,
             "osd":{"enabled":true,"debugLatency":false},
             "roiQp":{"thresholdKbps":6000,"lowAnchorKbps":2000,
                      "floor":-24,"step":3},
@@ -79,7 +78,14 @@ TEST_CASE("schema: dynamicLink round-trips through json") {
     // unchanged defaults round-trip too
     CHECK(c2.dynamicLink.healthTimeoutMs == 10000);
     CHECK(c2.dynamicLink.interleavingSupported == true);
-    CHECK(c2.dynamicLink.mavlinkEnable == true);
+    // mavlinkEnable was removed from schema — must NOT appear in serialised output
+    CHECK(j.at("dynamicLink").contains("mavlinkEnable") == false);
+    // a stray mavlinkEnable in input is silently ignored (NLOHMANN_WITH_DEFAULT behaviour)
+    nlohmann::json jStray = j;
+    jStray["dynamicLink"]["mavlinkEnable"] = true;
+    fpvd::Config c3 = jStray.get<fpvd::Config>();  // must not throw
+    nlohmann::json jOut3 = c3;
+    CHECK(jOut3.at("dynamicLink").contains("mavlinkEnable") == false);
 }
 
 TEST_CASE("schema: dynamicLink defaults match spec") {
@@ -90,7 +96,6 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
     CHECK(c.dynamicLink.minIdrIntervalMs == 500);
     CHECK(c.dynamicLink.applyStaggerMs == 50);
     CHECK(c.dynamicLink.applySubPaceMs == 5);
-    CHECK(c.dynamicLink.mavlinkEnable == true);
     CHECK(c.dynamicLink.osd.enabled == true);
     CHECK(c.dynamicLink.osd.debugLatency == false);
     CHECK(c.dynamicLink.roiQp.thresholdKbps == 6000);
