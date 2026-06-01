@@ -28,6 +28,7 @@ target_link_libraries(fpvd_core PUBLIC third_party Threads::Threads)
 target_sources(fpvd_core PRIVATE
     src/dynlink/dedup.cpp
     src/dynlink/encoder_client.cpp
+    src/dynlink/radio_txpower.cpp
     src/dynlink/roi_qp.cpp
     src/dynlink/watchdog.cpp
     src/dynlink/wire.cpp
@@ -90,6 +91,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/integration/test_http_server.cpp
         tests/integration/test_http_handlers.cpp
         tests/unit/test_dl_encoder_client.cpp
+        tests/unit/test_dl_radio_txpower.cpp
     )
     add_test(NAME fpvd_tests COMMAND fpvd_tests)
 endif()
