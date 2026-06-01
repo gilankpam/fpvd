@@ -3,8 +3,10 @@
 #include "dynlink/apply_direction.hpp"
 
 #include <cassert>
+#include <cstring>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
@@ -66,6 +68,26 @@ static int openTickTimer(uint32_t intervalMs) {
     return fd;
 }
 
+// Open an unconnected UDP socket for drone→GS tunnel traffic.
+// Resolves gsTunnelAddr:gsTunnelPort into *outDst. Returns -1 on failure
+// (non-fatal; HELLO is silently dropped when fd == -1).
+// Why no connect(): connect() on UDP triggers an immediate route lookup.
+// The applier may start before wfb-ng's TUN interface is up; sendto() per
+// packet lets the route self-heal once the tunnel comes up.
+static int openGsTunnelSocket(const std::string& addr, uint16_t port,
+                               struct sockaddr_in* outDst) {
+    int fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (fd < 0) return -1;
+    std::memset(outDst, 0, sizeof(*outDst));
+    outDst->sin_family = AF_INET;
+    outDst->sin_port   = htons(port);
+    if (inet_pton(AF_INET, addr.c_str(), &outDst->sin_addr) != 1) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
 static int armGap(int gapFd, uint32_t ms) {
     struct itimerspec ts{};
     ts.it_value.tv_sec = ms / 1000;
@@ -103,6 +125,8 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap, uint32_t generati
     radio_.emplace(snap.iface);
     osd_.emplace(ep_.osdMsgPath, snap.osdEnabled, ep_.osdUpdateIntervalMs, snap.osdDebugLatency);
     watchdog_.emplace(snap.healthTimeoutMs);
+    hello_.emplace(generationId, snap.helloMtuBytes, snap.helloFps, HelloCadence{});
+    hello_->setVanilla(!snap.interleavingSupported);
     dedup_.reset();
 
     // Reset diff baselines to "first/invalid" so the first decision re-emits all.
@@ -214,15 +238,52 @@ void DynamicLinkController::run(int evfd) {
     // Gap timer (single-shot, armed on demand for staggered apply).
     int gapFd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
 
-    // Build pollfd array: [listenFd?, tickFd?, gapFd?, evfd?].
-    struct pollfd pfds[4];
-    int nfds = 0;
-    int listenIdx = -1, tickIdx = -1, gapIdx = -1, eventIdx = -1;
+    // Hello timer: fires ASAP (1 ms) to emit the first DLHE, then re-armed
+    // via nextDelayMs() after each fire. Owned + closed by run().
+    int helloTimerFd = -1;
+    if (hello_ && hello_->state() != HelloState::Disabled) {
+        helloTimerFd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+        if (helloTimerFd >= 0) {
+            struct itimerspec t{};
+            t.it_value.tv_nsec = 1 * 1000 * 1000;  // 1 ms — fire ASAP
+            timerfd_settime(helloTimerFd, 0, &t, nullptr);
+        }
+    }
 
-    if (listenFd >= 0) { pfds[nfds].fd = listenFd; pfds[nfds].events = POLLIN; listenIdx = nfds++; }
-    if (tickFd   >= 0) { pfds[nfds].fd = tickFd;   pfds[nfds].events = POLLIN; tickIdx   = nfds++; }
-    if (gapFd    >= 0) { pfds[nfds].fd = gapFd;    pfds[nfds].events = POLLIN; gapIdx    = nfds++; }
-    if (evfd     >= 0) { pfds[nfds].fd = evfd;     pfds[nfds].events = POLLIN; eventIdx  = nfds++; }
+    // GS-tunnel socket: unconnected UDP, sendto per packet so the route
+    // self-heals once wfb-ng's tunnel comes up. -1 = non-fatal, HELLO dropped.
+    int gsTunnelFd = -1;
+    struct sockaddr_in gsTunnelDst{};
+    if (ep_.gsTunnelPort != 0) {
+        gsTunnelFd = openGsTunnelSocket(ep_.gsTunnelAddr, ep_.gsTunnelPort,
+                                         &gsTunnelDst);
+    }
+
+    // Build pollfd array: [listenFd?, tickFd?, gapFd?, helloTimerFd?, evfd?].
+    struct pollfd pfds[6];
+    int nfds = 0;
+    int listenIdx = -1, tickIdx = -1, gapIdx = -1, helloIdx = -1, eventIdx = -1;
+
+    if (listenFd    >= 0) { pfds[nfds].fd = listenFd;    pfds[nfds].events = POLLIN; listenIdx = nfds++; }
+    if (tickFd      >= 0) { pfds[nfds].fd = tickFd;      pfds[nfds].events = POLLIN; tickIdx   = nfds++; }
+    if (gapFd       >= 0) { pfds[nfds].fd = gapFd;       pfds[nfds].events = POLLIN; gapIdx    = nfds++; }
+    if (helloTimerFd >= 0){ pfds[nfds].fd = helloTimerFd;pfds[nfds].events = POLLIN; helloIdx  = nfds++; }
+    if (evfd        >= 0) { pfds[nfds].fd = evfd;        pfds[nfds].events = POLLIN; eventIdx  = nfds++; }
+
+    // Helper: map HelloSm state -> HelloPub for status publication.
+    auto helloStateToPub = [](HelloState s) -> HelloPub {
+        switch (s) {
+            case HelloState::Announcing: return HelloPub::Announcing;
+            case HelloState::Keepalive:  return HelloPub::Keepalive;
+            default:                     return HelloPub::Disabled;
+        }
+    };
+
+    // Publish initial hello status from the state already set in start().
+    if (hello_) {
+        std::lock_guard<std::mutex> sg(statusMu_);
+        status_.hello = helloStateToPub(hello_->state());
+    }
 
     ApplyState applyState = ApplyState::Idle;
     Decision   applyPending{};
@@ -251,7 +312,7 @@ void DynamicLinkController::run(int evfd) {
             // (Task 17 will reconcile cfg_ here on a reload wake.)
         }
 
-        // ---- listenFd readable: decode + dispatch a decision ----------------
+        // ---- listenFd readable: decode + dispatch a decision/ack ----------------
         if (listenIdx >= 0 && (pfds[listenIdx].revents & POLLIN)) {
             uint8_t buf[256];
             struct sockaddr_in src{};
@@ -260,68 +321,79 @@ void DynamicLinkController::run(int evfd) {
                                    reinterpret_cast<struct sockaddr*>(&src), &slen);
             if (got < 0) {
                 // EAGAIN/EINTR: nothing to do.
-            } else if (peekKind(buf, static_cast<size_t>(got)) == PacketKind::Decision) {
-                Decision d{};
-                DecodeResult dr = decodeDecision(buf, static_cast<size_t>(got), d);
-                if (dr != DecodeResult::Ok) {
-                    // bad decode — ignore (matches dl_applier.c logging branch).
-                } else if (dedup_.check(d.sequence)) {
-                    // duplicate / stale seq — drop.
-                } else {
-                    // New decision supersedes any in-flight phase 2; the
-                    // per-backend diff below reapplies anything that differs.
-                    if (applyState != ApplyState::Idle) {
-                        if (gapFd >= 0) disarmGap(gapFd);
-                        applyState = ApplyState::Idle;
-                    }
-
-                    uint64_t now = nowMonotonicMs();
-                    bool first = (lastEnc_.magic != kWireMagic);
-                    ApplyDir dir = applyDirection(lastEnc_.bitrateKbps,
-                                                  d.bitrateKbps, first);
-                    useconds_t subPaceUs =
-                        static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
-
-                    // canStagger: staggered dispatch requires both a non-zero
-                    // gap interval AND a live gap timerfd. If the fd failed to
-                    // open (gapFd < 0) we must fall back to single-shot so that
-                    // the deferred phase-2 is not silently lost.
-                    const bool canStagger = (cfg.applyStaggerMs != 0) && (gapFd >= 0);
-
-                    if (!canStagger || dir == ApplyDir::Equal) {
-                        // Single shot: all backends fire now.
-                        dispatchTxApply(cfg, d);
-                        radio_->apply(d.txPowerDbm);
-                        enc_->apply(d.bitrateKbps, d.fps);
-                        lastRadio_ = d;
-                        lastEnc_ = d;
-                    } else if (dir == ApplyDir::Up) {
-                        // Power up BEFORE MCS up. radio -> (sub-pace) -> tx;
-                        // encoder bitrate expands after the outer gap.
-                        radio_->apply(d.txPowerDbm);
-                        lastRadio_ = d;
-                        if (subPaceUs > 0) usleep(subPaceUs);
-                        dispatchTxApply(cfg, d);
-                        applyPending = d;
-                        applyState = ApplyState::UpGap;
-                        armGap(gapFd, cfg.applyStaggerMs);
-                    } else {  // ApplyDir::Down
-                        // Throttle producer first, then narrow capacity after gap.
-                        enc_->apply(d.bitrateKbps, d.fps);
-                        lastEnc_ = d;
-                        applyPending = d;
-                        applyState = ApplyState::DownGap;
-                        armGap(gapFd, cfg.applyStaggerMs);
-                    }
-
-                    lastApplied_ = d;
-                    osd_->writeStatus(lastApplied_, 0);
-                    watchdog_->notifyDecision(now);
-                    lastDecisionMs_ = now;
-                    {
+            } else {
+                PacketKind kind = peekKind(buf, static_cast<size_t>(got));
+                if (kind == PacketKind::HelloAck && hello_) {
+                    // HELLO ACK: decode and hand to the state machine.
+                    HelloAck ack{};
+                    if (decodeHelloAck(buf, static_cast<size_t>(got), ack) == DecodeResult::Ok) {
+                        hello_->onAck(ack);
                         std::lock_guard<std::mutex> sg(statusMu_);
-                        status_.watchdogTripped = false;
-                        status_.lastDecisionAgeMs = 0;
+                        status_.hello = helloStateToPub(hello_->state());
+                    }
+                } else if (kind == PacketKind::Decision) {
+                    Decision d{};
+                    DecodeResult dr = decodeDecision(buf, static_cast<size_t>(got), d);
+                    if (dr != DecodeResult::Ok) {
+                        // bad decode — ignore (matches dl_applier.c logging branch).
+                    } else if (dedup_.check(d.sequence)) {
+                        // duplicate / stale seq — drop.
+                    } else {
+                        // New decision supersedes any in-flight phase 2; the
+                        // per-backend diff below reapplies anything that differs.
+                        if (applyState != ApplyState::Idle) {
+                            if (gapFd >= 0) disarmGap(gapFd);
+                            applyState = ApplyState::Idle;
+                        }
+
+                        uint64_t now = nowMonotonicMs();
+                        bool first = (lastEnc_.magic != kWireMagic);
+                        ApplyDir dir = applyDirection(lastEnc_.bitrateKbps,
+                                                      d.bitrateKbps, first);
+                        useconds_t subPaceUs =
+                            static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
+
+                        // canStagger: staggered dispatch requires both a non-zero
+                        // gap interval AND a live gap timerfd. If the fd failed to
+                        // open (gapFd < 0) we must fall back to single-shot so that
+                        // the deferred phase-2 is not silently lost.
+                        const bool canStagger = (cfg.applyStaggerMs != 0) && (gapFd >= 0);
+
+                        if (!canStagger || dir == ApplyDir::Equal) {
+                            // Single shot: all backends fire now.
+                            dispatchTxApply(cfg, d);
+                            radio_->apply(d.txPowerDbm);
+                            enc_->apply(d.bitrateKbps, d.fps);
+                            lastRadio_ = d;
+                            lastEnc_ = d;
+                        } else if (dir == ApplyDir::Up) {
+                            // Power up BEFORE MCS up. radio -> (sub-pace) -> tx;
+                            // encoder bitrate expands after the outer gap.
+                            radio_->apply(d.txPowerDbm);
+                            lastRadio_ = d;
+                            if (subPaceUs > 0) usleep(subPaceUs);
+                            dispatchTxApply(cfg, d);
+                            applyPending = d;
+                            applyState = ApplyState::UpGap;
+                            armGap(gapFd, cfg.applyStaggerMs);
+                        } else {  // ApplyDir::Down
+                            // Throttle producer first, then narrow capacity after gap.
+                            enc_->apply(d.bitrateKbps, d.fps);
+                            lastEnc_ = d;
+                            applyPending = d;
+                            applyState = ApplyState::DownGap;
+                            armGap(gapFd, cfg.applyStaggerMs);
+                        }
+
+                        lastApplied_ = d;
+                        osd_->writeStatus(lastApplied_, 0);
+                        watchdog_->notifyDecision(now);
+                        lastDecisionMs_ = now;
+                        {
+                            std::lock_guard<std::mutex> sg(statusMu_);
+                            status_.watchdogTripped = false;
+                            status_.lastDecisionAgeMs = 0;
+                        }
                     }
                 }
             }
@@ -392,11 +464,57 @@ void DynamicLinkController::run(int evfd) {
             // disarm landed — drained, ignore.
             applyState = ApplyState::Idle;
         }
+
+        // ---- hello timer: build + send DLHE, re-arm -------------------------
+        if (helloIdx >= 0 && (pfds[helloIdx].revents & POLLIN)) {
+            uint64_t expirations;
+            ssize_t r = read(helloTimerFd, &expirations, sizeof(expirations));
+            (void)r;  // drain; count ignored
+
+            if (hello_) {
+                // If in KEEPALIVE, tick the miss counter (may drop to ANNOUNCING).
+                if (hello_->state() == HelloState::Keepalive) {
+                    hello_->onKeepaliveTick();
+                }
+
+                // Send a HELLO announcement if not DISABLED and gs-tunnel is up.
+                if (hello_->state() != HelloState::Disabled && gsTunnelFd >= 0) {
+                    uint8_t out[kHelloOnWire];
+                    size_t nOut = hello_->buildAnnounce(out, sizeof(out));
+                    if (nOut > 0) {
+                        ssize_t s = sendto(gsTunnelFd, out, nOut, 0,
+                                           reinterpret_cast<struct sockaddr*>(&gsTunnelDst),
+                                           sizeof(gsTunnelDst));
+                        (void)s;  // non-fatal; route may not be ready yet
+                    }
+                }
+
+                // Re-arm. timerfd_settime with all-zero it_value disarms the
+                // timer, so coerce a 0-ms delay to 1 ms when we still want to
+                // fire. DISABLED -> leave it_value zero -> timer stays parked.
+                uint32_t delayMs = hello_->nextDelayMs();
+                struct itimerspec t{};
+                t.it_value.tv_sec  = delayMs / 1000;
+                t.it_value.tv_nsec = static_cast<long>(delayMs % 1000) * 1000000L;
+                if (delayMs == 0 && hello_->state() != HelloState::Disabled) {
+                    t.it_value.tv_nsec = 1 * 1000 * 1000;  // 1 ms
+                }
+                timerfd_settime(helloTimerFd, 0, &t, nullptr);
+
+                // Publish updated hello state (may have changed on keepalive tick).
+                {
+                    std::lock_guard<std::mutex> sg(statusMu_);
+                    status_.hello = helloStateToPub(hello_->state());
+                }
+            }
+        }
     }
 
-    if (listenFd >= 0) ::close(listenFd);
-    if (tickFd   >= 0) ::close(tickFd);
-    if (gapFd    >= 0) ::close(gapFd);
+    if (listenFd    >= 0) ::close(listenFd);
+    if (tickFd      >= 0) ::close(tickFd);
+    if (gapFd       >= 0) ::close(gapFd);
+    if (helloTimerFd >= 0) ::close(helloTimerFd);
+    if (gsTunnelFd  >= 0) ::close(gsTunnelFd);
     // do NOT close evfd/eventFd_ here — stop() owns the close after join()
 }
 
