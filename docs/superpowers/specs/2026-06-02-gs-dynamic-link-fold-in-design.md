@@ -74,17 +74,17 @@ Lifted **as-is** from `dynamic-link/gs/dynamic_link/` (core control):
 | `wire.py` | DLK1 v2 encoder (31-byte decision packets) |
 | `return_link.py` | non-blocking UDP sender to the drone |
 | `drone_config.py` | P4a HELLO handshake state (mtu/fps/generationId), gates emit |
+| `tunnel_listener.py` | GS UDP listener that receives drone `DLHE` HELLOs |
 | `decision.py` | Decision dataclass |
 
-**Dropped** (Phase-3 forensics): `timesync.py`, `tunnel_listener.py` (PONG only),
-`latency_sink.py`, `video_tap.py`, `mavlink_status.py`, `flight_log.py`,
-`debug_config.py`, `observed.py`, `sinks.py`, `tools/`.
+**Dropped** (Phase-3 forensics): `timesync.py`, `latency_sink.py`,
+`video_tap.py`, `mavlink_status.py`, `flight_log.py`, `debug_config.py`,
+`observed.py`, `sinks.py`, `tools/`.
 
-> The HELLO **receive** path (drone → GS DLHE, GS → drone DLHA) is *core* and
-> comes along with `drone_config.py`; only the timesync PONG listener and the
-> forensic sinks are dropped. During implementation, confirm the HELLO receive
-> currently living in `tunnel_listener.py`/`service.py` is separated from the
-> dropped PONG/timesync code.
+> The HELLO **receive** path (drone → GS DLHE, GS → drone DLHA) is *core*.
+> `tunnel_listener.py` is the GS UDP listener for it — its PONG callback is
+> optional and simply left unwired (we pass `on_pong=None`); only `timesync.py`
+> and the forensic sinks are actually dropped.
 
 ### New wrapper: `DynamicLinkController` (`gs/fpvdgs/dynlink/controller.py`)
 
@@ -96,11 +96,12 @@ stats cadence until stopped. Thread-safe surface for the HTTP server thread:
 - `start()` — spawn the thread (only when `enabled`). No-op if already running.
 - `stop()` — `loop.call_soon_threadsafe` an asyncio stop event; join the thread.
   Idempotent.
-- `set_config(snapshot)` — push a new snapshot. Tunable changes (gate weights,
-  fec thresholds, maxMcs, txpower range, bandwidth) are swapped **live** on the
-  next tick. Only an **endpoint** change (stats host/port, drone addr/port, GS
-  HELLO-listen port) tears down and rebuilds I/O **inside the loop** — the wfb
-  runner is never touched.
+- `set_config(snapshot)` — apply a new snapshot. v1: if running, the control
+  loop is rebuilt from the new snapshot (stop + start on the controller thread).
+  This briefly pauses decision emit — well within the drone's multi-second
+  watchdog — and **never touches the wfb runner**. In-place live tunable swap
+  (no emit pause) is a future refinement; it is not required to meet the
+  "no wfb restart" contract.
 - `status()` — `{running, statsConnected, decision{mcs,k,n,depth,txpowerDbm,
   bitrateKbps}, lastEmitMs, emitSeq, reason, hello}` (a thread-safe copy of the
   last published state).
