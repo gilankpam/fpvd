@@ -44,21 +44,28 @@ remote '
     chmod +x /usr/bin/fpvd /etc/init.d/S99fpvd
 
     mkdir -p /root/fpvd-gs-rollback
-    cp -a /etc/wifibroadcast.cfg /root/fpvd-gs-rollback/wifibroadcast.cfg.orig 2>/dev/null || true
-    [ -f /etc/init.d/S98wifibroadcast ] && cp -a /etc/init.d/S98wifibroadcast /root/fpvd-gs-rollback/ || true
+    # back up the stock cfg + init script ONCE; never clobber on re-deploy
+    # (the live /etc/wifibroadcast.cfg is fpvd-generated after the first install).
+    if [ ! -e /root/fpvd-gs-rollback/wifibroadcast.cfg.orig ]; then
+        cp -a /etc/wifibroadcast.cfg /root/fpvd-gs-rollback/wifibroadcast.cfg.orig 2>/dev/null || true
+    fi
+    if [ -f /etc/init.d/S98wifibroadcast ] && [ ! -e /root/fpvd-gs-rollback/S98wifibroadcast ]; then
+        cp -a /etc/init.d/S98wifibroadcast /root/fpvd-gs-rollback/
+    fi
     [ -x /etc/init.d/S98wifibroadcast ] && /etc/init.d/S98wifibroadcast stop >/dev/null 2>&1 || true
     sleep 2
     rm -f /etc/init.d/S98wifibroadcast
     : > /tmp/fpvd.log
-    /etc/init.d/S99fpvd start
+    /etc/init.d/S99fpvd restart   # restart: reloads code on re-deploy; starts on first install
 '
 
 echo "[verify]"
 sleep 5
 remote '
-    printf "  procs: "; for p in fpvd wfb_rx wfb_tx; do
+    printf "  fpvd:  "; pgrep -f "fpvdgs.supervisor" >/dev/null && echo running || echo DOWN
+    printf "  procs: "; for p in wfb_rx wfb_tx; do
         printf "%s=%s " "$p" "$(pidof $p 2>/dev/null | cut -d" " -f1 || echo -)"; done; echo
     printf "  api:   "; curl -s http://127.0.0.1:8080/status | head -c 200; echo
-    printf "  8103:  "; (echo > /dev/tcp/127.0.0.1/8103) 2>/dev/null && echo open || echo closed
+    printf "  8103:  "; ss -tln 2>/dev/null | grep -q ":8103" && echo listening || echo down
 '
 echo "[done] fpvd (GS) deployed to $GS_HOST. Rollback: deploy/gs/rollback.sh --host $GS_HOST"

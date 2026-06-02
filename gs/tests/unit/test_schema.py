@@ -39,6 +39,11 @@ def test_validate_effective_checks_width_domain():
         validate_effective({"link": {"channel": 132, "width": 80, "region": "US"}})
 
 
+def test_validate_effective_accepts_10mhz():
+    # 10 MHz is supported (underclocked); must not raise.
+    validate_effective({"link": {"channel": 132, "width": 10, "region": "US"}})
+
+
 def test_validate_effective_ok():
     validate_effective({
         "link": {"channel": 132, "width": 40, "txpower": 19, "region": "US",

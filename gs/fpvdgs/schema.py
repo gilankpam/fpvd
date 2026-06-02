@@ -3,7 +3,7 @@
 LINK_KEYS = {"channel", "width", "txpower", "region", "linkId", "beamforming", "wlans"}
 CONFIG_TOP_KEYS = {"wfb", "drone"}      # link is excluded on purpose
 ALL_TOP_KEYS = {"link"} | CONFIG_TOP_KEYS
-VALID_WIDTHS = {20, 40}                  # 10 reserved for future
+VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
 class SchemaError(ValueError):
