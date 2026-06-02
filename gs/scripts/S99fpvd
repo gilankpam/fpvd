@@ -1,0 +1,23 @@
+#!/bin/sh
+DAEMON=fpvd
+PIDFILE=/var/run/fpvd.pid
+LOG=/tmp/fpvd.log
+ARGS="--defaults /etc/fpvd/defaults.json --config /etc/fpvd/config.json --cfg-out /etc/wifibroadcast.cfg --port 8080 --log $LOG"
+
+start() {
+    printf 'Starting %s: ' "$DAEMON"
+    modprobe tun 2>/dev/null
+    start-stop-daemon -S -q -b -m -p "$PIDFILE" -x /usr/bin/fpvd -- $ARGS
+    [ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+stop() {
+    printf 'Stopping %s: ' "$DAEMON"
+    start-stop-daemon -K -q -p "$PIDFILE"
+    [ $? = 0 ] && echo "OK" || echo "FAIL"
+}
+case "$1" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; sleep 1; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
