@@ -30,8 +30,11 @@ remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 # import without any sys.path/PYTHONPATH hacks.
 SITE="$(remote 'python3 -c "import site; print(site.getsitepackages()[0])"')"
 echo "[push] fpvdgs -> $TARGET:$SITE/fpvdgs  (+ init + defaults)"
-remote "mkdir -p /etc/fpvd '$SITE/fpvdgs'"
+remote "mkdir -p /etc/fpvd '$SITE/fpvdgs' '$SITE/fpvdgs/dynlink/profiles'"
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs"/*.py "$TARGET:$SITE/fpvdgs/"
+# dynlink subpackage (in-process GS dynamic-link controller) + JSON radio profiles
+scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/dynlink"/*.py "$TARGET:$SITE/fpvdgs/dynlink/"
+scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/dynlink/profiles"/*.json "$TARGET:$SITE/fpvdgs/dynlink/profiles/"
 # defaults (do not clobber an existing user overlay /etc/fpvd/config.json)
 scp -O "${SSH_OPTS[@]}" "$GS/etc/defaults.json" "$TARGET:/etc/fpvd/defaults.json"
 scp -O "${SSH_OPTS[@]}" "$GS/scripts/S99fpvd"  "$TARGET:/etc/init.d/S99fpvd"
