@@ -1,8 +1,11 @@
 """Validation rules. Link/overlap params are mutated ONLY via /link."""
 
+from pathlib import Path
+
 LINK_KEYS = {"channel", "width", "txpower", "region", "linkId", "beamforming", "wlans"}
 CONFIG_TOP_KEYS = {"wfb", "drone", "dynamicLink"}   # link is excluded on purpose
 DL_BANDWIDTHS = {20, 40}
+DL_PROFILES_DIR = Path(__file__).resolve().parent / "dynlink" / "profiles"
 ALL_TOP_KEYS = {"link"} | CONFIG_TOP_KEYS
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
@@ -61,3 +64,9 @@ def _validate_dynamic_link(dl: dict) -> None:
     port = dl.get("dronePort", 9999)
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("dynamicLink.dronePort must be an int in 1..65535")
+    profile = dl.get("radioProfile", "m8812eu2")
+    if not (DL_PROFILES_DIR / f"{profile}.json").is_file():
+        available = sorted(p.stem for p in DL_PROFILES_DIR.glob("*.json"))
+        raise SchemaError(
+            f"dynamicLink.radioProfile {profile!r} not found; available: {available}"
+        )

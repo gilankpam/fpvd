@@ -85,3 +85,12 @@ def test_effective_rejects_bad_bandwidth():
 def test_effective_rejects_inverted_txpower():
     with pytest.raises(SchemaError):
         schema.validate_effective(_eff(txpower={"min": 30, "max": 10}))
+
+
+def test_effective_rejects_unknown_radio_profile():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(_eff(radioProfile="nonexistent"))
+
+
+def test_effective_accepts_known_radio_profile():
+    schema.validate_effective(_eff(radioProfile="m8812eu2"))  # no raise
