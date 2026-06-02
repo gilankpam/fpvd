@@ -89,6 +89,11 @@ private:
     void reconcileBeamforming();
     void rewriteWaybeamJson();
     void startController();
+    // Rebuild the msposd OSD spec from effective_ and (re)start it, so it picks
+    // up the new canvas size (-z resolution) after a waybeam restart. A plain
+    // orch_.restart would relaunch msposd with the stale spec argv. No-op unless
+    // msposd is the supervised telemetry router.
+    void restartOsd();
 
     DaemonPaths paths_;
     Config effective_;

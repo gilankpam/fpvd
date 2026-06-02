@@ -127,6 +127,19 @@ void Daemon::seedOrchestrator() {
     }
 }
 
+void Daemon::restartOsd() {
+    // msposd's canvas size (-z) is baked into its launch args, so a waybeam
+    // restart needs msposd re-registered from the committed config (a plain
+    // restart would relaunch it at the old resolution). Only msposd renders the
+    // OSD onto the video; mavfwd has no video dependency.
+    if (effective_.telemetry.router != "msposd") return;
+    if (!orch_.get("msposd")) return;            // not supervised (e.g. not bootstrapped)
+    auto args = telemetryArgs(effective_);
+    if (args.empty()) return;
+    orch_.remove("msposd");                       // shut down the stale instance
+    orch_.add(wfbSpec("msposd", std::move(args), {"wfb_tlm_rx", "wfb_tlm_tx"}));
+    if (auto* s = orch_.get("msposd")) s->start();
+}
 
 void Daemon::reconcileBeamforming() {
     const auto& bfc = effective_.link.beamforming;
@@ -282,10 +295,11 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             orch_.restart("waybeam",
                           std::chrono::milliseconds{paths_.waybeamRestartSettleMs});
             // msposd renders the OSD onto waybeam's video pipeline; a waybeam
-            // restart drops the overlay region, so bounce msposd too to redraw it
-            // against the fresh waybeam. No-op when the telemetry router isn't
-            // msposd (that name isn't supervised then).
-            orch_.restart("msposd");
+            // restart drops the overlay region, so rebuild + restart msposd to
+            // redraw it against the fresh waybeam AT THE NEW CANVAS SIZE (its -z
+            // resolution arg is baked in at launch). No-op when the router isn't
+            // msposd.
+            restartOsd();
         }
         // Hot path: no wfb restart. Route the in-process controller before the
         // link hot-apply blocks below, so it

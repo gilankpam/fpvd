@@ -230,9 +230,12 @@ restarted[] += "encoder" if encChanged   // plus existing radio/telemetry/dynami
 if (reallyRestart && needsRebuild) {
     … full rebuild, unchanged (daemon.cpp:207-235) …
 } else if (reallyRestart) {
-    if (encRestart) { orch_.restart("waybeam", settle); orch_.restart("msposd"); }
-                                                // msposd redraws OSD onto the fresh
-                                                // waybeam; no-op if router != msposd
+    if (encRestart) { orch_.restart("waybeam", settle); restartOsd(); }
+                                                // restartOsd() rebuilds msposd from
+                                                // effective_ (new -z resolution) and
+                                                // restarts it so the OSD redraws at
+                                                // the new canvas size; no-op if
+                                                // router != msposd
     … existing DL routing (daemon.cpp:242-250) …
     … existing radio hot-apply (txpower/mtu/fec/radiotap/channel) …
 } else {
