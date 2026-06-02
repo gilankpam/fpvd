@@ -8,34 +8,43 @@ HEADER = (
 )
 
 
+def _lit(value) -> str:
+    """Render a value as a Python literal — wfb-ng's config parser runs
+    ast.literal_eval on every value, so strings MUST be quoted (e.g. a peer
+    URL renders as 'connect://127.0.0.1:14550', not connect://...)."""
+    return repr(value)
+
+
 def render_cfg(effective: dict) -> str:
     link = effective.get("link", {})
     wfb = effective.get("wfb", {})
     lines = [HEADER, "[common]"]
-    lines.append(f"wifi_channel = {link['channel']}")
-    lines.append(f"wifi_region = '{link['region']}'")
+    lines.append(f"wifi_channel = {_lit(link['channel'])}")
+    lines.append(f"wifi_region = {_lit(link['region'])}")
     if link.get("txpower") is not None:
-        lines.append(f"wifi_txpower = {link['txpower']}")
-    if link.get("linkId") is not None:
-        lines.append(f"link_id = {link['linkId']}")
+        # NOTE: wfb-ng wifi_txpower is in mBm; leave unset to keep the driver default.
+        lines.append(f"wifi_txpower = {_lit(link['txpower'])}")
+    # link.linkId is NOT emitted: wfb-ng derives link_id by hashing link_domain,
+    # there is no link_id config key. The default link_domain already yields the
+    # shared id. (Wiring linkId -> link_domain is future work.)
 
     # gs_video: width drives the card bandwidth (HT20/HT40)
     lines.append("")
     lines.append("[gs_video]")
-    lines.append(f"bandwidth = {link['width']}")
+    lines.append(f"bandwidth = {_lit(link['width'])}")
 
     mav = wfb.get("mavlink", {})
     if mav.get("peer"):
         lines.append("")
         lines.append("[gs_mavlink]")
-        lines.append(f"peer = {mav['peer']}")
+        lines.append(f"peer = {_lit(mav['peer'])}")
 
-    # raw passthrough: {section: {key: value}}
+    # raw passthrough: {section: {key: value}} — values rendered as literals too
     for section, kv in (wfb.get("raw") or {}).items():
         lines.append("")
         lines.append(f"[{section}]")
         for key, value in kv.items():
-            lines.append(f"{key} = {value}")
+            lines.append(f"{key} = {_lit(value)}")
 
     return "\n".join(lines) + "\n"
 
