@@ -1,5 +1,6 @@
 #include "supervise/orchestrator.hpp"
 #include <algorithm>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -17,6 +18,16 @@ void Orchestrator::remove(const std::string& name) {
     it->second->shutdown();
     sups_.erase(it);
     specs_.erase(name);
+}
+
+void Orchestrator::restart(const std::string& name,
+                           std::chrono::milliseconds settle) {
+    auto it = sups_.find(name);
+    if (it == sups_.end()) return;
+    it->second->shutdown();   // SIGTERM + join (no reinit flag -> no self-respawn)
+    if (settle.count() > 0)   // let the old process's kernel/driver state drain
+        std::this_thread::sleep_for(settle);
+    it->second->start();      // fresh supervision loop
 }
 
 Supervisor* Orchestrator::get(const std::string& name) {

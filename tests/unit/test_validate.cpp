@@ -46,11 +46,26 @@ TEST_CASE("validate: video.resolution must parse as WxH") {
     CHECK(errs[0].path == "video.resolution");
 }
 
-TEST_CASE("validate: video.codec must be h264 or h265") {
-    Config c{}; c.video.codec = "av1";
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "video.codec");
+TEST_CASE("validate: video.codec must be h265 (hardware is H.265-only)") {
+    {
+        Config c{}; c.video.codec = "h265";   // the only accepted value
+        auto errs = validate(c);
+        for (auto& e : errs) CHECK(e.path != "video.codec");
+    }
+    {
+        Config c{}; c.video.codec = "h264";   // previously valid, now rejected
+        auto errs = validate(c);
+        bool found = false;
+        for (auto& e : errs) if (e.path == "video.codec") found = true;
+        CHECK(found);
+    }
+    {
+        Config c{}; c.video.codec = "av1";
+        auto errs = validate(c);
+        bool found = false;
+        for (auto& e : errs) if (e.path == "video.codec") found = true;
+        CHECK(found);
+    }
 }
 
 TEST_CASE("validate: image.rotate must be 0/90/180/270") {

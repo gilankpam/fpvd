@@ -20,6 +20,17 @@ TEST_CASE("translate.telemetry: msposd argv from defaults") {
     CHECK(contains("-z")); CHECK(contains("1920x1080"));
 }
 
+TEST_CASE("translate.telemetry: msposd -z tracks video.resolution") {
+    Config c{}; c.video.resolution = "1280x720";
+    auto a = fpvd::telemetryArgs(c);
+    // -z must carry the *current* resolution, so a rebuilt msposd sizes its OSD
+    // canvas to the new video size after a resolution change.
+    auto it = std::find(a.begin(), a.end(), "-z");
+    REQUIRE(it != a.end());
+    REQUIRE(std::next(it) != a.end());
+    CHECK(*std::next(it) == "1280x720");
+}
+
 TEST_CASE("translate.telemetry: mavfwd argv") {
     Config c{}; c.telemetry.router = "mavfwd";
     auto a = fpvd::telemetryArgs(c);

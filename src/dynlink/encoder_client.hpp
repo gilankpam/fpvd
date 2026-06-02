@@ -1,6 +1,6 @@
 #pragma once
+#include "waybeam/client.hpp"
 #include <cstdint>
-#include <string>
 
 namespace fpvd::dynlink {
 
@@ -13,8 +13,9 @@ struct RoiCurve {
 
 class EncoderClient {
 public:
-    EncoderClient(std::string host, uint16_t port,
-                  uint32_t minIdrIntervalMs, RoiCurve roi);
+    // Transport is injected (non-owning); the referenced WaybeamClient must
+    // outlive this EncoderClient.
+    EncoderClient(WaybeamClient& client, uint32_t minIdrIntervalMs, RoiCurve roi);
 
     // GET /api/v1/set?video0.bitrate=&fpv.roiQp=&[video0.fps=]. Diff-based.
     // bitrate==0 is a no-op sentinel. Returns 0 ok/no-op, -1 HTTP fail.
@@ -26,16 +27,13 @@ public:
     // Push safe bitrate (roiQp recomputed, fps unchanged). Returns 0/-1.
     int applySafe(uint16_t safeBitrateKbps);
 
-    void setRoiCurve(RoiCurve roi) { roi_ = roi; }           // hot reconcile
-    void setMinIdrInterval(uint32_t ms) { minIdrIntervalMs_ = ms; } // hot reconcile
+    void setRoiCurve(RoiCurve roi) { roi_ = roi; }
+    void setMinIdrInterval(uint32_t ms) { minIdrIntervalMs_ = ms; }
 
 private:
-    int httpGet(const std::string& path);
-
-    std::string host_;
-    uint16_t    port_;
-    uint32_t    minIdrIntervalMs_;
-    RoiCurve    roi_;
+    WaybeamClient* client_;
+    uint32_t       minIdrIntervalMs_;
+    RoiCurve       roi_;
 
     bool     lastValid_{false};
     uint16_t lastBitrate_{0};

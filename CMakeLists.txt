@@ -42,6 +42,7 @@ target_sources(fpvd_core PRIVATE
     src/config/diff.cpp
     src/config/lock.cpp
     src/translate/waybeam.cpp
+    src/waybeam/client.cpp
     src/translate/wfb.cpp
     src/translate/wfb_control.cpp
     src/translate/telemetry.cpp
@@ -79,6 +80,8 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/unit/test_link_classify.cpp
         tests/unit/test_lock.cpp
         tests/unit/test_translate_waybeam.cpp
+        tests/unit/test_waybeam_diff.cpp
+        tests/unit/test_waybeam_client.cpp
         tests/unit/test_translate_wfb.cpp
         tests/unit/test_wfb_control.cpp
         tests/unit/test_translate_telemetry.cpp

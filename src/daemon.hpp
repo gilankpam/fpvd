@@ -4,12 +4,15 @@
 #include "config/validate.hpp"
 #include "dynlink/controller.hpp"
 #include "dynlink/runtime_config.hpp"
+#include "waybeam/client.hpp"
 #include "supervise/orchestrator.hpp"
 #include "supervise/beamforming.hpp"
+#include <atomic>
 #include <chrono>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fpvd {
@@ -21,6 +24,11 @@ struct DaemonPaths {
     std::string waybeamJsonPath; // /etc/waybeam.json
     std::string radioTuneScript{}; // /usr/libexec/fpvd/radio-tune.sh (optional)
     dynlink::Endpoints dlEndpoints{};  // defaults to production endpoints; overridable in tests
+    // Settle delay for the waybeam-only restart (see Orchestrator::restart):
+    // gives the SigmaStar driver time to drain the old pipeline before the fresh
+    // waybeam re-inits, so a video0.size change doesn't wedge the VENC channel.
+    // 700 ms > waybeam's own 500 ms margin. Tests set this to 0 to stay fast.
+    int waybeamRestartSettleMs{700};
 };
 
 struct PatchResult {
@@ -83,6 +91,24 @@ private:
     void reconcileBeamforming();
     void rewriteWaybeamJson();
     void startController();
+    // Rebuild the msposd OSD spec from effective_ and (re)start it, so it picks
+    // up the new canvas size (-z resolution) after a waybeam restart. A plain
+    // orch_.restart would relaunch msposd with the stale spec argv. No-op unless
+    // msposd is the supervised telemetry router.
+    void restartOsd();
+    // Push the static configured radio (mcs/fec/txpower/bandwidth) + encoder
+    // (bitrate/roiQp) values back after dynamic-link is disabled, so the link
+    // reverts to its pre-DL state instead of staying at the controller's last
+    // adaptive values. Best-effort.
+    void restateStaticLink();
+    // Write the system-stats OSD line to msposd's message file when dynamic-link
+    // isn't feeding the OSD (DL off). msposd holds + re-renders it with live
+    // placeholder values. No-op unless the telemetry router is msposd.
+    void writeOsdBaseLine();
+    // Background loop that re-writes the base OSD line every ~1s while DL is off,
+    // so it survives the window where a resolution change restarts waybeam +
+    // msposd (the one-shot write is consumed before the fresh msposd can render).
+    void osdHeartbeat();
 
     DaemonPaths paths_;
     Config effective_;
@@ -90,12 +116,15 @@ private:
     int version_{0};
     LastApply lastApply_;
     RadioInfo radio_;
+    WaybeamClient waybeam_;   // declared before dl_/orch_ for init order
     Orchestrator orch_;
     BeamformingController bf_;
     dynlink::DynamicLinkController dl_;
     uint32_t dlGenerationId_;
     std::chrono::steady_clock::time_point startedAt_;
     std::mutex mu_;
+    std::thread osdThread_;
+    std::atomic<bool> osdStop_{false};
 };
 
 } // namespace fpvd

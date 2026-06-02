@@ -26,12 +26,16 @@ static std::string nowIso() {
 
 Daemon::Daemon(DaemonPaths paths)
     : paths_(std::move(paths)),
+      waybeam_(paths_.dlEndpoints.encHost, paths_.dlEndpoints.encPort),
       dl_(paths_.dlEndpoints),
       dlGenerationId_(std::random_device{}()),
       startedAt_(std::chrono::steady_clock::now()) {
 }
 
 Daemon::~Daemon() {
+    // Stop the OSD heartbeat (it touches mu_ + dl_) before tearing those down.
+    osdStop_.store(true);
+    if (osdThread_.joinable()) osdThread_.join();
     // Stop the in-process control loop (joins its thread) before any member is destroyed.
     dl_.stop();
 }
@@ -61,7 +65,10 @@ void Daemon::bootstrap(bool startProcesses) {
         reconcileBeamforming();
         if (effective_.dynamicLink.enabled) {
             startController();
+        } else {
+            writeOsdBaseLine();   // DL off: seed the system-stats OSD line
         }
+        osdThread_ = std::thread([this] { osdHeartbeat(); });
     }
 }
 
@@ -93,7 +100,19 @@ void Daemon::seedOrchestrator() {
               wfbArgs(effective_, WfbRole::TlmRx, iface, key), {}));
     orch_.add(wfbSpec("wfb_tlm_tx",
               wfbArgs(effective_, WfbRole::TlmTx, iface, key), {}));
-    orch_.add(wfbSpec("waybeam", {"/usr/bin/waybeam"}, {"wfb_video_tx"}));
+    // Launch waybeam through a guard that first kills any stray /usr/bin/waybeam
+    // fpvd does not own — e.g. one that self-respawned out of supervision when an
+    // operator manually hit waybeam's /api/v1/restart (the new process reparents
+    // to init). Without this, fpvd loses the live process and crash-loops doomed
+    // replacements that collide with the orphan over the SoC video hardware, and
+    // never recovers without a reboot. The guard runs as the child before exec,
+    // so its own (sh) comm never matches "waybeam"; the 1s pause after a kill
+    // lets the SigmaStar driver release the orphan's pipeline before re-init.
+    orch_.add(wfbSpec("waybeam",
+        {"/bin/sh", "-c",
+         "K=0; for p in $(pidof waybeam); do kill -9 \"$p\" 2>/dev/null && K=1; done; "
+         "[ \"$K\" = 1 ] && sleep 1; exec /usr/bin/waybeam"},
+        {"wfb_video_tx"}));
     auto tArgs = telemetryArgs(effective_);
     if (!tArgs.empty() && !telemetryName.empty()) {
         orch_.add(wfbSpec(telemetryName, std::move(tArgs),
@@ -114,6 +133,73 @@ void Daemon::seedOrchestrator() {
     }
 }
 
+void Daemon::restartOsd() {
+    // msposd's canvas size (-z) is baked into its launch args, so a waybeam
+    // restart needs msposd re-registered from the committed config (a plain
+    // restart would relaunch it at the old resolution). Only msposd renders the
+    // OSD onto the video; mavfwd has no video dependency.
+    if (effective_.telemetry.router != "msposd") return;
+    if (!orch_.get("msposd")) return;            // not supervised (e.g. not bootstrapped)
+    auto args = telemetryArgs(effective_);
+    if (args.empty()) return;
+    orch_.remove("msposd");                       // shut down the stale instance
+    orch_.add(wfbSpec("msposd", std::move(args), {"wfb_tlm_rx", "wfb_tlm_tx"}));
+    if (auto* s = orch_.get("msposd")) s->start();
+}
+
+void Daemon::restateStaticLink() {
+    // dl_.stop() leaves the radio (mcs/fec/txpower/bandwidth) and encoder
+    // (bitrate/roiQp) at the controller's last adaptive values. Push the static
+    // configured values back so the link reverts to its pre-DL state. Best-effort:
+    // a transient control-socket / HTTP failure is ignored (this is a revert, not
+    // a user-requested change; the operator can re-apply).
+    WfbControlClient cli("127.0.0.1", kVideoControlPort);
+    cli.setFec(static_cast<uint8_t>(effective_.link.fec.k),
+               static_cast<uint8_t>(effective_.link.fec.n));
+    cli.setRadio(static_cast<uint8_t>(effective_.link.stbc ? 1 : 0),
+                 effective_.link.ldpc, false,
+                 static_cast<uint8_t>(modulationWidth(effective_.link.width)),
+                 static_cast<uint8_t>(effective_.link.mcs), false, 1);
+    if (!paths_.radioTuneScript.empty())
+        tuneRadio(paths_.radioTuneScript, "txpower", effective_,
+                  radio_.iface, radio_.driver);
+    waybeam_.setFields({
+        {"video0.bitrate", std::to_string(effective_.video.bitrate)},
+        {"fpv.roi_qp",     std::to_string(effective_.video.roi.qp)},
+    });
+}
+
+void Daemon::writeOsdBaseLine() {
+    // System-stats OSD line shown when dynamic-link isn't feeding the OSD (the DL
+    // OsdWriter owns the msg file while DL runs). msposd holds + re-renders the
+    // last message, substituting the & placeholders (bitrate+fps, board/wifi
+    // temp, cpu%) at render time. No-op unless the router is msposd. Atomic
+    // (tmp + rename) so msposd never reads a half-written line.
+    if (effective_.telemetry.router != "msposd") return;
+    const std::string& path = paths_.dlEndpoints.osdMsgPath;
+    if (path.empty()) return;
+    const std::string tmp = path + ".tmp";
+    {
+        std::ofstream f(tmp, std::ios::trunc);
+        if (!f) return;
+        f << "&L50&F30 &B  T&T  W&W  CPU&C\n";
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) std::filesystem::remove(tmp, ec);
+}
+
+void Daemon::osdHeartbeat() {
+    while (!osdStop_.load()) {
+        // ~1s cadence, in 100ms chunks so shutdown is responsive.
+        for (int i = 0; i < 10 && !osdStop_.load(); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (osdStop_.load()) break;
+        if (dl_.status().running) continue;   // DL feeds the OSD; don't fight it
+        std::lock_guard<std::mutex> g(mu_);
+        writeOsdBaseLine();                    // re-asserts the line msposd renders
+    }
+}
 
 void Daemon::reconcileBeamforming() {
     const auto& bfc = effective_.link.beamforming;
@@ -173,6 +259,29 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             nlohmann::json(pending_.link.beamforming) ||
         effective_.link.width != pending_.link.width;
 
+    // Encoder reconcile (computed from the pre-commit diff). codec is excluded;
+    // dynamic-link-owned fields are excluded while DL is enabled.
+    auto wbDiff = waybeamConfigDiff(effective_, pending_, enabledNew);
+    const bool encRestart = !wbDiff.restart.empty();   // any restart field => restart
+    const bool encLive    = !encRestart && !wbDiff.live.empty();
+    const bool encChanged = encRestart || encLive;
+
+    // A full orchestrator rebuild is needed only for non-encoder subsystems.
+    const bool needsRebuild = subs.telemetry ||
+        !subs.servicesAffected.empty() || link.fullRestart;
+
+    // Transactional LIVE push: apply before committing so a failed push fails the
+    // apply with nothing changed and the radio link untouched. Skipped under a
+    // full rebuild (it restarts waybeam + reloads the file) and on the dry path.
+    if (reallyRestart && !needsRebuild && encLive) {
+        if (!waybeam_.setFields(wbDiff.live)) {
+            lastApply_ = {nowIso(), false, {},
+                          std::string("waybeam: /api/v1/set failed")};
+            return {false, {}, {}, std::string("waybeam: /api/v1/set failed"),
+                    version_};
+        }
+    }
+
     // Persist overlay (sparse diff vs defaults).
     auto defaultsJ = defaultsJson();
     auto pendingJ = nlohmann::json(pending_);
@@ -184,7 +293,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
 
     std::vector<std::string> restarted;
     if (subs.radio) restarted.push_back("radio");
-    if (subs.encoder) restarted.push_back("encoder");
+    if (encChanged) restarted.push_back("encoder");
     if (subs.telemetry) restarted.push_back("telemetry");
     // The in-process DynamicLinkController is hot-reloaded (start/stop/setConfig)
     // — never bounced with wfb. Report it as "dynamicLink" when its config moves
@@ -195,14 +304,15 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     for (auto& n : subs.servicesAffected) restarted.push_back(n);
     if (bfChanged) restarted.push_back("beamforming");
 
-    // A rebuild bounces the whole orchestrator (including wfb). It is needed
-    // only when a non-link subsystem changes, or when a link change cannot be
-    // hot-applied (linkId / wlanAdapter). A dynamicLink-only change (or an
-    // mtu-only change consumed by the controller) is NOT a rebuild: it hot-
-    // reloads the controller. A video.fps change still rebuilds via subs.encoder
-    // (the restart-around re-snapshots the controller after startAll).
-    const bool needsRebuild = subs.encoder || subs.telemetry ||
-        !subs.servicesAffected.empty() || link.fullRestart;
+    // A rebuild bounces the whole orchestrator (including wfb). It is needed only
+    // when a non-link subsystem changes (telemetry/services), or when a link
+    // change cannot be hot-applied (linkId / wlanAdapter). A dynamicLink-only
+    // change (or an mtu-only change consumed by the controller) is NOT a rebuild:
+    // it hot-reloads the controller. Encoder changes are NOT rebuilds either —
+    // LIVE fields are pushed to waybeam (/api/v1/set) and restart-class fields
+    // bounce only waybeam (see encRestart). A video.fps change is a LIVE /set
+    // when DL is off, and is routed through dl_.setConfig() when DL is on (fps is
+    // excluded from waybeamConfigDiff there).
 
     if (reallyRestart && needsRebuild) {
         // Full-restart path: rebuild orchestrator + radio bring-up. The in-process
@@ -229,25 +339,52 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // Start AFTER radio_ is refreshed so the snapshot's iface is fresh.
         if (enabledNew)
             startController();
+        else
+            writeOsdBaseLine();   // DL off: rebuilt msposd needs the base OSD line
         version_++;
         lastApply_ = {nowIso(), true, restarted, std::nullopt};
         return {true, {}, restarted, std::nullopt, version_};
     }
 
     if (reallyRestart) {
-        // Hot path: no wfb restart. Route the in-process controller FIRST, so it
+        // Encoder restart-class change: waybeam.json was rewritten above; bounce
+        // ONLY waybeam (wfb stays up, radio link preserved). On Star6E a /set-
+        // driven reinit would self-respawn and race our supervisor, so fpvd owns
+        // the restart. The settle delay lets the SigmaStar driver drain the old
+        // pipeline before the fresh waybeam re-inits (a video0.size change wedges
+        // the VENC channel otherwise). No-op if waybeam is not currently supervised.
+        if (encRestart) {
+            orch_.restart("waybeam",
+                          std::chrono::milliseconds{paths_.waybeamRestartSettleMs});
+            // msposd renders the OSD onto waybeam's video pipeline; a waybeam
+            // restart drops the overlay region, so rebuild + restart msposd to
+            // redraw it against the fresh waybeam AT THE NEW CANVAS SIZE (its -z
+            // resolution arg is baked in at launch). No-op when the router isn't
+            // msposd.
+            restartOsd();
+        }
+        // Hot path: no wfb restart. Route the in-process controller before the
+        // link hot-apply blocks below, so it
         // runs regardless of which hot return is taken below (the deferred
         // nicChannel return detaches a worker and returns early). start() binds
         // sockets + launches the thread; setConfig() hot-reloads; stop() joins.
         if (!enabledOld && enabledNew)
             startController();
-        else if (enabledOld && !enabledNew)
+        else if (enabledOld && !enabledNew) {
             dl_.stop();
+            restateStaticLink();   // revert radio + encoder to the static config
+        }
         else if (enabledOld && enabledNew && (subs.dynamicLink || link.videoRadiotap))
             // A stbc/ldpc retune is the only videoRadiotap change reachable under
             // DL (mcs/width/fec are locked), so refresh the controller snapshot;
             // the loop restates the radio with its current mcs (see reconcile).
             dl_.setConfig(dynlink::buildDlSnapshot(effective_, radio_.iface));
+
+        // DL isn't feeding the OSD — (re)assert the system-stats base line so a
+        // just-restarted msposd, or an on->off toggle, shows CPU/temp/bitrate
+        // instead of going blank or holding stale DL stats.
+        if (!enabledNew)
+            writeOsdBaseLine();
 
         // A purely hot-applicable link change — no wfb restart.
         // (A) Immediate, non-link-dropping changes.

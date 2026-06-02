@@ -40,6 +40,7 @@ private:
     void dispatchTxSafe(const DlRuntimeConfig& cfg);
 
     Endpoints ep_;
+    WaybeamClient wb_;            // transport for enc_; built from ep_ in the ctor
     std::thread thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> stopFlag_{false};

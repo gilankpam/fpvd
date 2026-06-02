@@ -1,8 +1,11 @@
 #include "translate/waybeam.hpp"
+#include <cstdio>
+#include <string>
 
 namespace fpvd {
 
 nlohmann::json toWaybeamJson(const Config& c) {
+    // Keep the fpvd-managed field set in sync with waybeamConfigDiff().
     return {
         {"system", {{"webPort", 80}, {"overclockLevel", 1}, {"verbose", false}}},
         {"sensor", {
@@ -21,7 +24,6 @@ nlohmann::json toWaybeamJson(const Config& c) {
             {"rotate", c.image.rotate}
         }},
         {"video0", {
-            {"codec", c.video.codec},
             {"rcMode", c.video.rcMode},
             {"fps", c.video.fps},
             {"size", c.video.resolution},
@@ -74,6 +76,67 @@ nlohmann::json toWaybeamJson(const Config& c) {
         }},
         {"debug", {{"showOsd", false}}}
     };
+}
+
+static std::string fmtBool(bool b) { return b ? "true" : "false"; }
+
+// Formats a double for a waybeam query value. Assumes the C locale (fpvd never
+// calls setlocale) so the separator is '.'; waybeam parses these fields as
+// floats, so an integral value renders without a decimal (e.g. 2.0 -> "2").
+static std::string fmtDouble(double d) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%g", d);
+    return buf;
+}
+
+WaybeamFieldDiff waybeamConfigDiff(const Config& a, const Config& b,
+                                   bool dlEnabled) {
+    // Keep the fpvd-managed field set in sync with toWaybeamJson().
+    WaybeamFieldDiff d;
+    const auto& va = a.video; const auto& vb = b.video;
+
+    // LIVE — dynamic-link-owned fields are skipped while DL is enabled.
+    if (!dlEnabled) {
+        if (va.bitrate != vb.bitrate)
+            d.live["video0.bitrate"]  = std::to_string(vb.bitrate);
+        if (va.fps != vb.fps)
+            d.live["video0.fps"]      = std::to_string(vb.fps);
+        if (va.qpDelta != vb.qpDelta)
+            d.live["video0.qp_delta"] = std::to_string(vb.qpDelta);
+        if (va.roi.enabled != vb.roi.enabled)
+            d.live["fpv.roi_enabled"] = fmtBool(vb.roi.enabled);
+        if (va.roi.qp != vb.roi.qp)
+            d.live["fpv.roi_qp"]      = std::to_string(vb.roi.qp);
+        if (va.roi.steps != vb.roi.steps)
+            d.live["fpv.roi_steps"]   = std::to_string(vb.roi.steps);
+        if (va.roi.center != vb.roi.center)
+            d.live["fpv.roi_center"]  = fmtDouble(vb.roi.center);
+    }
+    // gopSize is LIVE but NOT dynamic-link-owned (the controller never writes
+    // gop), so it is pushed regardless of DL state.
+    if (va.gopSize != vb.gopSize)
+        d.live["video0.gop_size"] = fmtDouble(vb.gopSize);
+
+    // RESTART
+    if (va.resolution != vb.resolution)
+        d.restart["video0.size"]    = vb.resolution;
+    if (va.rcMode != vb.rcMode)
+        d.restart["video0.rc_mode"] = vb.rcMode;
+
+    const auto& ia = a.image; const auto& ib = b.image;
+    if (ia.mirror != ib.mirror) d.restart["image.mirror"] = fmtBool(ib.mirror);
+    if (ia.flip   != ib.flip)   d.restart["image.flip"]   = fmtBool(ib.flip);
+    if (ia.rotate != ib.rotate) d.restart["image.rotate"] = std::to_string(ib.rotate);
+
+    const auto& ra = a.recording; const auto& rb = b.recording;
+    if (ra.enabled    != rb.enabled)    d.restart["record.enabled"]     = fmtBool(rb.enabled);
+    if (ra.format     != rb.format)     d.restart["record.format"]      = rb.format;
+    if (ra.mode       != rb.mode)       d.restart["record.mode"]        = rb.mode;
+    if (ra.maxSeconds != rb.maxSeconds) d.restart["record.max_seconds"] = std::to_string(rb.maxSeconds);
+    if (ra.maxMB      != rb.maxMB)      d.restart["record.max_mb"]      = std::to_string(rb.maxMB);
+
+    // video.codec intentionally not mapped (retired; pinned to h265).
+    return d;
 }
 
 } // namespace fpvd

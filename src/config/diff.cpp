@@ -8,6 +8,9 @@ SubsystemDiff diffSubsystems(const Config& a, const Config& b) {
     SubsystemDiff d;
     json ja = a, jb = b;
     if (ja["link"] != jb["link"]) d.radio = true;
+    // NOTE: encoder is no longer a rebuild trigger — Daemon::apply() applies
+    // encoder changes via the waybeam API (waybeamConfigDiff), not a rebuild.
+    // Retained for subsystem-classification reporting/tests.
     if (ja["video"] != jb["video"] || ja["image"] != jb["image"] ||
         ja["recording"] != jb["recording"])
         d.encoder = true;

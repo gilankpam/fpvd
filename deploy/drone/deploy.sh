@@ -80,10 +80,7 @@ start() {
     printf 'Starting %s: ' "$DAEMON"
     start-stop-daemon -S -q -b -m -p "$PIDFILE" -x "$DAEMON_PATH" -- $DAEMON_ARGS
     [ $? = 0 ] && echo "OK" || echo "FAIL"
-    # Seed a base OSD line once msposd is up (msposd renders the last message it
-    # read and holds it). dynamic-link overwrites this with live link stats while
-    # decisions flow; this base line shows whenever dl isn't feeding.
-    (sleep 6; printf '&L70&F28&G8CPU:&C TEMP:&T\n&B\n' > /tmp/MSPOSD.msg) &
+    # (fpvd now writes the base OSD line itself when dynamic-link isn't feeding.)
 }
 stop() {
     printf 'Stopping %s: ' "$DAEMON"
