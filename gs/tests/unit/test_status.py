@@ -1,0 +1,31 @@
+from fpvdgs.status import parse_iw_info, build_status
+
+IW = """Interface wlx84fc146c36e6
+\tifindex 5
+\ttype monitor
+\tchannel 132 (5660 MHz), width: 40 MHz, center1: 5670 MHz
+\ttxpower 19.00 dBm
+"""
+
+
+def test_parse_iw_info():
+    d = parse_iw_info(IW)
+    assert d["type"] == "monitor"
+    assert d["channel"] == 132
+    assert d["freqMhz"] == 5660
+    assert d["widthMhz"] == 40
+    assert d["txpowerDbm"] == 19.0
+
+
+def test_build_status_shape():
+    s = build_status(
+        version="0.1.0",
+        runner_state={"running": True, "pid": 591, "restarts": 0, "lastExit": None},
+        wlans={"wlx84fc146c36e6": parse_iw_info(IW)},
+        drone_probe={"reachable": True, "inSync": True, "linkId": 7669206},
+    )
+    assert s["runner"]["pid"] == 591
+    assert s["radio"][0]["wlan"] == "wlx84fc146c36e6"
+    assert s["radio"][0]["channel"] == 132
+    assert s["link"]["droneReachable"] is True
+    assert s["link"]["inSync"] is True

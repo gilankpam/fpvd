@@ -1,0 +1,19 @@
+{
+  "link": {
+    "channel": 132,
+    "width": 40,
+    "txpower": null,
+    "region": "US",
+    "linkId": 7669206,
+    "beamforming": { "enabled": false },
+    "wlans": "auto"
+  },
+  "wfb": {
+    "profile": "gs",
+    "mavlink": { "peer": "connect://127.0.0.1:14550" },
+    "raw": {}
+  },
+  "drone": {
+    "endpoint": "http://10.5.0.10:8080"
+  }
+}

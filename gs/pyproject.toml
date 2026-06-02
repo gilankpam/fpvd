@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fpvdgs"
+version = "0.1.0"
+description = "fpvd ground-station wfb supervisor"
+requires-python = ">=3.11"
+
+[project.scripts]
+fpvd = "fpvdgs.supervisor:main"
+fpvd-runner = "fpvdgs.runner:main"
+
+[tool.setuptools.packages.find]
+include = ["fpvdgs*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

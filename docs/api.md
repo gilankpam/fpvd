@@ -4,6 +4,8 @@
 
 The server binds on `0.0.0.0:8080` by default (overridable with `--port`). There is no authentication — the API is reachable over the wfb-ng tunnel (`10.5.0.10/24`) and any LAN interface, all of which are assumed to be private networks. Clients include ground-station apps, `curl` scripts, and the `wfbng-dynamic-link` ground-station component.
 
+> **Two daemons.** This repo ships two `fpvd` builds: the **drone** daemon (C++, `drone/`) documented in the sections below, and the **ground-station** daemon (Python, `gs/`) documented in [Ground-station API (fpvd-GS)](#ground-station-api-fpvd-gs). They share most of the HTTP surface (`/config`, `/apply`, `/reset`, `/defaults`, `/status`, `/healthz`) and the stage→apply lifecycle, but the GS has a different config schema (radio-only, no encoder/telemetry/recording) and adds two GS-only endpoint groups: a `/link` coordinator and an opaque `/air/*` proxy to the drone. Unless a section is under that heading, it describes the **drone** daemon.
+
 ---
 
 ## Conventions
@@ -813,3 +815,175 @@ curl -X PATCH http://127.0.0.1:8080/config \
 # {"error":"dynamic_link_locked","message":"fields owned by dl-applier while dynamicLink.enabled",
 #  "details":{"locked":["link.mcs"]}}
 ```
+
+---
+
+# Ground-station API (fpvd-GS)
+
+The ground-station `fpvd` (Python, `gs/fpvdgs/`) owns the **GS** wfb radio config and supervises the GS wfb data plane, replacing the stock `wfb-server`/`S98wifibroadcast`. A supervisor process owns the config + this HTTP API; a runner child imports the `wfb_ng` library to run `wfb_rx`/`wfb_tx` and continues to serve the wfb stats APIs on `:8103` (JSON) / `:8003` (MsgPack), so `dynamic-link-gs` and `wfb-cli` are unaffected.
+
+Binds `0.0.0.0:8080` (same posture as the drone). Source of truth: `/etc/fpvd/{defaults,config}.json`; the daemon renders these to `/etc/wifibroadcast.cfg` (a generated artifact — do not edit). The stage→apply lifecycle (effective vs pending, `?pending=true`) is identical to the drone's.
+
+### Differences from the drone API at a glance
+
+| | Drone | Ground station |
+|--|--|--|
+| Config schema | link + video + image + telemetry + recording + dynamicLink + services | **radio-only**: `link` + `wfb` + `drone` |
+| `link` fields | channel, width, txpower, **mcs, fec, stbc, ldpc**, mtu, … | channel, width, txpower, region, linkId, beamforming, wlans — **no mcs/fec/stbc/ldpc** (drone-owned for video; GS uplink uses wfb-ng defaults) |
+| `GET /healthz` body | `{}` | `{"ok": true}` |
+| Error body | `{error, message, details}` | `{"error": "<message>"}` |
+| Mutating link params | `PATCH /config` | **`/link` only** (`/config` rejects `link.*`) |
+| Extra endpoints | — | `/link`, `/link/apply`, `/air/*` |
+
+## Shared endpoints (GS behavior)
+
+`GET /healthz` → `200 {"ok": true}`. `GET /defaults` → the GS baseline. `GET /config[?pending=true]` → effective/pending GS config. `POST /reset` → `{"reset": true}` (drops the overlay, re-renders, bounces the runner).
+
+### PATCH /config (GS)
+
+Deep-merges a partial GS config into pending. **Rejects any `link.*` key** (those are mutated only via `/link`, to keep the radio from desyncing with the drone) and rejects unknown top-level keys.
+
+```bash
+curl -X PATCH http://127.0.0.1:8080/config -H 'content-type: application/json' \
+  -d '{"wfb":{"mavlink":{"peer":"connect://127.0.0.1:14550"}}}'
+```
+
+| Code | Meaning |
+|------|---------|
+| 200 | Patch accepted; body is the updated pending config. |
+| 400 | `{"error":"link.* is read-only via /config; use /link"}` or `{"error":"unknown config keys: [...]"}`. |
+
+### POST /apply (GS)
+
+Validates pending, renders the cfg, and **bounces only the runner** (a brief RX drop), committing only after the runner is back; on failure it restores the last-good cfg and does not commit.
+
+```jsonc
+{"applied": true}
+```
+
+| Code | Meaning |
+|------|---------|
+| 200 | `{"applied": true}` — committed; runner bounced and back up. |
+| 409 | `{"error":"link changed; use POST /link/apply"}` — pending has an un-applied `link` change; apply it via `/link/apply` so the drone stays coordinated. |
+| 500 | `{"applied": false, "error":"runner failed; rolled back to last-good cfg"}`. |
+
+### GET /status (GS)
+
+```jsonc
+{
+  "fpvd":   {"version": "0.1.0", "uptimeMs": 41717},
+  "runner": {"running": true, "pid": 10447, "restarts": 0,
+             "autoRestarts": 0, "lastExit": null, "fault": false},
+  "radio":  [
+    {"wlan": "wlx84fc146c36e6", "type": "monitor", "channel": 132,
+     "freqMhz": 5660, "widthMhz": 40, "txpowerDbm": 19.0}
+  ],
+  "link":   {"linkId": 7669206, "droneReachable": true, "inSync": null}
+}
+```
+
+- `runner` — the supervised wfb runner: `restarts` counts operator bounces, `autoRestarts` counts crash auto-restarts, `fault` is the crash-loop guard.
+- `radio` — one entry per wlan, parsed from `iw dev <wlan> info`.
+- `link.droneReachable` — cached probe of the drone fpvd. `link.inSync` — best-effort: set after an `applyTo:"both"`; `null`/`false` after a GS-only apply even when the widths happen to match (compare against `GET /air/config` to confirm).
+
+## Link coordinator
+
+The shared radio params — **channel, width, region, beamforming, linkId** — are owned here, not by `/config`. A change is **GS-local-first**: it always applies on the GS (that is how a link is *established* — e.g. set the GS to the drone's channel to connect), and best-effort pushes the shared subset (`channel`, `width`, `linkId`) to the drone when reachable. It is never gated on the drone.
+
+### GET /link
+
+Effective overlap params plus `droneReachable`.
+
+```jsonc
+{"channel": 132, "width": 20, "txpower": null, "region": "US",
+ "linkId": 7669206, "beamforming": {"enabled": false}, "wlans": "auto",
+ "droneReachable": true}
+```
+
+### PATCH /link
+
+Stages overlap params into pending. Accepts **only** `link.*`, only the known link keys; rejects others (`400 {"error":"only link.* allowed via /link"}` / `unknown link keys`).
+
+### POST /link/apply
+
+Applies the staged link change. Body: `{"applyTo": "gs" | "both"}` (default `"both"`).
+
+- `"gs"` — change only the GS (the "tune the GS to a drone state I already know" / recovery path; drone untouched).
+- `"both"` — also push `channel`/`width`/`linkId` to the drone fpvd (`PATCH /config` + `POST /apply` over `drone.endpoint`) when reachable. The drone ACKs then defers its retune; the GS follows. Drone unreachable → degrades to GS-only.
+
+```jsonc
+{"gsApplied": true, "droneApplied": false, "droneReachable": false, "inSync": false}
+```
+
+| Code | Meaning |
+|------|---------|
+| 200 | Applied. Body reports per-end outcome. A drone-unreachable on `applyTo:"both"` is **not** an error — the GS still applies with `droneApplied:false`. |
+| 400 | Value validation failed (e.g. `link.width` not in {20,40}). |
+
+```bash
+# Set the GS to 20 MHz to match a drone already on 20 MHz (GS-only):
+curl -X PATCH http://127.0.0.1:8080/link -H 'content-type: application/json' \
+  -d '{"link":{"width":20}}'
+curl -X POST http://127.0.0.1:8080/link/apply -H 'content-type: application/json' \
+  -d '{"applyTo":"gs"}'
+# {"gsApplied":true,"droneApplied":false,"droneReachable":false,"inSync":false}
+```
+
+## Drone proxy — `/air/*`
+
+`GET/PATCH /air/config`, `POST /air/apply`, `GET /air/status` forward the request **opaquely** (no schema parsing) to the drone fpvd at `drone.endpoint`, relaying its response verbatim. This is the single front door for drone-only config (video bitrate, codec, ROI, …) — the GS daemon never models the drone schema.
+
+| Code | Meaning |
+|------|---------|
+| 2xx/4xx/5xx | Relayed from the drone fpvd. |
+| 502 | `{"error":"drone unreachable: ..."}` — could not reach `drone.endpoint`. |
+
+```bash
+curl http://127.0.0.1:8080/air/status                       # drone's /status, proxied
+curl -X PATCH http://127.0.0.1:8080/air/config \            # drone-only config
+  -H 'content-type: application/json' -d '{"video":{"bitrate":9000}}'
+```
+
+## GS config schema
+
+```jsonc
+{
+  "link": {
+    "channel": 132,          // integer — Wi-Fi channel (must be valid for region)
+    "width": 40,             // integer, 20 or 40 — card width (HT20/HT40); must match the drone's video TX width to receive
+    "txpower": null,         // integer (mBm) or null — null keeps the driver default; wfb-ng treats this as mBm
+    "region": "US",          // string — CRDA country code
+    "linkId": 7669206,       // integer — informational; the actual id is derived from wfb-ng link_domain (matches the drone)
+    "beamforming": {"enabled": false},  // parsed; inert in v1 (future)
+    "wlans": "auto"          // "auto" -> wfb-nics autodetect, or an explicit list ["wlx..", ...]
+  },
+  "wfb": {
+    "profile": "gs",         // string — wfb-ng service profile
+    "mavlink": {"peer": "connect://127.0.0.1:14550"},
+    "raw": {}                // passthrough: {section: {key: value}} merged verbatim into the rendered cfg
+  },
+  "drone": {
+    "endpoint": "http://10.5.0.10:8080"  // where /link and /air reach the drone fpvd (over the wfb tunnel)
+  }
+}
+```
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `link.channel` | integer | `132` | required |
+| `link.width` | integer | `40` | `20` or `40` |
+| `link.txpower` | integer \| null | `null` | mBm; `null` = driver default |
+| `link.region` | string | `"US"` | required |
+| `link.linkId` | integer | `7669206` | informational (link_domain-derived) |
+| `link.beamforming.enabled` | boolean | `false` | inert in v1 |
+| `link.wlans` | `"auto"` \| array | `"auto"` | `wfb-nics` autodetect or explicit list |
+| `wfb.profile` | string | `"gs"` | — |
+| `wfb.mavlink.peer` | string | `connect://127.0.0.1:14550` | — |
+| `wfb.raw` | object | `{}` | passthrough escape hatch |
+| `drone.endpoint` | string | `http://10.5.0.10:8080` | drone fpvd base URL |
+
+There is intentionally **no** `mcs`/`fec`/`ldpc`/`stbc` on the GS: video downlink FEC/modulation is auto-detected by `wfb_rx` (drone-owned), and the GS uplink TX uses wfb-ng's defaults. There are also no `video`/`image`/`telemetry`/`recording`/`dynamicLink`/`services` sections — those are drone-only.
+
+## Errors (GS)
+
+Error responses are a single field — `{"error": "<human message>"}` — with HTTP `400` (validation/schema), `404` (no route), `409` (link drift on `/apply`), `500` (apply/runner failure), or `502` (drone unreachable on `/air`).

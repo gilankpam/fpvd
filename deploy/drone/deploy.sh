@@ -33,7 +33,8 @@ while [ $# -gt 0 ]; do
 done
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-BIN="$REPO/build/ssc338q/fpvd"
+CPP="$REPO/drone"
+BIN="$CPP/build/ssc338q/fpvd"
 TARGET="${DRONE_USER}@${DRONE_HOST}"
 SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o LogLevel=error)
 
@@ -46,12 +47,12 @@ trap 'rm -f "$STRIPPED" "$INIT"' EXIT
 # ---- 1. build (cross, Release) + strip ----------------------------------
 if [ "$SKIP_BUILD" -eq 0 ]; then
     echo "[build] cross-compiling fpvd for ssc338q (armv7l/musl/static) via nix-shell…"
-    ( cd "$REPO" && nix-shell --run "cmake -S . -B build/ssc338q \
+    ( cd "$CPP" && nix-shell --run "cmake -S . -B build/ssc338q \
         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-ssc338q.cmake -DCMAKE_BUILD_TYPE=Release \
         && cmake --build build/ssc338q --target fpvd -j" )
 fi
 [ -f "$BIN" ] || { echo "[error] no binary at $BIN (build failed, or --skip-build with no prior build)"; exit 1; }
-( cd "$REPO" && nix-shell --run "armv7l-unknown-linux-musleabihf-strip -s -o '$STRIPPED' '$BIN'" )
+( cd "$CPP" && nix-shell --run "armv7l-unknown-linux-musleabihf-strip -s -o '$STRIPPED' '$BIN'" )
 echo "[build] stripped binary: $(stat -c %s "$STRIPPED") bytes"
 
 # ---- 2. detect install vs update ----------------------------------------
@@ -62,9 +63,9 @@ echo "[mode]  $MODE  ($TARGET)"
 echo "[push]  binary, radio scripts, defaults, init script…"
 remote 'mkdir -p /etc/fpvd /usr/libexec/fpvd'
 copy "$STRIPPED"                   /usr/bin/fpvd.new
-copy "$REPO/scripts/radio-up.sh"   /usr/libexec/fpvd/radio-up.sh
-copy "$REPO/scripts/radio-tune.sh" /usr/libexec/fpvd/radio-tune.sh
-copy "$REPO/etc/defaults.json"     /etc/fpvd/defaults.json   # baseline; overlay /etc/fpvd/config.json (user edits) is untouched
+copy "$CPP/scripts/radio-up.sh"   /usr/libexec/fpvd/radio-up.sh
+copy "$CPP/scripts/radio-tune.sh" /usr/libexec/fpvd/radio-tune.sh
+copy "$CPP/etc/defaults.json"     /etc/fpvd/defaults.json   # baseline; overlay /etc/fpvd/config.json (user edits) is untouched
 
 # init script: manual-deploy variant — /rom is read-only on a live system, so
 # point --defaults at the writable /etc/fpvd/defaults.json.
