@@ -31,6 +31,69 @@ See `../docs/superpowers/specs/2026-06-02-fpvd-gs-design.md`.
 | GET | /link | overlap params + droneReachable |
 | PATCH/POST | /link, /link/apply | GS-local-first link change; applyTo "gs"|"both" |
 
+## Config reference
+
+### `dynamicLink`
+
+Arms the in-process GS adaptive-link control loop. Disabled by default.
+
+```json
+"dynamicLink": {
+  "enabled": false,
+  "maxMcs": 5,
+  "bandwidth": 20,
+  "txpower": { "min": 18, "max": 28 },
+  "radioProfile": "m8812eu2",
+  "droneAddr": null,
+  "dronePort": 9999,
+  "tuning": {}
+}
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Arms the in-process control loop. Toggle at runtime via `PATCH /config` + `POST /apply`. |
+| `maxMcs` | int 0–7 | `5` | Upper MCS bound the controller may select. |
+| `bandwidth` | 20 or 40 | `20` | RF bandwidth the controller targets (MHz). |
+| `txpower.min` / `.max` | int (dBm) | 18 / 28 | Tx-power range the controller may request. |
+| `radioProfile` | string | `"m8812eu2"` | Packaged radio profile (JSON under `gs/fpvdgs/dynlink/profiles/`). Determines per-MCS bitrate tables. |
+| `droneAddr` | string\|null | `null` | Drone's dynamic-link UDP address. Defaults to the host parsed from `drone.endpoint`. |
+| `dronePort` | int | `9999` | Drone's dynamic-link UDP port. |
+| `tuning` | object | `{}` | Opaque passthrough of advanced policy knobs (gate/fec/smoothing/cooldown). Merged over code defaults. |
+
+**Operating model.** The controller is an in-process daemon thread that
+consumes wfb-ng stats on `:8103` at 10 Hz (fpvd renders `log_interval = 100`
+unconditionally to guarantee this), runs the adaptive policy, and emits
+decisions to the drone over UDP.
+
+Enabling, disabling, or tuning is applied at runtime via `PATCH /config` +
+`POST /apply` with **no wfb restart** — the runner is never bounced for
+`dynamicLink`-only changes.
+
+The drone side must be armed separately (its own `dynamicLink.enabled`,
+reachable via fpvd's `/air` proxy).
+
+**Status.** `GET /status.dynamicLink` shows the controller state plus a
+`drone` sub-object with `reachable`, `dynamicLinkActive`, and `hello` — so a
+GS-armed / drone-not mismatch is immediately visible:
+
+```json
+{
+  "dynamicLink": {
+    "enabled": true,
+    "running": true,
+    "drone": {
+      "reachable": true,
+      "dynamicLinkActive": false,
+      "hello": "announcing"
+    }
+  }
+}
+```
+
+When `enabled` is false the block is `{"enabled": false, "running": false}`.
+`hello` is one of `"announcing"`, `"keepalive"`, `"none"`.
+
 ## On-device smoke (run after deploy; needs the drone reachable for /air and /link "both")
 
 1. `pidof fpvd wfb_rx wfb_tx` — all present; no `wfb-server`/`S98wifibroadcast`.
