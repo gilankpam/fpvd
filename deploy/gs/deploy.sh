@@ -62,7 +62,7 @@ remote '
 echo "[verify]"
 sleep 5
 remote '
-    printf "  fpvd:  "; pgrep -f "fpvdgs.supervisor" >/dev/null && echo running || echo DOWN
+    printf "  fpvd:  "; ps w | grep -q "[f]pvdgs.supervisor" && echo running || echo DOWN
     printf "  procs: "; for p in wfb_rx wfb_tx; do
         printf "%s=%s " "$p" "$(pidof $p 2>/dev/null | cut -d" " -f1 || echo -)"; done; echo
     printf "  api:   "; curl -s http://127.0.0.1:8080/status | head -c 200; echo
