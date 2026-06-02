@@ -50,11 +50,12 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         render_mod.write_cfg(cfg_out, render_mod.render_cfg(eff))
 
     # live iw retune of the monitor cards (no process restart) for channel /
-    # 10<->20 width changes; the coordinator falls back to a runner bounce
-    # for changes that need a -B change (crossing 40 MHz).
+    # 10<->20 width / txpower / region changes; the coordinator falls back to a
+    # runner bounce for changes that need a -B change (crossing 40 MHz) or that
+    # are structural (wlans, linkId, profile, …).
     link = LinkCoordinator(store, renderer_write, runner, drone,
                            validate=schema.validate_effective,
-                           retune=lambda ch, w: radio.retune(wlans, ch, w))
+                           retune=lambda lnk: radio.retune(wlans, lnk))
 
     started = time.monotonic()
 

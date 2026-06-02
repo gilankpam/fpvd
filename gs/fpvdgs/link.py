@@ -35,13 +35,15 @@ class LinkCoordinator:
         return self._last_sync
 
     def _can_retune_live(self, old, new):
-        """A live iw retune is safe only when the change is limited to
-        channel/width AND the radiotap BW class is unchanged (so the running
-        wfb_tx's -B need not change). Otherwise a full bounce re-inits -B."""
+        """A live iw retune is safe only when the change is limited to fields
+        that `iw` can apply on a running monitor card (channel/width/txpower/
+        region) AND the radiotap BW class is unchanged (so the running wfb_tx's
+        -B need not change). Anything else (wlans, linkId, beamforming, …) or a
+        40 MHz crossing falls back to a full runner bounce."""
         if self.retune is None:
             return False
         changed = {k for k in set(old) | set(new) if old.get(k) != new.get(k)}
-        if not changed <= {"channel", "width"}:
+        if not changed <= {"channel", "width", "txpower", "region"}:
             return False
         return _bw_class(old.get("width")) == _bw_class(new.get("width"))
 
@@ -74,7 +76,7 @@ class LinkCoordinator:
 
         self.renderer_write(pending_cfg)
         if live:
-            gs_applied = self.retune(link.get("channel"), link.get("width"))
+            gs_applied = self.retune(link)
             mode = "live"
             if not gs_applied:           # live retune failed → fall back to a bounce
                 gs_applied = self.runner.restart()

@@ -140,10 +140,10 @@ def test_apply_link_validates_bad_width():
 class FakeRetune:
     def __init__(self, ok=True):
         self.ok = ok
-        self.calls = []
+        self.calls = []          # records each link dict passed
 
-    def __call__(self, channel, width):
-        self.calls.append((channel, width))
+    def __call__(self, link):
+        self.calls.append(link)
         return self.ok
 
 
@@ -155,7 +155,8 @@ def test_channel_change_retunes_live_without_restart():
     res = coord.apply_link("gs")
     assert res["mode"] == "live"
     assert res["gsApplied"] is True
-    assert retune.calls == [(100, 40)]   # live retune to new channel, same width
+    assert len(retune.calls) == 1
+    assert retune.calls[0]["channel"] == 100 and retune.calls[0]["width"] == 40
     assert runner.restarts == 0          # NO process restart
     assert store.effective()["link"]["channel"] == 100
 
@@ -167,7 +168,29 @@ def test_10_to_20_width_retunes_live():
     coord = LinkCoordinator(store, lambda cfg: None, runner, drone, retune=retune)
     res = coord.apply_link("gs")
     assert res["mode"] == "live"          # 10<->20 stays radiotap BW_20, no -B change
-    assert retune.calls == [(132, 20)]
+    assert retune.calls[0]["width"] == 20
+    assert runner.restarts == 0
+
+
+def test_txpower_change_retunes_live():
+    store = _store()  # width 40, no txpower
+    store.patch({"link": {"txpower": 2200}})
+    runner, drone, retune = FakeRunner(), FakeDrone(reachable=False), FakeRetune(ok=True)
+    coord = LinkCoordinator(store, lambda cfg: None, runner, drone, retune=retune)
+    res = coord.apply_link("gs")
+    assert res["mode"] == "live"          # txpower is pure iw, no restart
+    assert retune.calls[0]["txpower"] == 2200
+    assert runner.restarts == 0
+
+
+def test_region_change_retunes_live():
+    store = _store()  # region US
+    store.patch({"link": {"region": "BO"}})
+    runner, drone, retune = FakeRunner(), FakeDrone(reachable=False), FakeRetune(ok=True)
+    coord = LinkCoordinator(store, lambda cfg: None, runner, drone, retune=retune)
+    res = coord.apply_link("gs")
+    assert res["mode"] == "live"          # region is pure iw (iw reg set), no restart
+    assert retune.calls[0]["region"] == "BO"
     assert runner.restarts == 0
 
 
@@ -182,13 +205,13 @@ def test_20_to_40_width_bounces():
     assert runner.restarts == 1
 
 
-def test_region_change_bounces():
+def test_structural_change_bounces():
     store = _store()
-    store.patch({"link": {"region": "BO"}})
+    store.patch({"link": {"wlans": ["wlanX"]}})   # interface list change -> respawn
     runner, drone, retune = FakeRunner(), FakeDrone(reachable=False), FakeRetune(ok=True)
     coord = LinkCoordinator(store, lambda cfg: None, runner, drone, retune=retune)
     res = coord.apply_link("gs")
-    assert res["mode"] == "bounce"        # non-channel/width change -> bounce
+    assert res["mode"] == "bounce"        # not channel/width/txpower/region -> bounce
     assert retune.calls == []
     assert runner.restarts == 1
 
@@ -199,8 +222,8 @@ def test_live_retune_failure_falls_back_to_bounce():
     runner, drone, retune = FakeRunner(), FakeDrone(reachable=False), FakeRetune(ok=False)
     coord = LinkCoordinator(store, lambda cfg: None, runner, drone, retune=retune)
     res = coord.apply_link("gs")
-    assert retune.calls == [(100, 40)]    # tried live first
-    assert runner.restarts == 1           # fell back to a bounce
+    assert retune.calls[0]["channel"] == 100   # tried live first
+    assert runner.restarts == 1                # fell back to a bounce
     assert res["mode"] == "bounce"
     assert res["gsApplied"] is True
     assert store.effective()["link"]["channel"] == 100
