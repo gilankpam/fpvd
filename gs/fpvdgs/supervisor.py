@@ -8,24 +8,31 @@ from . import __version__, radio, render as render_mod, schema, status as status
 from .api import Api, make_http_server
 from .config import ConfigStore
 from .drone_client import DroneClient
+from .dynlink.controller import DynamicLinkController
+from .dynlink.config_build import make_dl_snapshot
 from .link import LinkCoordinator
 from .runner_supervisor import RunnerSupervisor, resolve_wlans
 
 
 class App:
-    def __init__(self, store, runner, http_server):
+    def __init__(self, store, runner, http_server, api, dynlink):
         self.store = store
         self.runner = runner
         self.http = http_server
+        self.api = api
+        self.dynlink = dynlink
 
     def start(self):
         self.runner.start()
+        if self.store.effective().get("dynamicLink", {}).get("enabled"):
+            self.dynlink.start()
 
     def serve_forever(self):
         self.http.serve_forever()
 
     def shutdown(self):
         self.http.shutdown()
+        self.dynlink.stop()
         self.runner.shutdown()
 
 
@@ -46,6 +53,8 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     drone = DroneClient(effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080"))
 
+    dynlink = DynamicLinkController(make_dl_snapshot(effective))
+
     def renderer_write(eff):
         render_mod.write_cfg(cfg_out, render_mod.render_cfg(eff))
 
@@ -59,21 +68,36 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     started = time.monotonic()
 
+    def _dynamic_link_status():
+        eff_dl = store.effective().get("dynamicLink", {})
+        st = dynlink.status()
+        st["enabled"] = bool(eff_dl.get("enabled"))
+        try:
+            drone_active = drone.get_status().get("link", {}).get("dynamicLinkActive")
+        except Exception:
+            drone_active = None
+        st["drone"] = {"reachable": drone.healthz(),
+                       "dynamicLinkActive": drone_active,
+                       "hello": st.pop("hello", "none")}
+        return st
+
     def status_fn():
         wlan_info = {w: status_mod.iw_info(w) for w in resolve_wlans(store.effective())}
         reachable = drone.healthz()
         eff_link = store.effective().get("link", {})
         probe = {"reachable": reachable, "linkId": eff_link.get("linkId"),
-                 "inSync": link.in_sync()}
+                 "inSync": link.in_sync() if link else None}
         uptime_ms = int((time.monotonic() - started) * 1000)
         return status_mod.build_status(__version__, runner.state(), wlan_info, probe,
-                                       uptime_ms=uptime_ms)
+                                       uptime_ms=uptime_ms,
+                                       dynamic_link=_dynamic_link_status())
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
-              drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out)
+              drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out,
+              dynlink=dynlink)
 
     http_server = make_http_server(api, host, port)
-    return App(store, runner, http_server)
+    return App(store, runner, http_server, api, dynlink)
 
 
 def main(argv=None):
