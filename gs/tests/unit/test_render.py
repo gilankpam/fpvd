@@ -89,3 +89,13 @@ def test_write_cfg_atomic_keeps_bak(tmp_path):
     write_cfg(str(p), "second\n")
     assert p.read_text() == "second\n"
     assert (tmp_path / "wifibroadcast.cfg.bak").read_text() == "first\n"
+
+
+def test_render_emits_10hz_log_interval():
+    from fpvdgs import render
+    cfg = {"link": {"channel": 132, "width": 40, "region": "US"}, "wfb": {}}
+    text = render.render_cfg(cfg)
+    assert "log_interval = 100" in text
+    # it belongs to [common]
+    common = text.split("[common]", 1)[1].split("[", 1)[0]
+    assert "log_interval = 100" in common
