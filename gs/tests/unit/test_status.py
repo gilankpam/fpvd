@@ -29,3 +29,23 @@ def test_build_status_shape():
     assert s["radio"][0]["channel"] == 132
     assert s["link"]["droneReachable"] is True
     assert s["link"]["inSync"] is True
+
+
+def test_build_status_includes_dynamic_link_section():
+    from fpvdgs import status
+    dl = {"enabled": True, "running": True, "statsConnected": True,
+          "decision": {"mcs": 4, "k": 8, "n": 12, "depth": 1,
+                       "txpowerDbm": 22, "bitrateKbps": 9000},
+          "lastEmitMs": 1234, "emitSeq": 5, "reason": "snr_margin",
+          "drone": {"reachable": True, "dynamicLinkActive": True, "hello": "acked"}}
+    out = status.build_status("0.1.0", {"running": True}, {}, {"reachable": True},
+                              dynamic_link=dl)
+    assert out["dynamicLink"]["running"] is True
+    assert out["dynamicLink"]["decision"]["mcs"] == 4
+    assert out["dynamicLink"]["drone"]["hello"] == "acked"
+
+
+def test_build_status_omits_dynamic_link_when_absent():
+    from fpvdgs import status
+    out = status.build_status("0.1.0", {"running": True}, {}, {"reachable": True})
+    assert "dynamicLink" not in out
