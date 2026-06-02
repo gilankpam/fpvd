@@ -33,6 +33,7 @@ class DynamicLinkController:
         self._gs_listen = (gs_listen_addr, gs_listen_port)
         self._make_stats = stats_client_factory
         self._lock = threading.RLock()
+        self._lifecycle = threading.RLock()
         self._thread = None
         self._loop = None
         self._stop_event = None         # asyncio.Event, created in-loop
@@ -43,38 +44,41 @@ class DynamicLinkController:
 
     # ---- thread-safe public API -----------------------------------------
     def start(self):
-        with self._lock:
-            if self._thread and self._thread.is_alive():
-                return
-            self._started.clear()
-            self._thread = threading.Thread(target=self._thread_main,
-                                            name="dl-controller", daemon=True)
-            self._thread.start()
-        self._started.wait(timeout=5.0)
+        with self._lifecycle:
+            with self._lock:
+                if self._thread and self._thread.is_alive():
+                    return
+                self._started.clear()
+                self._thread = threading.Thread(target=self._thread_main,
+                                                name="dl-controller", daemon=True)
+                self._thread.start()
+            self._started.wait(timeout=5.0)
 
     def stop(self):
-        with self._lock:
-            loop, stop, thread = self._loop, self._stop_event, self._thread
-        if loop is not None and stop is not None:
-            try:
-                loop.call_soon_threadsafe(stop.set)
-            except RuntimeError:
-                pass  # loop already closed/closing — teardown in progress
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=5.0)
-        with self._lock:
-            self._thread = None
+        with self._lifecycle:
+            with self._lock:
+                loop, stop, thread = self._loop, self._stop_event, self._thread
+            if loop is not None and stop is not None:
+                try:
+                    loop.call_soon_threadsafe(stop.set)
+                except RuntimeError:
+                    pass  # loop already closed/closing — teardown in progress
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=5.0)
+            with self._lock:
+                self._thread = None
 
     def set_config(self, snapshot):
         """Apply a new snapshot. If running, rebuild the loop (stop+start)
         from the new config — the wfb runner is untouched."""
-        running = self._thread is not None and self._thread.is_alive()
-        if running:
-            self.stop()
-        with self._lock:
-            self._snapshot = dict(snapshot)
-        if running:
-            self.start()
+        with self._lifecycle:
+            running = self._thread is not None and self._thread.is_alive()
+            if running:
+                self.stop()
+            with self._lock:
+                self._snapshot = dict(snapshot)
+            if running:
+                self.start()
 
     def status(self):
         with self._lock:

@@ -112,3 +112,35 @@ def test_set_config_while_running_rebuilds_with_new_drone_port():
         c.stop()
         sock_a.close()
         sock_b.close()
+
+
+def test_concurrent_set_config_no_hang():
+    import threading as _t
+
+    sock, port = _free_udp_port()
+    c = DynamicLinkController(_snapshot(port),
+                              stats_client_factory=_IdleStatsClient,
+                              gs_listen_port=0)
+    c.start()
+    errors = []
+
+    def hammer():
+        try:
+            for _ in range(5):
+                c.set_config(_snapshot(port))
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [_t.Thread(target=hammer) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+    alive = [t for t in threads if t.is_alive()]
+    try:
+        assert not alive, "lifecycle hammer threads hung"
+        assert not errors, f"errors during concurrent set_config: {errors}"
+        assert c.status()["running"] is True
+    finally:
+        c.stop()
+        sock.close()
