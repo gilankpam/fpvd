@@ -30,7 +30,8 @@ def iw_info(wlan: str) -> dict:
 
 
 def build_status(version: str, runner_state: dict, wlans: dict,
-                 drone_probe: dict, link_stats: dict | None = None) -> dict:
+                 drone_probe: dict, link_stats: dict | None = None,
+                 uptime_ms: int | None = None) -> dict:
     radio = []
     for wlan, info in wlans.items():
         radio.append({"wlan": wlan, **info})
@@ -41,8 +42,11 @@ def build_status(version: str, runner_state: dict, wlans: dict,
     }
     if link_stats:
         link["stats"] = link_stats
+    fpvd = {"version": version}
+    if uptime_ms is not None:
+        fpvd["uptimeMs"] = uptime_ms
     return {
-        "fpvd": {"version": version},
+        "fpvd": fpvd,
         "runner": runner_state,
         "radio": radio,
         "link": link,

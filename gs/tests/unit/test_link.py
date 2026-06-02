@@ -1,3 +1,6 @@
+import pytest
+
+from fpvdgs import schema
 from fpvdgs.config import ConfigStore
 from fpvdgs.link import LinkCoordinator
 
@@ -104,3 +107,28 @@ def test_apply_both_healthz_ok_but_patch_raises_still_applies_gs():
     assert res["droneApplied"] is False
     assert res["droneReachable"] is False
     assert res["inSync"] is False
+
+
+def test_apply_link_rollback_on_runner_failure():
+    class FailingRunner:
+        def restart(self):
+            return False
+
+    store = _store()
+    store.patch({"link": {"channel": 100}})
+    written = []
+    coord = LinkCoordinator(store, lambda cfg: written.append(cfg),
+                            FailingRunner(), FakeDrone(reachable=False))
+    res = coord.apply_link("gs")
+    assert res["gsApplied"] is False
+    assert store.effective()["link"]["channel"] == 132    # not committed
+    assert written[-1]["link"]["channel"] == 132           # rolled back to last-good
+
+
+def test_apply_link_validates_bad_width():
+    store = _store()
+    store.patch({"link": {"width": 80}})
+    coord = LinkCoordinator(store, lambda cfg: None, FakeRunner(),
+                            FakeDrone(reachable=True), validate=schema.validate_effective)
+    with pytest.raises(schema.SchemaError):
+        coord.apply_link("both")

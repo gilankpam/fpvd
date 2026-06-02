@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import time
 
 from . import __version__, render as render_mod, schema, status as status_mod
 from .api import Api, make_http_server
@@ -25,7 +26,7 @@ class App:
 
     def shutdown(self):
         self.http.shutdown()
-        self.runner.stop()
+        self.runner.shutdown()
 
 
 def build_app(defaults_path, overlay_path, cfg_out, host, port,
@@ -48,15 +49,20 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
     def renderer_write(eff):
         render_mod.write_cfg(cfg_out, render_mod.render_cfg(eff))
 
-    link = LinkCoordinator(store, renderer_write, runner, drone)
+    link = LinkCoordinator(store, renderer_write, runner, drone,
+                           validate=schema.validate_effective)
+
+    started = time.monotonic()
 
     def status_fn():
         wlan_info = {w: status_mod.iw_info(w) for w in resolve_wlans(store.effective())}
         reachable = drone.healthz()
         eff_link = store.effective().get("link", {})
         probe = {"reachable": reachable, "linkId": eff_link.get("linkId"),
-                 "inSync": None}
-        return status_mod.build_status(__version__, runner.state(), wlan_info, probe)
+                 "inSync": link.in_sync()}
+        uptime_ms = int((time.monotonic() - started) * 1000)
+        return status_mod.build_status(__version__, runner.state(), wlan_info, probe,
+                                       uptime_ms=uptime_ms)
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out)

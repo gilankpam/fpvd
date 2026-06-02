@@ -71,11 +71,16 @@ class Api:
         if pending.get("link") != self.store.effective().get("link"):
             return 409, {"error": "link changed; use POST /link/apply"}
         self.schema.validate_effective(pending)
-        self.store.commit()
-        self.render_mod.write_cfg(self.cfg_out,
-                                  self.render_mod.render_cfg(self.store.effective()))
-        ok = self.runner.restart()
-        return (200 if ok else 500), {"applied": bool(ok)}
+        # Render the pending cfg (write_cfg keeps the prior as .bak). Commit only
+        # after the runner comes back up; otherwise roll the cfg back.
+        self.render_mod.write_cfg(self.cfg_out, self.render_mod.render_cfg(pending))
+        if self.runner.restart():
+            self.store.commit()
+            return 200, {"applied": True}
+        self.render_mod.restore_bak(self.cfg_out)
+        self.runner.restart()
+        return 500, {"applied": False,
+                     "error": "runner failed; rolled back to last-good cfg"}
 
     def _link_view(self):
         link = dict(self.store.effective().get("link", {}))

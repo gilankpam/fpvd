@@ -47,7 +47,7 @@ def _api():
     link = LinkCoordinator(
         store,
         lambda cfg: render_mod.write_cfg(cfg_out, render_mod.render_cfg(cfg)),
-        runner, drone)
+        runner, drone, validate=schema.validate_effective)
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=drone, link=link, status_fn=lambda: {"ok": True}, cfg_out=cfg_out)
     return api, store, drone, cfg_out
@@ -110,3 +110,42 @@ def test_air_config_is_proxied_opaquely():
     code, raw = api.handle("PATCH", "/air/config", {}, b'{"video":{"bitrate":9000}}')
     assert code == 200
     assert any(c[0] == "PATCH" and c[1] == "/config" for c in drone.calls)
+
+
+def test_link_apply_rejects_bad_width():
+    api, store, _, _ = _api()
+    api.handle("PATCH", "/link", {}, json.dumps({"link": {"width": 80}}).encode())
+    code, obj = api.handle("POST", "/link/apply", {},
+                           json.dumps({"applyTo": "gs"}).encode())
+    assert code == 400
+
+
+def test_apply_rolls_back_on_runner_failure(tmp_path):
+    from fpvdgs.api import Api as _Api
+
+    class FailingRunner:
+        def restart(self):
+            return False
+        def state(self):
+            return {"running": False, "pid": None, "restarts": 0,
+                    "lastExit": 1, "fault": False}
+
+    cfg_out = str(tmp_path / "wifibroadcast.cfg")
+    store = ConfigStore({"link": {"channel": 132, "width": 40, "region": "US"},
+                         "wfb": {"profile": "gs"}, "drone": {"endpoint": "http://x"}},
+                        overlay_path=None)
+    drone = FakeDrone()
+    link = LinkCoordinator(
+        store, lambda cfg: render_mod.write_cfg(cfg_out, render_mod.render_cfg(cfg)),
+        FailingRunner(), drone, validate=schema.validate_effective)
+    api = _Api(store=store, schema=schema, render_mod=render_mod, runner=FailingRunner(),
+               drone=drone, link=link, status_fn=lambda: {}, cfg_out=cfg_out)
+    # boot render of the good cfg
+    render_mod.write_cfg(cfg_out, render_mod.render_cfg(store.effective()))
+    api.handle("PATCH", "/config", {},
+               json.dumps({"wfb": {"mavlink": {"peer": "connect://127.0.0.1:9999"}}}).encode())
+    code, obj = api.handle("POST", "/apply", {}, b"")
+    assert code == 500
+    # cfg rolled back (no 9999) and overlay not committed
+    assert "9999" not in open(cfg_out).read()
+    assert store.effective().get("wfb", {}).get("mavlink", {}).get("peer") != "connect://127.0.0.1:9999"

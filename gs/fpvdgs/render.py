@@ -48,3 +48,10 @@ def write_cfg(path: str, text: str) -> None:
     with open(tmp, "w") as f:
         f.write(text)
     os.replace(tmp, path)
+
+
+def restore_bak(path: str) -> None:
+    """Restore the previous cfg saved by write_cfg (<path>.bak -> <path>)."""
+    bak = path + ".bak"
+    if os.path.exists(bak):
+        os.replace(bak, path)
