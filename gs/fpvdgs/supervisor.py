@@ -68,7 +68,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     started = time.monotonic()
 
-    def _dynamic_link_status():
+    def _dynamic_link_status(reachable):
         eff_dl = store.effective().get("dynamicLink", {})
         st = dynlink.status()
         st["enabled"] = bool(eff_dl.get("enabled"))
@@ -76,7 +76,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
             drone_active = drone.get_status().get("link", {}).get("dynamicLinkActive")
         except Exception:
             drone_active = None
-        st["drone"] = {"reachable": drone.healthz(),
+        st["drone"] = {"reachable": reachable,
                        "dynamicLinkActive": drone_active,
                        "hello": st.pop("hello", "none")}
         return st
@@ -90,7 +90,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         uptime_ms = int((time.monotonic() - started) * 1000)
         return status_mod.build_status(__version__, runner.state(), wlan_info, probe,
                                        uptime_ms=uptime_ms,
-                                       dynamic_link=_dynamic_link_status())
+                                       dynamic_link=_dynamic_link_status(reachable))
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out,
