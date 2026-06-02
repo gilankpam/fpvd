@@ -3,3 +3,10 @@ build/
 *.a
 .cache/
 compile_commands.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
