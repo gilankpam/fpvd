@@ -171,11 +171,24 @@ class DynamicLinkController:
                 log.warning("dl: IDR relay bind 127.0.0.1:%d failed: %s", idr_port, e)
                 idr_transport = None
 
+        # The wfb stats feed (:8103) interleaves rx records for every service
+        # (video / mavlink / tunnel). Only the VIDEO stream may drive the policy:
+        # the low/zero-rate uplink streams would trip link_starved and pin MCS at
+        # the floor, and pollute the session/loss/fec signals. Match the video
+        # stream by id substring (records are e.g. "video rx").
+        video_id = (snap.get("videoStreamId") or "video").lower()
+
+        def _is_video(ev):
+            return ev.id is not None and video_id in ev.id.lower()
+
         def on_event(ev):
             if isinstance(ev, SessionEvent):
-                aggregator.update_session(ev.session)
+                if _is_video(ev):
+                    aggregator.update_session(ev.session)
                 return
             if isinstance(ev, RxEvent):
+                if not _is_video(ev):
+                    return
                 signals = aggregator.consume(ev)
                 decision = policy.tick(signals)
                 return_link.send(encoder.encode(decision))

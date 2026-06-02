@@ -18,10 +18,10 @@ def _snapshot(drone_port, **over):
     return snap
 
 
-def _rx_event():
+def _rx_event(stream_id="video rx", data=100, out=100, lost=0):
     return RxEvent(
-        timestamp=1.0, id="video",
-        packets_window={"out": 100, "lost": 0, "data": 100},
+        timestamp=1.0, id=stream_id,
+        packets_window={"out": out, "lost": lost, "data": data},
         rx_ant_stats=[RxAnt(ant=0, freq=5825, mcs=2, bw=20, pkt_recv=100,
                             rssi_min=-60, rssi_avg=-55, rssi_max=-50,
                             snr_min=20, snr_avg=25, snr_max=30)],
@@ -144,6 +144,41 @@ def test_concurrent_set_config_no_hang():
         assert not alive, "lifecycle hammer threads hung"
         assert not errors, f"errors during concurrent set_config: {errors}"
         assert c.status()["running"] is True
+    finally:
+        c.stop()
+        sock.close()
+
+
+def test_non_video_streams_are_ignored():
+    # :8103 interleaves video/mavlink/tunnel rx records. Only the video stream
+    # may drive the policy — a low-rate non-video record must NOT be consumed
+    # (it would trip link_starved and pin MCS at the floor).
+    sock, port = _free_udp_port()
+    sock.settimeout(2.0)
+
+    class _MixedStats:
+        def __init__(self, endpoint, on_event):
+            self._on = on_event
+            self._stop = False
+
+        async def run(self):
+            import asyncio
+            self._on(_rx_event(stream_id="tunnel rx", data=0, out=0))  # ignore
+            self._on(_rx_event(stream_id="video rx"))                  # one decision
+            while not self._stop:
+                await asyncio.sleep(0.02)
+
+        def stop(self):
+            self._stop = True
+
+    c = DynamicLinkController(_snapshot(port), stats_client_factory=_MixedStats,
+                              gs_listen_port=0)
+    c.start()
+    try:
+        data, _ = sock.recvfrom(64)
+        assert data[:4] == b"DLK1"
+        time.sleep(0.2)
+        assert c.status()["emitSeq"] == 1   # tunnel ignored; only video emitted
     finally:
         c.stop()
         sock.close()

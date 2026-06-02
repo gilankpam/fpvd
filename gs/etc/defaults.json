@@ -24,6 +24,7 @@
     "radioProfile": "m8812eu2",
     "droneAddr": null,
     "dronePort": 9999,
+    "videoStreamId": "video",
     "idrForward": true,
     "idrPort": 11223,
     "tuning": {}

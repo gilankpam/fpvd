@@ -61,6 +61,7 @@ Arms the in-process GS adaptive-link control loop. Disabled by default.
 | `radioProfile` | string | `"m8812eu2"` | Packaged radio profile (JSON under `gs/fpvdgs/dynlink/profiles/`). Determines per-MCS bitrate tables. |
 | `droneAddr` | string\|null | `null` | Drone's dynamic-link UDP address. Defaults to the host parsed from `drone.endpoint`. |
 | `dronePort` | int | `9999` | Drone's dynamic-link UDP port. |
+| `videoStreamId` | string | `"video"` | Substring matched against the wfb stats record `id` to select the **video** rx stream. The policy is driven by this stream only; the mavlink/tunnel rx records on `:8103` are ignored (their low packet rate would trip `link_starved` and pin MCS at the floor). |
 | `idrForward` | bool | `true` | Run the IDR-token relay (`127.0.0.1:idrPort` → `droneAddr:idrPort`) while the controller is active. Bridges PixelPilot keyframe requests to the drone's `idr_listen`; replaces the old standalone `socat` idr-forwarder. |
 | `idrPort` | int | `11223` | UDP port for the IDR relay (local listen + drone forward). |
 | `tuning` | object | `{}` | Opaque passthrough of advanced policy knobs (gate/fec/smoothing/cooldown). Merged over code defaults. |
