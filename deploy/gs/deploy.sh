@@ -58,6 +58,16 @@ remote '
     [ -x /etc/init.d/S98wifibroadcast ] && /etc/init.d/S98wifibroadcast stop >/dev/null 2>&1 || true
     sleep 2
     rm -f /etc/init.d/S98wifibroadcast
+
+    # Retire the standalone dynamic-link-gs service — now folded into fpvd as the
+    # in-process dynlink controller + IDR relay. Stop it (also stops its bundled
+    # idr-forwarder socat) and disable boot autostart, keeping the init script in
+    # the rollback dir so the GS dynamic-link role is fully owned by fpvd. fpvd
+    # then binds the HELLO listener on UDP 5801 and the IDR relay on 127.0.0.1:11223.
+    if [ -f /etc/init.d/S99dynamic-link-gs ]; then
+        [ -x /etc/init.d/S99dynamic-link-gs ] && /etc/init.d/S99dynamic-link-gs stop >/dev/null 2>&1 || true
+        mv /etc/init.d/S99dynamic-link-gs /root/fpvd-gs-rollback/S99dynamic-link-gs
+    fi
     : > /tmp/fpvd.log
     /etc/init.d/S99fpvd restart   # restart: reloads code on re-deploy; starts on first install
 '
@@ -66,6 +76,7 @@ echo "[verify]"
 sleep 5
 remote '
     printf "  fpvd:  "; ps w | grep -q "[f]pvdgs.supervisor" && echo running || echo DOWN
+    printf "  dlstd: "; ps w | grep -q "[d]ynamic_link.service" && echo "STILL RUNNING (!)" || echo retired
     printf "  procs: "; for p in wfb_rx wfb_tx; do
         printf "%s=%s " "$p" "$(pidof $p 2>/dev/null | cut -d" " -f1 || echo -)"; done; echo
     printf "  api:   "; curl -s http://127.0.0.1:8080/status | head -c 200; echo

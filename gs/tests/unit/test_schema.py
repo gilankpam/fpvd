@@ -94,3 +94,8 @@ def test_effective_rejects_unknown_radio_profile():
 
 def test_effective_accepts_known_radio_profile():
     schema.validate_effective(_eff(radioProfile="m8812eu2"))  # no raise
+
+
+def test_effective_rejects_bad_idr_port():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(_eff(idrPort=70000))

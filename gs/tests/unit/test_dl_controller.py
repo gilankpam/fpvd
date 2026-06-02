@@ -10,6 +10,9 @@ def _snapshot(drone_port, **over):
         "enabled": True, "maxMcs": 5, "bandwidth": 20,
         "txpower": {"min": 18, "max": 28}, "radioProfile": "m8812eu2",
         "droneAddr": "127.0.0.1", "dronePort": drone_port, "tuning": {},
+        # IDR relay off by default so unrelated tests don't contend for :11223;
+        # the dedicated relay test enables it on an ephemeral port.
+        "idrForward": False,
     }
     snap.update(over)
     return snap
@@ -144,3 +147,31 @@ def test_concurrent_set_config_no_hang():
     finally:
         c.stop()
         sock.close()
+
+
+def test_idr_relay_forwards_player_tokens_to_drone():
+    # Relay listens on 127.0.0.1:idrPort and forwards to droneAddr:idrPort.
+    # Use a distinct loopback alias (127.0.0.2) for the fake drone so the
+    # same port doesn't loop back on itself.
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    probe.bind(("127.0.0.1", 0))
+    idr_port = probe.getsockname()[1]
+    probe.close()
+
+    drone = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    drone.bind(("127.0.0.2", idr_port))
+    drone.settimeout(2.0)
+
+    c = DynamicLinkController(
+        _snapshot(40010, droneAddr="127.0.0.2", idrForward=True, idrPort=idr_port),
+        stats_client_factory=_IdleStatsClient, gs_listen_port=0)
+    c.start()
+    try:
+        player = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        player.sendto(b"IDR!", ("127.0.0.1", idr_port))
+        player.close()
+        data, _ = drone.recvfrom(64)
+        assert data == b"IDR!"
+    finally:
+        c.stop()
+        drone.close()

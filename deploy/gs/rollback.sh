@@ -18,5 +18,12 @@ ssh -o StrictHostKeyChecking=accept-new "$TARGET" '
         chmod +x /etc/init.d/S98wifibroadcast
         /etc/init.d/S98wifibroadcast start
     fi
+    # restore the standalone dynamic-link-gs service (retired by deploy.sh) so a
+    # full rollback returns the GS to its complete pre-fpvd state.
+    if [ -f /root/fpvd-gs-rollback/S99dynamic-link-gs ]; then
+        mv /root/fpvd-gs-rollback/S99dynamic-link-gs /etc/init.d/S99dynamic-link-gs
+        chmod +x /etc/init.d/S99dynamic-link-gs
+        /etc/init.d/S99dynamic-link-gs start >/dev/null 2>&1 || true
+    fi
     echo rollback-done
 '

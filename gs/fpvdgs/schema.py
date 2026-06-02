@@ -64,6 +64,9 @@ def _validate_dynamic_link(dl: dict) -> None:
     port = dl.get("dronePort", 9999)
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("dynamicLink.dronePort must be an int in 1..65535")
+    idr_port = dl.get("idrPort", 11223)
+    if not isinstance(idr_port, int) or not 1 <= idr_port <= 65535:
+        raise SchemaError("dynamicLink.idrPort must be an int in 1..65535")
     profile = dl.get("radioProfile", "m8812eu2")
     if not (DL_PROFILES_DIR / f"{profile}.json").is_file():
         available = sorted(p.stem for p in DL_PROFILES_DIR.glob("*.json"))

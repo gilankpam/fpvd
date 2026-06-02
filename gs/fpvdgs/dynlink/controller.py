@@ -24,6 +24,30 @@ from .wire import Encoder as WireEncoder, encode_hello_ack
 log = logging.getLogger("fpvdgs.dynlink")
 
 
+class _IdrRelay(asyncio.DatagramProtocol):
+    """Bridge PixelPilot IDR/keyframe tokens to the drone.
+
+    The local video player sends IDR tokens to 127.0.0.1:<idrPort> (wfb_rx
+    relays RTP through localhost, so the player aims its requests there). We
+    forward each datagram over the tunnel to the drone's idr_listen at
+    <droneAddr>:<idrPort>. Replaces the standalone `socat` idr-forwarder that
+    shipped with the old dynamic-link-gs service."""
+
+    def __init__(self, dest):
+        self._dest = dest          # (droneAddr, idrPort)
+        self._transport = None
+
+    def connection_made(self, transport):
+        self._transport = transport
+
+    def datagram_received(self, data, addr):
+        if self._transport is not None:
+            try:
+                self._transport.sendto(data, self._dest)
+            except OSError:
+                pass               # drone momentarily unreachable — drop, keep relaying
+
+
 class DynamicLinkController:
     def __init__(self, snapshot, *, stats_endpoint="tcp://127.0.0.1:8103",
                  gs_listen_addr="0.0.0.0", gs_listen_port=5801,
@@ -134,6 +158,19 @@ class DynamicLinkController:
             log.warning("dl: HELLO listener bind %s failed: %s", self._gs_listen, e)
             listener = None
 
+        # IDR-token relay: 127.0.0.1:idrPort -> droneAddr:idrPort. Non-fatal if
+        # the local port is taken (e.g. a leftover socat); the controller runs on.
+        idr_transport = None
+        if snap.get("idrForward", True):
+            idr_port = int(snap.get("idrPort", 11223))
+            try:
+                idr_transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(
+                    lambda: _IdrRelay((snap["droneAddr"], idr_port)),
+                    local_addr=("127.0.0.1", idr_port))
+            except OSError as e:
+                log.warning("dl: IDR relay bind 127.0.0.1:%d failed: %s", idr_port, e)
+                idr_transport = None
+
         def on_event(ev):
             if isinstance(ev, SessionEvent):
                 aggregator.update_session(ev.session)
@@ -161,6 +198,8 @@ class DynamicLinkController:
         finally:
             if listener is not None:
                 listener.stop()
+            if idr_transport is not None:
+                idr_transport.close()
             return_link.close()
             self._set(running=False, statsConnected=False)
 

@@ -46,6 +46,8 @@ Arms the in-process GS adaptive-link control loop. Disabled by default.
   "radioProfile": "m8812eu2",
   "droneAddr": null,
   "dronePort": 9999,
+  "idrForward": true,
+  "idrPort": 11223,
   "tuning": {}
 }
 ```
@@ -59,6 +61,8 @@ Arms the in-process GS adaptive-link control loop. Disabled by default.
 | `radioProfile` | string | `"m8812eu2"` | Packaged radio profile (JSON under `gs/fpvdgs/dynlink/profiles/`). Determines per-MCS bitrate tables. |
 | `droneAddr` | string\|null | `null` | Drone's dynamic-link UDP address. Defaults to the host parsed from `drone.endpoint`. |
 | `dronePort` | int | `9999` | Drone's dynamic-link UDP port. |
+| `idrForward` | bool | `true` | Run the IDR-token relay (`127.0.0.1:idrPort` → `droneAddr:idrPort`) while the controller is active. Bridges PixelPilot keyframe requests to the drone's `idr_listen`; replaces the old standalone `socat` idr-forwarder. |
+| `idrPort` | int | `11223` | UDP port for the IDR relay (local listen + drone forward). |
 | `tuning` | object | `{}` | Opaque passthrough of advanced policy knobs (gate/fec/smoothing/cooldown). Merged over code defaults. |
 
 **Operating model.** The controller is an in-process daemon thread that
@@ -72,6 +76,13 @@ Enabling, disabling, or tuning is applied at runtime via `PATCH /config` +
 
 The drone side must be armed separately (its own `dynamicLink.enabled`,
 reachable via fpvd's `/air` proxy).
+
+**Deploy cutover.** `deploy/gs/deploy.sh` retires the standalone
+`dynamic-link-gs` service (init `S99dynamic-link-gs`, which also ran a bundled
+`socat` idr-forwarder): it stops the service and moves the init script to
+`/root/fpvd-gs-rollback/` so fpvd owns the GS dynamic-link role — binding the
+HELLO listener on UDP `5801` and the IDR relay on `127.0.0.1:11223`.
+`deploy/gs/rollback.sh` restores it for a full revert to the pre-fpvd state.
 
 **Status.** `GET /status.dynamicLink` shows the controller state plus a
 `drone` sub-object with `reachable`, `dynamicLinkActive`, and `hello` — so a
