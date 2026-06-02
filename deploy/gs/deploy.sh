@@ -38,6 +38,14 @@ scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/dynlink/profiles"/*.json "$TARGET:$SITE/fpvd
 # defaults (do not clobber an existing user overlay /etc/fpvd/config.json)
 scp -O "${SSH_OPTS[@]}" "$GS/etc/defaults.json" "$TARGET:/etc/fpvd/defaults.json"
 scp -O "${SSH_OPTS[@]}" "$GS/scripts/S99fpvd"  "$TARGET:/etc/init.d/S99fpvd"
+# initial dynamic-link overlay (production tuning translated from the standalone's
+# gs.yaml) — installed ONLY on first deploy; never clobbers operator edits.
+if remote 'test -e /etc/fpvd/config.json'; then
+    echo "[skip] /etc/fpvd/config.json exists — operator overlay preserved"
+else
+    echo "[push] initial config.json -> $TARGET:/etc/fpvd/config.json"
+    scp -O "${SSH_OPTS[@]}" "$REPO/deploy/gs/config.json" "$TARGET:/etc/fpvd/config.json"
+fi
 
 echo "[install] fpvd launcher + backup/disable S98wifibroadcast"
 remote '
