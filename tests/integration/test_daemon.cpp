@@ -642,6 +642,33 @@ TEST_CASE("apply: failed /api/v1/set fails the apply with effective unchanged") 
     fs::remove_all(tmp);
 }
 
+TEST_CASE("apply: disabling dynamic-link restates the static encoder bitrate") {
+    FakeWbDaemon wb;
+    auto tmp = fs::temp_directory_path() / "fpvd-dl-revert";
+    auto paths = makeRoutingPaths(tmp, 46821);
+    paths.dlEndpoints.encPort = static_cast<uint16_t>(wb.port);
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+    size_t before = wb.count();
+
+    // Disabling DL must push the configured encoder values back (the controller
+    // left waybeam at its last adaptive bitrate).
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":false}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+
+    REQUIRE(wb.count() > before);                       // a restate /set was issued
+    const std::string want =
+        "video0.bitrate=" + std::to_string(d.effective().video.bitrate);
+    CHECK(wb.last().find(want) != std::string::npos);   // == the configured value
+
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("apply: writes the system-stats OSD line when dynamic-link is off") {
     auto tmp = fs::temp_directory_path() / "fpvd-osd-base";
     auto paths = makeRoutingPaths(tmp, 46820);

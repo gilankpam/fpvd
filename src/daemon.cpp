@@ -147,6 +147,28 @@ void Daemon::restartOsd() {
     if (auto* s = orch_.get("msposd")) s->start();
 }
 
+void Daemon::restateStaticLink() {
+    // dl_.stop() leaves the radio (mcs/fec/txpower/bandwidth) and encoder
+    // (bitrate/roiQp) at the controller's last adaptive values. Push the static
+    // configured values back so the link reverts to its pre-DL state. Best-effort:
+    // a transient control-socket / HTTP failure is ignored (this is a revert, not
+    // a user-requested change; the operator can re-apply).
+    WfbControlClient cli("127.0.0.1", kVideoControlPort);
+    cli.setFec(static_cast<uint8_t>(effective_.link.fec.k),
+               static_cast<uint8_t>(effective_.link.fec.n));
+    cli.setRadio(static_cast<uint8_t>(effective_.link.stbc ? 1 : 0),
+                 effective_.link.ldpc, false,
+                 static_cast<uint8_t>(modulationWidth(effective_.link.width)),
+                 static_cast<uint8_t>(effective_.link.mcs), false, 1);
+    if (!paths_.radioTuneScript.empty())
+        tuneRadio(paths_.radioTuneScript, "txpower", effective_,
+                  radio_.iface, radio_.driver);
+    waybeam_.setFields({
+        {"video0.bitrate", std::to_string(effective_.video.bitrate)},
+        {"fpv.roi_qp",     std::to_string(effective_.video.roi.qp)},
+    });
+}
+
 void Daemon::writeOsdBaseLine() {
     // System-stats OSD line shown when dynamic-link isn't feeding the OSD (the DL
     // OsdWriter owns the msg file while DL runs). msposd holds + re-renders the
@@ -348,8 +370,10 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // sockets + launches the thread; setConfig() hot-reloads; stop() joins.
         if (!enabledOld && enabledNew)
             startController();
-        else if (enabledOld && !enabledNew)
+        else if (enabledOld && !enabledNew) {
             dl_.stop();
+            restateStaticLink();   // revert radio + encoder to the static config
+        }
         else if (enabledOld && enabledNew && (subs.dynamicLink || link.videoRadiotap))
             // A stbc/ldpc retune is the only videoRadiotap change reachable under
             // DL (mcs/width/fec are locked), so refresh the controller snapshot;

@@ -96,6 +96,11 @@ private:
     // orch_.restart would relaunch msposd with the stale spec argv. No-op unless
     // msposd is the supervised telemetry router.
     void restartOsd();
+    // Push the static configured radio (mcs/fec/txpower/bandwidth) + encoder
+    // (bitrate/roiQp) values back after dynamic-link is disabled, so the link
+    // reverts to its pre-DL state instead of staying at the controller's last
+    // adaptive values. Best-effort.
+    void restateStaticLink();
     // Write the system-stats OSD line to msposd's message file when dynamic-link
     // isn't feeding the OSD (DL off). msposd holds + re-renders it with live
     // placeholder values. No-op unless the telemetry router is msposd.
