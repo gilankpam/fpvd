@@ -55,8 +55,22 @@ def test_render_does_not_emit_link_id():
 
 
 def test_render_maps_video_bandwidth_from_width():
-    cfg = _parse_literals(render_cfg(EFFECTIVE))
+    cfg = _parse_literals(render_cfg(EFFECTIVE))   # width 40
     assert cfg["gs_video"]["bandwidth"] == 40
+    # uplink services cap at 20 MHz (the card width comes from gs_video=40)
+    assert cfg["gs_mavlink"]["bandwidth"] == 20
+    assert cfg["gs_tunnel"]["bandwidth"] == 20
+
+
+def test_render_10mhz_narrows_all_services():
+    # The card width = max(all service bandwidths), so a 10 MHz link must narrow
+    # every service to 10 or the card stays at 20.
+    eff = {"link": {"channel": 132, "width": 10, "region": "US"},
+           "wfb": {"mavlink": {"peer": "connect://127.0.0.1:14550"}}}
+    cfg = _parse_literals(render_cfg(eff))
+    assert cfg["gs_video"]["bandwidth"] == 10
+    assert cfg["gs_mavlink"]["bandwidth"] == 10
+    assert cfg["gs_tunnel"]["bandwidth"] == 10
 
 
 def test_render_maps_mavlink_peer():

@@ -28,16 +28,28 @@ def render_cfg(effective: dict) -> str:
     # there is no link_id config key. The default link_domain already yields the
     # shared id. (Wiring linkId -> link_domain is future work.)
 
-    # gs_video: width drives the card bandwidth (HT20/HT40)
+    # The card width = max(all service bandwidths). gs_video carries the full
+    # link width; the uplink services (mavlink/tunnel) cap at 20 MHz, but narrow
+    # to the link width when it is below 20 so the card can actually reach 10 MHz.
+    # (-B 10 and -B 20 are wire-identical — both radiotap BW_20 — so a 10 MHz
+    # link just needs the card at 10 MHz via iw; see wfb-ng src/tx.cpp.)
+    width = link["width"]
+    uplink_bw = min(width, 20)
+
     lines.append("")
     lines.append("[gs_video]")
-    lines.append(f"bandwidth = {_lit(link['width'])}")
+    lines.append(f"bandwidth = {_lit(width)}")
 
+    lines.append("")
+    lines.append("[gs_mavlink]")
     mav = wfb.get("mavlink", {})
     if mav.get("peer"):
-        lines.append("")
-        lines.append("[gs_mavlink]")
         lines.append(f"peer = {_lit(mav['peer'])}")
+    lines.append(f"bandwidth = {_lit(uplink_bw)}")
+
+    lines.append("")
+    lines.append("[gs_tunnel]")
+    lines.append(f"bandwidth = {_lit(uplink_bw)}")
 
     # raw passthrough: {section: {key: value}} — values rendered as literals too
     for section, kv in (wfb.get("raw") or {}).items():
