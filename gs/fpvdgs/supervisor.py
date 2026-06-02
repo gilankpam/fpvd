@@ -4,7 +4,7 @@ import argparse
 import sys
 import time
 
-from . import __version__, render as render_mod, schema, status as status_mod
+from . import __version__, radio, render as render_mod, schema, status as status_mod
 from .api import Api, make_http_server
 from .config import ConfigStore
 from .drone_client import DroneClient
@@ -49,8 +49,12 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
     def renderer_write(eff):
         render_mod.write_cfg(cfg_out, render_mod.render_cfg(eff))
 
+    # live iw retune of the monitor cards (no process restart) for channel /
+    # 10<->20 width changes; the coordinator falls back to a runner bounce
+    # for changes that need a -B change (crossing 40 MHz).
     link = LinkCoordinator(store, renderer_write, runner, drone,
-                           validate=schema.validate_effective)
+                           validate=schema.validate_effective,
+                           retune=lambda ch, w: radio.retune(wlans, ch, w))
 
     started = time.monotonic()
 
