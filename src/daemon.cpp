@@ -33,6 +33,9 @@ Daemon::Daemon(DaemonPaths paths)
 }
 
 Daemon::~Daemon() {
+    // Stop the OSD heartbeat (it touches mu_ + dl_) before tearing those down.
+    osdStop_.store(true);
+    if (osdThread_.joinable()) osdThread_.join();
     // Stop the in-process control loop (joins its thread) before any member is destroyed.
     dl_.stop();
 }
@@ -65,6 +68,7 @@ void Daemon::bootstrap(bool startProcesses) {
         } else {
             writeOsdBaseLine();   // DL off: seed the system-stats OSD line
         }
+        osdThread_ = std::thread([this] { osdHeartbeat(); });
     }
 }
 
@@ -161,6 +165,18 @@ void Daemon::writeOsdBaseLine() {
     std::error_code ec;
     std::filesystem::rename(tmp, path, ec);
     if (ec) std::filesystem::remove(tmp, ec);
+}
+
+void Daemon::osdHeartbeat() {
+    while (!osdStop_.load()) {
+        // ~1s cadence, in 100ms chunks so shutdown is responsive.
+        for (int i = 0; i < 10 && !osdStop_.load(); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (osdStop_.load()) break;
+        if (dl_.status().running) continue;   // DL feeds the OSD; don't fight it
+        std::lock_guard<std::mutex> g(mu_);
+        writeOsdBaseLine();                    // re-asserts the line msposd renders
+    }
 }
 
 void Daemon::reconcileBeamforming() {

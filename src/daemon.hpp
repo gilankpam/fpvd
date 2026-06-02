@@ -7,10 +7,12 @@
 #include "waybeam/client.hpp"
 #include "supervise/orchestrator.hpp"
 #include "supervise/beamforming.hpp"
+#include <atomic>
 #include <chrono>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fpvd {
@@ -98,6 +100,10 @@ private:
     // isn't feeding the OSD (DL off). msposd holds + re-renders it with live
     // placeholder values. No-op unless the telemetry router is msposd.
     void writeOsdBaseLine();
+    // Background loop that re-writes the base OSD line every ~1s while DL is off,
+    // so it survives the window where a resolution change restarts waybeam +
+    // msposd (the one-shot write is consumed before the fresh msposd can render).
+    void osdHeartbeat();
 
     DaemonPaths paths_;
     Config effective_;
@@ -112,6 +118,8 @@ private:
     uint32_t dlGenerationId_;
     std::chrono::steady_clock::time_point startedAt_;
     std::mutex mu_;
+    std::thread osdThread_;
+    std::atomic<bool> osdStop_{false};
 };
 
 } // namespace fpvd
