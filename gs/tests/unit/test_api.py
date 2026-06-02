@@ -149,3 +149,86 @@ def test_apply_rolls_back_on_runner_failure(tmp_path):
     # cfg rolled back (no 9999) and overlay not committed
     assert "9999" not in open(cfg_out).read()
     assert store.effective().get("wfb", {}).get("mavlink", {}).get("peer") != "connect://127.0.0.1:9999"
+
+
+# --- dynamicLink apply routing ---
+class _FakeController:
+    def __init__(self):
+        self.calls = []
+    def start(self):
+        self.calls.append(("start", None))
+    def stop(self):
+        self.calls.append(("stop", None))
+    def set_config(self, snap):
+        self.calls.append(("set_config", snap))
+
+
+class _FakeRunner:
+    def __init__(self):
+        self.restarts = 0
+    def restart(self):
+        self.restarts += 1
+        return True
+
+
+def _api_with_dynlink(tmp_path):
+    import json
+    from fpvdgs import render, schema
+    from fpvdgs.api import Api
+    from fpvdgs.config import ConfigStore
+    from fpvdgs.drone_client import DroneClient
+
+    defaults = {"link": {"channel": 132, "width": 40, "region": "US"},
+                "wfb": {"profile": "gs", "raw": {}},
+                "drone": {"endpoint": "http://10.5.0.10:8080"},
+                "dynamicLink": {"enabled": False, "maxMcs": 5, "bandwidth": 20,
+                                "txpower": {"min": 18, "max": 28},
+                                "radioProfile": "m8812eu2", "droneAddr": None,
+                                "dronePort": 9999, "tuning": {}}}
+    store = ConfigStore(defaults)
+    ctrl = _FakeController()
+    runner = _FakeRunner()
+    cfg_out = str(tmp_path / "wfb.cfg")
+    api = Api(store=store, schema=schema, render_mod=render, runner=runner,
+              drone=DroneClient("http://127.0.0.1:1"), link=None,
+              status_fn=lambda: {}, cfg_out=cfg_out, dynlink=ctrl)
+    return api, store, ctrl, runner
+
+
+def test_enable_dynamiclink_starts_controller_without_bouncing_runner(tmp_path):
+    api, store, ctrl, runner = _api_with_dynlink(tmp_path)
+    store.patch({"dynamicLink": {"enabled": True}})
+    code, body = api.handle("POST", "/apply", {}, b"")
+    assert code == 200 and body["applied"] is True
+    assert ("start", None) in ctrl.calls
+    assert runner.restarts == 0          # dynamic-link-only change: no bounce
+    assert store.effective()["dynamicLink"]["enabled"] is True
+
+
+def test_disable_dynamiclink_stops_controller(tmp_path):
+    api, store, ctrl, runner = _api_with_dynlink(tmp_path)
+    store.patch({"dynamicLink": {"enabled": True}})
+    api.handle("POST", "/apply", {}, b"")
+    store.patch({"dynamicLink": {"enabled": False}})
+    api.handle("POST", "/apply", {}, b"")
+    assert ("stop", None) in ctrl.calls
+    assert runner.restarts == 0
+
+
+def test_tuning_change_while_enabled_calls_set_config(tmp_path):
+    api, store, ctrl, runner = _api_with_dynlink(tmp_path)
+    store.patch({"dynamicLink": {"enabled": True}})
+    api.handle("POST", "/apply", {}, b"")
+    store.patch({"dynamicLink": {"maxMcs": 3}})
+    api.handle("POST", "/apply", {}, b"")
+    assert any(c[0] == "set_config" for c in ctrl.calls)
+    assert runner.restarts == 0
+
+
+def test_wfb_change_bounces_runner_and_leaves_controller_alone(tmp_path):
+    api, store, ctrl, runner = _api_with_dynlink(tmp_path)
+    store.patch({"wfb": {"raw": {"common": {"foo": 1}}}})
+    code, _ = api.handle("POST", "/apply", {}, b"")
+    assert code == 200
+    assert runner.restarts == 1          # non-dynamicLink change: bounce
+    assert ctrl.calls == []              # controller untouched (stayed disabled)

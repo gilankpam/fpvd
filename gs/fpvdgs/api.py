@@ -6,10 +6,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from .schema import SchemaError
+from .dynlink.config_build import make_dl_snapshot
 
 
 class Api:
-    def __init__(self, store, schema, render_mod, runner, drone, link, status_fn, cfg_out):
+    def __init__(self, store, schema, render_mod, runner, drone, link,
+                 status_fn, cfg_out, dynlink=None):
         self.store = store
         self.schema = schema
         self.render_mod = render_mod
@@ -18,6 +20,7 @@ class Api:
         self.link = link
         self.status_fn = status_fn
         self.cfg_out = cfg_out
+        self.dynlink = dynlink
 
     def _json(self, body: bytes) -> dict:
         return json.loads(body or b"{}")
@@ -65,22 +68,48 @@ class Api:
         except Exception as e:  # surfaced, never silent
             return 500, {"error": str(e)}
 
+    @staticmethod
+    def _without(cfg: dict, *keys) -> dict:
+        return {k: v for k, v in cfg.items() if k not in keys}
+
     def _apply_gs(self):
         pending = self.store.pending()
+        effective = self.store.effective()
         # Guard: link drift must go through /link/apply (drone coordination).
-        if pending.get("link") != self.store.effective().get("link"):
+        if pending.get("link") != effective.get("link"):
             return 409, {"error": "link changed; use POST /link/apply"}
         self.schema.validate_effective(pending)
-        # Render the pending cfg (write_cfg keeps the prior as .bak). Commit only
-        # after the runner comes back up; otherwise roll the cfg back.
-        self.render_mod.write_cfg(self.cfg_out, self.render_mod.render_cfg(pending))
-        if self.runner.restart():
-            self.store.commit()
-            return 200, {"applied": True}
-        self.render_mod.restore_bak(self.cfg_out)
-        self.runner.restart()
-        return 500, {"applied": False,
-                     "error": "runner failed; rolled back to last-good cfg"}
+
+        # Anything outside dynamicLink (link already equal) needs the runner.
+        non_dl_changed = (self._without(pending, "dynamicLink")
+                          != self._without(effective, "dynamicLink"))
+        if non_dl_changed:
+            self.render_mod.write_cfg(self.cfg_out,
+                                      self.render_mod.render_cfg(pending))
+            if not self.runner.restart():
+                self.render_mod.restore_bak(self.cfg_out)
+                self.runner.restart()
+                return 500, {"applied": False,
+                             "error": "runner failed; rolled back to last-good cfg"}
+
+        self._route_dynamic_link(effective.get("dynamicLink", {}),
+                                 pending.get("dynamicLink", {}), pending)
+        self.store.commit()
+        return 200, {"applied": True}
+
+    def _route_dynamic_link(self, dl_old, dl_new, pending):
+        """Start/stop/reconfigure the in-process controller. Never bounces
+        the wfb runner."""
+        if self.dynlink is None:
+            return
+        was, now = bool(dl_old.get("enabled")), bool(dl_new.get("enabled"))
+        if not was and now:
+            self.dynlink.set_config(make_dl_snapshot(pending))
+            self.dynlink.start()
+        elif was and not now:
+            self.dynlink.stop()
+        elif was and now and dl_old != dl_new:
+            self.dynlink.set_config(make_dl_snapshot(pending))
 
     def _link_view(self):
         link = dict(self.store.effective().get("link", {}))
