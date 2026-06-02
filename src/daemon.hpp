@@ -94,6 +94,10 @@ private:
     // orch_.restart would relaunch msposd with the stale spec argv. No-op unless
     // msposd is the supervised telemetry router.
     void restartOsd();
+    // Write the system-stats OSD line to msposd's message file when dynamic-link
+    // isn't feeding the OSD (DL off). msposd holds + re-renders it with live
+    // placeholder values. No-op unless the telemetry router is msposd.
+    void writeOsdBaseLine();
 
     DaemonPaths paths_;
     Config effective_;

@@ -641,3 +641,25 @@ TEST_CASE("apply: failed /api/v1/set fails the apply with effective unchanged") 
 
     fs::remove_all(tmp);
 }
+
+TEST_CASE("apply: writes the system-stats OSD line when dynamic-link is off") {
+    auto tmp = fs::temp_directory_path() / "fpvd-osd-base";
+    auto paths = makeRoutingPaths(tmp, 46820);
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // DL off (default), router msposd (default): a reallyRestart apply re-asserts
+    // the base OSD line to msposd's message file.
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);
+
+    std::ifstream f(paths.dlEndpoints.osdMsgPath);
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+    CHECK(content.find("&B") != std::string::npos);   // video bitrate+fps
+    CHECK(content.find("&T") != std::string::npos);   // board temp
+    CHECK(content.find("&W") != std::string::npos);   // wifi-module temp
+    CHECK(content.find("&C") != std::string::npos);   // cpu %
+
+    fs::remove_all(tmp);
+}

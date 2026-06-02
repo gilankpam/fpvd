@@ -62,6 +62,8 @@ void Daemon::bootstrap(bool startProcesses) {
         reconcileBeamforming();
         if (effective_.dynamicLink.enabled) {
             startController();
+        } else {
+            writeOsdBaseLine();   // DL off: seed the system-stats OSD line
         }
     }
 }
@@ -139,6 +141,26 @@ void Daemon::restartOsd() {
     orch_.remove("msposd");                       // shut down the stale instance
     orch_.add(wfbSpec("msposd", std::move(args), {"wfb_tlm_rx", "wfb_tlm_tx"}));
     if (auto* s = orch_.get("msposd")) s->start();
+}
+
+void Daemon::writeOsdBaseLine() {
+    // System-stats OSD line shown when dynamic-link isn't feeding the OSD (the DL
+    // OsdWriter owns the msg file while DL runs). msposd holds + re-renders the
+    // last message, substituting the & placeholders (bitrate+fps, board/wifi
+    // temp, cpu%) at render time. No-op unless the router is msposd. Atomic
+    // (tmp + rename) so msposd never reads a half-written line.
+    if (effective_.telemetry.router != "msposd") return;
+    const std::string& path = paths_.dlEndpoints.osdMsgPath;
+    if (path.empty()) return;
+    const std::string tmp = path + ".tmp";
+    {
+        std::ofstream f(tmp, std::ios::trunc);
+        if (!f) return;
+        f << "&L50&F30 &B  T&T  W&W  CPU&C\n";
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) std::filesystem::remove(tmp, ec);
 }
 
 void Daemon::reconcileBeamforming() {
@@ -279,6 +301,8 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // Start AFTER radio_ is refreshed so the snapshot's iface is fresh.
         if (enabledNew)
             startController();
+        else
+            writeOsdBaseLine();   // DL off: rebuilt msposd needs the base OSD line
         version_++;
         lastApply_ = {nowIso(), true, restarted, std::nullopt};
         return {true, {}, restarted, std::nullopt, version_};
@@ -315,6 +339,12 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             // DL (mcs/width/fec are locked), so refresh the controller snapshot;
             // the loop restates the radio with its current mcs (see reconcile).
             dl_.setConfig(dynlink::buildDlSnapshot(effective_, radio_.iface));
+
+        // DL isn't feeding the OSD — (re)assert the system-stats base line so a
+        // just-restarted msposd, or an on->off toggle, shows CPU/temp/bitrate
+        // instead of going blank or holding stale DL stats.
+        if (!enabledNew)
+            writeOsdBaseLine();
 
         // A purely hot-applicable link change — no wfb restart.
         // (A) Immediate, non-link-dropping changes.
