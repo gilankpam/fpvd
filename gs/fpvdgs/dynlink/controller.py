@@ -56,7 +56,10 @@ class DynamicLinkController:
         with self._lock:
             loop, stop, thread = self._loop, self._stop_event, self._thread
         if loop is not None and stop is not None:
-            loop.call_soon_threadsafe(stop.set)
+            try:
+                loop.call_soon_threadsafe(stop.set)
+            except RuntimeError:
+                pass  # loop already closed/closing — teardown in progress
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=5.0)
         with self._lock:
