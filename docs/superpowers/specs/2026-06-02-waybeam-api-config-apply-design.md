@@ -230,7 +230,9 @@ restarted[] += "encoder" if encChanged   // plus existing radio/telemetry/dynami
 if (reallyRestart && needsRebuild) {
     … full rebuild, unchanged (daemon.cpp:207-235) …
 } else if (reallyRestart) {
-    if (encRestart) orch_.restart("waybeam");   // file already rewritten above
+    if (encRestart) { orch_.restart("waybeam", settle); orch_.restart("msposd"); }
+                                                // msposd redraws OSD onto the fresh
+                                                // waybeam; no-op if router != msposd
     … existing DL routing (daemon.cpp:242-250) …
     … existing radio hot-apply (txpower/mtu/fec/radiotap/channel) …
 } else {

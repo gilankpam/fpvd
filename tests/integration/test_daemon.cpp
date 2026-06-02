@@ -447,7 +447,7 @@ TEST_CASE("apply: enabled false->true starts controller; true->false stops it") 
     fs::remove_all(tmp);
 }
 
-TEST_CASE("apply: restart-class encoder change while enabled bounces only waybeam") {
+TEST_CASE("apply: restart-class encoder change bounces waybeam + msposd, leaves wfb") {
     auto tmp = fs::temp_directory_path() / "fpvd-route-encoder";
     auto paths = makeRoutingPaths(tmp, 46802);
     fpvd::Daemon d(paths);
@@ -459,24 +459,29 @@ TEST_CASE("apply: restart-class encoder change while enabled bounces only waybea
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     REQUIRE(d.dynamicLinkStatus().running);
 
-    // Seed the orchestrator with fakes so the waybeam-only bounce is observable:
-    // a real full rebuild would wipe/replace these; a hot apply preserves them,
-    // and the restart-class path bounces only "waybeam".
+    // Seed the orchestrator with fakes so the bounce is observable: a real full
+    // rebuild would wipe/replace these; a hot apply preserves them. The restart-
+    // class path bounces "waybeam" AND "msposd" (the OSD renderer, which draws
+    // onto waybeam's pipeline), but leaves wfb untouched.
     auto& orch = d.orchestrator();
     orch.add({"wfb_video_tx", {"/bin/sh", "-c", "sleep 30"}, {},
               fpvd::RestartPolicy::Always, {}});
     orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {},
+              fpvd::RestartPolicy::Always, {}});
+    orch.add({"msposd", {"/bin/sh", "-c", "sleep 30"}, {},
               fpvd::RestartPolicy::Always, {}});
     orch.startAll();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     auto namesBefore = orch.names();
     pid_t wfbPid = orch.get("wfb_video_tx")->pid();
     pid_t wbPid  = orch.get("waybeam")->pid();
+    pid_t osdPid = orch.get("msposd")->pid();
     REQUIRE(wfbPid > 0);
     REQUIRE(wbPid > 0);
+    REQUIRE(osdPid > 0);
 
     // A resolution change is a RESTART-class encoder field, NOT dynamic-link-
-    // locked and NOT a dynamicLink input -- it bounces only waybeam, no rebuild.
+    // locked and NOT a dynamicLink input -- it bounces waybeam (+ msposd), no rebuild.
     REQUIRE(d.patchPending(nlohmann::json::parse(
         R"({"video":{"resolution":"1280x720"}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
@@ -487,6 +492,7 @@ TEST_CASE("apply: restart-class encoder change while enabled bounces only waybea
           != ar.restarted.end());
     CHECK(orch.names() == namesBefore);                    // no full rebuild
     CHECK(orch.get("waybeam")->pid() != wbPid);            // waybeam bounced
+    CHECK(orch.get("msposd")->pid() != osdPid);            // OSD renderer bounced too
     CHECK(orch.get("wfb_video_tx")->pid() == wfbPid);      // wfb untouched
     CHECK(d.dynamicLinkStatus().running);                  // controller untouched
 

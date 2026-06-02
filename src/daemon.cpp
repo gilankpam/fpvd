@@ -278,9 +278,15 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // the restart. The settle delay lets the SigmaStar driver drain the old
         // pipeline before the fresh waybeam re-inits (a video0.size change wedges
         // the VENC channel otherwise). No-op if waybeam is not currently supervised.
-        if (encRestart)
+        if (encRestart) {
             orch_.restart("waybeam",
                           std::chrono::milliseconds{paths_.waybeamRestartSettleMs});
+            // msposd renders the OSD onto waybeam's video pipeline; a waybeam
+            // restart drops the overlay region, so bounce msposd too to redraw it
+            // against the fresh waybeam. No-op when the telemetry router isn't
+            // msposd (that name isn't supervised then).
+            orch_.restart("msposd");
+        }
         // Hot path: no wfb restart. Route the in-process controller before the
         // link hot-apply blocks below, so it
         // runs regardless of which hot return is taken below (the deferred
