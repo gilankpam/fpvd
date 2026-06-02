@@ -323,14 +323,20 @@ Fix: a configurable settle delay (`DaemonPaths.waybeamRestartSettleMs`, default
 (fpvd-owned) and applies the size with **zero** new `MI_VENC_Query` failures and
 no `CH 0 is not created` — no freeze.
 
-**Known follow-up (not yet fixed):** if waybeam ever escapes fpvd's supervision
-(self-respawn reparents it to init — e.g. an operator manually hits
-`/api/v1/restart` or SIGHUPs it), fpvd loses the live process and crash-loops
-doomed replacements that collide with the orphan over the SoC hardware (observed:
-supervisor went `state:failed` after 41 restarts), unrecoverable without a
-reboot. Harden by having fpvd kill any stray `/usr/bin/waybeam` it does not own
-before (re)starting one. Operationally: never call waybeam's `/api/v1/restart`
-while fpvd supervises it — fpvd owns the restart.
+**Orphan recovery (implemented + hardware-verified).** If waybeam ever escapes
+fpvd's supervision (self-respawn reparents it to init — e.g. an operator manually
+hits `/api/v1/restart` or SIGHUPs it), fpvd loses the live process and used to
+crash-loop doomed replacements that collide with the orphan over the SoC hardware
+(observed: supervisor went `state:failed` after 41 restarts), unrecoverable
+without a reboot. Fix: waybeam is launched through a guard (`sh -c`) that kills
+any stray `/usr/bin/waybeam` fpvd does not own before exec'ing the real binary,
+with a 1 s pause after a kill to let the driver release the orphan's pipeline.
+It runs on every (re)start, so the supervisor self-heals within a restart cycle.
+Verified on the drone: a deliberate `/api/v1/restart` produced an orphan
+(`ppid=1`) for ~2 s, then fpvd killed it and re-took a single fpvd-owned waybeam
+(`state:running`, `MI_VENC_Query` delta 0) — no reboot needed. Operationally,
+still prefer not to call waybeam's `/api/v1/restart` under fpvd; fpvd owns the
+restart, and now recovers if you do.
 
 ## Out of scope / risks
 
