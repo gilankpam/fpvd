@@ -70,7 +70,6 @@ def test_build_ack_returns_none_when_awaiting():
 
 
 @pytest.mark.skip(reason="requires pytest-asyncio, not yet in project deps")
-@pytest.mark.asyncio
 async def test_tunnel_listener_dispatches_hello_to_handler():
     """Bind a TunnelListener on an ephemeral port, send a wire-encoded
     HELLO from a UDP socket, verify the handler fires."""
