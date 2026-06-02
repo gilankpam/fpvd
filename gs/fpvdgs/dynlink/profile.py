@@ -1,4 +1,4 @@
-"""Radio-profile YAML loader and runtime `rssi_mcs_map` builder (§6.1).
+"""Radio-profile JSON loader and runtime `rssi_mcs_map` builder (§6.1).
 
 Bitrate is computed at runtime via
 `fpvdgs.dynlink.bitrate.compute_bitrate_kbps` keyed off `policy.bitrate`,
@@ -9,6 +9,7 @@ debounced via the EmitGate.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,9 +63,9 @@ class RadioProfile:
 
 
 def load_profile(name: str, search_dirs: list[Path]) -> RadioProfile:
-    """Resolve `<dir>/<name>.yaml` in order; load and validate the first hit."""
+    """Resolve `<dir>/<name>.json` in order; load and validate the first hit."""
     for d in search_dirs:
-        candidate = Path(d) / f"{name}.yaml"
+        candidate = Path(d) / f"{name}.json"
         if candidate.is_file():
             return load_profile_file(candidate)
     searched = ", ".join(str(p) for p in search_dirs)
@@ -72,9 +73,8 @@ def load_profile(name: str, search_dirs: list[Path]) -> RadioProfile:
 
 
 def load_profile_file(path: Path) -> RadioProfile:
-    import yaml  # lazy: keep yaml out of sys.modules until actually loading a file
     with open(path, "r") as fd:
-        data = yaml.safe_load(fd)
+        data = json.load(fd)
     if not isinstance(data, dict):
         raise ProfileError(f"{path}: top-level must be a mapping")
     return _validate(data, source=str(path))
