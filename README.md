@@ -9,14 +9,14 @@ design.
 
 ## Build (host, for tests)
 
-    cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-    cmake --build build -j
-    ./build/fpvd_tests
+    cmake -S drone -B drone/build -DCMAKE_BUILD_TYPE=Debug
+    cmake --build drone/build -j
+    ( cd drone && ./build/fpvd_tests )
 
 ## Build (target, ssc338q — cross-compile)
 
-    cmake -S . -B build/ssc338q -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-ssc338q.cmake
-    cmake --build build/ssc338q --target fpvd -j
+    cmake -S drone -B drone/build/ssc338q -DCMAKE_TOOLCHAIN_FILE=drone/cmake/toolchain-ssc338q.cmake
+    cmake --build drone/build/ssc338q --target fpvd -j
 
 Requires `armv7l-unknown-linux-musleabihf-g++` on PATH (available in
 the project `nix-shell`). Produces a statically-linked ARMv7 EABI5
