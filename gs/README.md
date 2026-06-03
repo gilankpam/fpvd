@@ -1,7 +1,8 @@
 # fpvd (ground station)
 
-Python peer to the drone `fpvd`. Owns the GS wfb radio config and supervises
-the wfb data plane (built on the `wfb_ng` library, replacing `wfb-server`).
+Python peer to the drone `fpvd`. Owns the GS wfb radio config, supervises
+the wfb data plane (built on the `wfb_ng` library, replacing `wfb-server`),
+and spawns/supervises the `pixelpilot` display process.
 Single front-door HTTP API on `:8080`.
 
 See `../docs/superpowers/specs/2026-06-02-fpvd-gs-design.md`.
@@ -106,6 +107,41 @@ GS-armed / drone-not mismatch is immediately visible:
 When `enabled` is false the block is `{"enabled": false, "running": false}`.
 `hello` is one of `"announcing"`, `"keepalive"`, `"none"`.
 
+### `pixelpilot`
+
+fpvd-GS spawns and supervises the `pixelpilot` binary as a managed child and
+builds its argv from this block (reproducing the stock `ExecStart` at defaults).
+Changes apply by restarting PixelPilot only — the radio link is untouched.
+
+```json
+"pixelpilot": {
+  "enabled": true,
+  "bin": "/usr/bin/pixelpilot",
+  "configPath": "/etc/pixelpilot/pixelpilot.yaml",
+  "screenMode": "1920x1080@60",
+  "videoScale": 1.0,
+  "osdConfigPath": "/etc/pixelpilot/config_osd.json",
+  "dvrFramerate": 60,
+  "dvrDir": "/var/dvr",
+  "dvrTemplate": "record_%Y-%m-%d_%H-%M-%S.mp4",
+  "extraArgs": []
+}
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Arms PixelPilot supervision; toggle via `PATCH /config` + `POST /apply`. |
+| `screenMode` | string | `1920x1080@60` | `--screen-mode` (HDMI output mode). |
+| `videoScale` | number | `1.0` | `--video-scale`. |
+| `osdConfigPath` | string | `/etc/pixelpilot/config_osd.json` | `--osd-config`. |
+| `dvrFramerate` | int | `60` | `--dvr-framerate`. |
+| `bin`/`configPath`/`dvrDir`/`dvrTemplate` | string | (see above) | Structural paths (rarely changed). |
+| `extraArgs` | list[str] | `[]` | Verbatim-appended flags (escape hatch for un-modeled options). |
+
+`GET /status.pixelpilot` shows `{enabled, running, pid, restarts, autoRestarts,
+lastExit, fault}`; `{enabled:false, running:false}` when disabled. Changes to
+`pixelpilot.*` restart only PixelPilot; a link/wfb change leaves it running.
+
 ## On-device smoke (run after deploy; needs the drone reachable for /air and /link "both")
 
 1. `pidof fpvd wfb_rx wfb_tx` — all present; no `wfb-server`/`S98wifibroadcast`.
@@ -115,3 +151,4 @@ When `enabled` is false the block is `{"enabled": false, "running": false}`.
 5. Link bootstrap (drone reachable): `curl -XPATCH :8080/link -d '{"link":{"channel":100}}'` then `curl -XPOST :8080/link/apply -d '{"applyTo":"both"}'` — `{gsApplied:true,droneApplied:true}`; link re-establishes on the new channel.
 6. Link bootstrap (drone offline / different channel): same with `{"applyTo":"gs"}` — `droneApplied:false`, GS moves to the drone's channel and the link comes up.
 7. `/air`: `curl :8080/air/status` round-trips the drone fpvd's status.
+8. PixelPilot: `pidof pixelpilot` present; `curl -s :8080/status` shows `pixelpilot.running:true`. `curl -XPATCH :8080/config -d '{"pixelpilot":{"videoScale":1.5}}'` then `curl -XPOST :8080/apply` — 200; only PixelPilot restarts (wfb_rx/wfb_tx PIDs unchanged).

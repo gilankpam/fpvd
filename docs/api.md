@@ -1050,6 +1050,55 @@ curl -X PATCH http://127.0.0.1:8080/air/config \            # drone-only config
 
 There is intentionally **no** `mcs`/`fec`/`ldpc`/`stbc` on the GS: video downlink FEC/modulation is auto-detected by `wfb_rx` (drone-owned), and the GS uplink TX uses wfb-ng's defaults. There are also no `video`/`image`/`telemetry`/`recording`/`dynamicLink`/`services` sections — those are drone-only.
 
+## PixelPilot managed service
+
+fpvd-GS spawns and supervises the `pixelpilot` display binary as a first-class managed child alongside the wfb data plane. The `pixelpilot` config block models all GS-local launch knobs and flows through the standard `PATCH /config` + `POST /apply` lifecycle — staging changes and committing them in one call — with **granular apply**: a `pixelpilot.*` change restarts PixelPilot only (the wfb runner and radio are untouched), and conversely a `link.*` or `wfb.*` change leaves PixelPilot running.
+
+### Config block
+
+The four operator knobs exposed for runtime adjustment by ground-station UIs are:
+
+| Key | CLI flag | Default |
+|---|---|---|
+| `screenMode` | `--screen-mode` | `1920x1080@60` |
+| `videoScale` | `--video-scale` | `1.0` |
+| `osdConfigPath` | `--osd-config` | `/etc/pixelpilot/config_osd.json` |
+| `dvrFramerate` | `--dvr-framerate` | `60` |
+
+`extraArgs` (default `[]`) is verbatim-appended to the built argv — an escape hatch for flags not yet modeled in the schema. The remaining keys (`bin`, `configPath`, `dvrDir`, `dvrTemplate`) are structural paths that reproduce the stock `ExecStart` and are rarely changed.
+
+```bash
+# Change display scale and apply (restarts PixelPilot only):
+curl -X PATCH http://10.18.0.1:8080/config \
+  -H 'content-type: application/json' \
+  -d '{"pixelpilot":{"videoScale":1.5}}'
+curl -X POST http://10.18.0.1:8080/apply
+```
+
+### Status
+
+`GET /status` includes a `pixelpilot` block alongside `runner`, `radio`, and `link`:
+
+```jsonc
+{
+  "pixelpilot": {
+    "enabled": true,
+    "running": true,
+    "pid": 1842,
+    "restarts": 0,
+    "autoRestarts": 0,
+    "lastExit": null,
+    "fault": false
+  }
+}
+```
+
+When `enabled` is `false` the block is `{"enabled": false, "running": false}`. `restarts` counts operator-initiated bounces (via apply); `autoRestarts` counts crash auto-restarts; `fault` is the crash-loop guard (trips after too many rapid auto-restarts).
+
+### Deploy takeover
+
+`deploy/gs/deploy.sh` stops and moves the stock `S*pixelpilot*` init script to `/root/fpvd-gs-rollback/` so fpvd-GS owns the PixelPilot lifecycle. `deploy/gs/rollback.sh` restores it for a full revert. The device-provisioned files — `/etc/pixelpilot/pixelpilot.yaml`, `/etc/pixelpilot/config_osd.json`, and the `/usr/bin/pixelpilot` binary — are left in place; fpvd points at them, it does not create or manage them.
+
 ## Errors (GS)
 
 Error responses are a single field — `{"error": "<human message>"}` — with HTTP `400` (validation/schema), `404` (no route), `409` (link drift on `/apply`), `500` (apply/runner failure), or `502` (drone unreachable on `/air`).
