@@ -7,11 +7,12 @@ from urllib.parse import urlparse, parse_qs
 
 from .schema import SchemaError
 from .dynlink.config_build import make_dl_snapshot
+from .pixelpilot import render_pixelpilot_argv
 
 
 class Api:
     def __init__(self, store, schema, render_mod, runner, drone, link,
-                 status_fn, cfg_out, dynlink=None):
+                 status_fn, cfg_out, dynlink=None, pixelpilot=None):
         self.store = store
         self.schema = schema
         self.render_mod = render_mod
@@ -21,6 +22,7 @@ class Api:
         self.status_fn = status_fn
         self.cfg_out = cfg_out
         self.dynlink = dynlink
+        self.pixelpilot = pixelpilot
 
     def _json(self, body: bytes) -> dict:
         return json.loads(body or b"{}")
@@ -80,10 +82,10 @@ class Api:
             return 409, {"error": "link changed; use POST /link/apply"}
         self.schema.validate_effective(pending)
 
-        # Anything outside dynamicLink (link already equal) needs the runner.
-        non_dl_changed = (self._without(pending, "dynamicLink")
-                          != self._without(effective, "dynamicLink"))
-        if non_dl_changed:
+        # Anything outside dynamicLink/pixelpilot (link already equal) needs the runner.
+        wfb_changed = (self._without(pending, "dynamicLink", "pixelpilot")
+                       != self._without(effective, "dynamicLink", "pixelpilot"))
+        if wfb_changed:
             self.render_mod.write_cfg(self.cfg_out,
                                       self.render_mod.render_cfg(pending))
             if not self.runner.restart():
@@ -94,6 +96,8 @@ class Api:
 
         self._route_dynamic_link(effective.get("dynamicLink", {}),
                                  pending.get("dynamicLink", {}), pending)
+        self._route_pixelpilot(effective.get("pixelpilot", {}),
+                               pending.get("pixelpilot", {}), pending)
         self.store.commit()
         return 200, {"applied": True}
 
@@ -110,6 +114,21 @@ class Api:
             self.dynlink.stop()
         elif was and now and dl_old != dl_new:
             self.dynlink.set_config(make_dl_snapshot(pending))
+
+    def _route_pixelpilot(self, pp_old, pp_new, pending):
+        """Start/stop/restart the PixelPilot child. Never bounces the wfb
+        runner. Mirrors _route_dynamic_link (set_argv ≈ set_config)."""
+        if self.pixelpilot is None or pp_old == pp_new:
+            return
+        was, now = bool(pp_old.get("enabled", True)), bool(pp_new.get("enabled", True))
+        if now:
+            self.pixelpilot.set_argv(render_pixelpilot_argv(pending))
+            if was:
+                self.pixelpilot.restart()
+            else:
+                self.pixelpilot.start()
+        elif was and not now:
+            self.pixelpilot.stop()
 
     def _link_view(self):
         link = dict(self.store.effective().get("link", {}))

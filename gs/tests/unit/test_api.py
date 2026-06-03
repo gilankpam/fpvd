@@ -232,3 +232,77 @@ def test_wfb_change_bounces_runner_and_leaves_controller_alone(tmp_path):
     assert code == 200
     assert runner.restarts == 1          # non-dynamicLink change: bounce
     assert ctrl.calls == []              # controller untouched (stayed disabled)
+
+
+# --- pixelpilot apply routing ---
+class _FakePP:
+    def __init__(self):
+        self.calls = []
+    def set_argv(self, argv):
+        self.calls.append(("set_argv", argv))
+    def start(self):
+        self.calls.append(("start", None))
+    def stop(self):
+        self.calls.append(("stop", None))
+    def restart(self):
+        self.calls.append(("restart", None))
+
+
+def _api_with_pp(tmp_path):
+    from fpvdgs.api import Api
+    from fpvdgs.config import ConfigStore
+    from fpvdgs.drone_client import DroneClient
+    defaults = {"link": {"channel": 132, "width": 40, "region": "US"},
+                "wfb": {"profile": "gs", "raw": {}},
+                "drone": {"endpoint": "http://10.5.0.10:8080"},
+                "pixelpilot": {"enabled": True, "screenMode": "1920x1080@60",
+                               "videoScale": 1.0, "dvrFramerate": 60,
+                               "extraArgs": []}}
+    store = ConfigStore(defaults)
+    runner = _FakeRunner()      # defined earlier in this file
+    pp = _FakePP()
+    cfg_out = str(tmp_path / "wfb.cfg")
+    api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
+              drone=DroneClient("http://127.0.0.1:1"), link=None,
+              status_fn=lambda: {}, cfg_out=cfg_out, pixelpilot=pp)
+    return api, store, pp, runner
+
+
+def test_pixelpilot_change_restarts_pp_not_wfb(tmp_path):
+    api, store, pp, runner = _api_with_pp(tmp_path)
+    store.patch({"pixelpilot": {"screenMode": "1280x720@60"}})
+    code, body = api.handle("POST", "/apply", {}, b"")
+    assert code == 200 and body["applied"] is True
+    assert any(c[0] == "set_argv" for c in pp.calls)
+    assert ("restart", None) in pp.calls
+    assert runner.restarts == 0      # PixelPilot-only change: radio untouched
+    assert store.effective()["pixelpilot"]["screenMode"] == "1280x720@60"
+
+
+def test_wfb_change_does_not_touch_pixelpilot(tmp_path):
+    api, store, pp, runner = _api_with_pp(tmp_path)
+    store.patch({"wfb": {"raw": {"common": {"foo": 1}}}})
+    code, _ = api.handle("POST", "/apply", {}, b"")
+    assert code == 200
+    assert runner.restarts == 1
+    assert pp.calls == []            # pixelpilot untouched
+
+
+def test_pixelpilot_disable_then_enable(tmp_path):
+    api, store, pp, runner = _api_with_pp(tmp_path)
+    store.patch({"pixelpilot": {"enabled": False}})
+    api.handle("POST", "/apply", {}, b"")
+    assert ("stop", None) in pp.calls
+    pp.calls.clear()
+    store.patch({"pixelpilot": {"enabled": True}})
+    api.handle("POST", "/apply", {}, b"")
+    assert ("start", None) in pp.calls     # off->on uses start(), not restart()
+    assert ("restart", None) not in pp.calls
+
+
+def test_patch_config_accepts_pixelpilot(tmp_path):
+    api, store, pp, runner = _api_with_pp(tmp_path)
+    code, _ = api.handle("PATCH", "/config", {},
+                         json.dumps({"pixelpilot": {"videoScale": 1.5}}).encode())
+    assert code == 200
+    assert store.pending()["pixelpilot"]["videoScale"] == 1.5
