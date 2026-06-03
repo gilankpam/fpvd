@@ -125,4 +125,5 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
     code, body = app.api.handle("GET", "/status", {}, b"")
     assert code == 200
     assert "dynamicLink" in body
+    assert "pixelpilot" in body
     assert body["dynamicLink"]["running"] is False
