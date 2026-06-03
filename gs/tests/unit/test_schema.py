@@ -116,7 +116,6 @@ def test_validate_effective_accepts_pixelpilot_block():
 
 def test_validate_effective_rejects_bad_pixelpilot():
     base = {"link": {"channel": 132, "width": 40, "region": "US"}}
-    import pytest
     for bad in (
         {"videoScale": 0},
         {"videoScale": -1.0},
