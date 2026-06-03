@@ -599,6 +599,72 @@ An object whose keys are service names and whose values are service definitions.
 
 ---
 
+## Ground-station adaptive link controller (`fpvdgs`)
+
+The adaptive link has two halves. The drone runs the **applier** — the [`dynamicLink`](#dynamiclink--adaptive-link-controller) block in the Config schema above — which receives decisions and applies them to the radio and encoder. The **controller** (the brain that *decides*) runs on the ground station as a separate daemon, `fpvdgs`, with its own HTTP+JSON API on the GS (same shapes as this document: `GET`/`PATCH /config`, `POST /apply`, `GET /status`, plus an opaque `/air/*` proxy to the drone fpvd).
+
+The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the dual-gate MCS selector + trailing FEC/bitrate loop, and emits decision packets over UDP to the drone applier (`droneAddr:dronePort`, default `:9999`). It is configured by the GS daemon's own `dynamicLink` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
+
+```jsonc
+"dynamicLink": {
+  "enabled": false,            // boolean — arm the in-process control loop
+  "maxMcs": 5,                 // integer, 0..7 — upper MCS bound the controller may select
+  "bandwidth": 20,             // integer, 20 or 40 — RF bandwidth the controller targets (MHz)
+  "txpower": {
+    "min": 18,                 // integer (dBm) — power at the top MCS (inverse MCS↔power coupling)
+    "max": 28                  // integer (dBm) — power at the bottom MCS; require min <= max
+  },
+  "radioProfile": "m8812eu2",  // string — packaged radio profile (fpvdgs/dynlink/profiles/<name>.json)
+  "droneAddr": null,           // string|null — drone UDP address; null => host parsed from drone.endpoint
+  "dronePort": 9999,           // integer, 1..65535 — drone dynamic-link UDP listener port
+  "videoStreamId": "video",    // string — substring matched against the wfb stats record id to
+                               //   select the VIDEO rx stream (mavlink/tunnel rx are ignored)
+  "idrForward": true,          // boolean — run the IDR-token relay while the controller is active
+  "idrPort": 11223,            // integer, 1..65535 — IDR relay port (127.0.0.1 listen + drone forward)
+  "tuning": {}                 // object — opaque passthrough of advanced policy knobs (see below)
+}
+```
+
+| Field | Type | Default | Valid values |
+|-------|------|---------|--------------|
+| `enabled` | boolean | `false` | — |
+| `maxMcs` | integer | `5` | 0 – 7 |
+| `bandwidth` | integer | `20` | `20` or `40` |
+| `txpower.min` | integer (dBm) | `18` | `<= txpower.max` |
+| `txpower.max` | integer (dBm) | `28` | `>= txpower.min` |
+| `radioProfile` | string | `"m8812eu2"` | a packaged profile name (`fpvdgs/dynlink/profiles/<name>.json`) |
+| `droneAddr` | string \| null | `null` | UDP address; `null` ⇒ host parsed from `drone.endpoint` |
+| `dronePort` | integer | `9999` | 1 – 65535 |
+| `videoStreamId` | string | `"video"` | non-empty string |
+| `idrForward` | boolean | `true` | — |
+| `idrPort` | integer | `11223` | 1 – 65535 |
+| `tuning` | object | `{}` | see [Tuning passthrough](#tuning-passthrough) |
+
+**Operating model.** Enabling, disabling, or tuning is applied at runtime via `PATCH /config` + `POST /apply` with **no wfb restart** — the GS runner is never bounced for `dynamicLink`-only changes. The controller reads wfb-ng stats on `:8103` (fpvd renders `log_interval = 100` so the feed is 10 Hz). The drone side must be armed **independently** (its own `dynamicLink.enabled`, reachable via the GS `/air` proxy); `GET /status.dynamicLink` reports the controller state plus a `drone` sub-object (`reachable`, `dynamicLinkActive`, `hello`) so a GS-armed/drone-not mismatch is visible.
+
+**`videoStreamId`.** The wfb stats feed interleaves rx records for every service (`video rx`, `mavlink rx`, `tunnel rx`). The policy must be driven by the **video** stream only — the low-rate uplink streams would trip the starvation detector and pin MCS at the floor. The default `"video"` substring matches the video record id.
+
+#### Tuning passthrough
+
+`tuning` is an opaque object deep-merged over the controller's built-in defaults; the **curated keys above always win** over the same field inside `tuning`. It mirrors the section layout of the standalone `dynamic-link` `gs.yaml` and accepts these sub-objects:
+
+| Sub-object | Selected keys |
+|---|---|
+| `gate` | `snr_safety_margin`, `hysteresis_up_db` / `hysteresis_down_db`, `emergency_loss_rate`, `emergency_fec_pressure`, `loss_margin_weight`, `fec_margin_weight`, `snr_ema_alpha`, `snr_slope_alpha`, `snr_predict_horizon_ticks` |
+| `profile_selection` | `upward_confidence_loops`, `hold_modes_down_ms`, `min_between_changes_ms`, `fast_downgrade` |
+| `fec` | `k_bounds.{min,max}`, `base_redundancy_ratio`, `max_redundancy_ratio`, `blocks_per_frame`, `n_loss_threshold`/`n_loss_windows`/`n_loss_step`, `n_recover_windows`/`n_recover_step`, `max_n_escalation`, `depth_max` |
+| `smoothing` | `ewma_alpha_rssi`, `ewma_alpha_fec`, `ewma_alpha_burst`, `starvation_threshold_pps` |
+| `cooldown` | `min_change_interval_ms_{fec,depth,radio,cross}` |
+| `policy` | `starvation_windows`, `bitrate.{utilization_factor,min_bitrate_kbps,max_bitrate_kbps}` |
+| `video` | `per_packet_airtime_us`, `max_latency_ms` (predictor latency budget) |
+| `safe_defaults` | `video.{k,n}`, `depth`, `mcs` — emitted until the drone HELLO handshake completes |
+
+A complete, production-tuned example for the BL-M8812EU2 airframe ships at **`deploy/gs/config.json`** (installed as the GS overlay on first deploy). Unknown or legacy keys are ignored with a log warning.
+
+> **Tip:** the controller computes the FEC block size `k` from the target bitrate, so a high-bitrate (high-MCS) link uses larger FEC blocks, which raises block-fill latency. If steady latency matters more than FEC granularity, raise `tuning.fec.blocks_per_frame` and/or lower `tuning.fec.k_bounds.max`. Also ensure the link runs at the intended channel **width** — a 10 MHz channel has half the airtime of 20 MHz, so a bitrate sized for 20 MHz will saturate and bufferbloat at 10 MHz.
+
+---
+
 ## Error codes
 
 Every error response body has an `"error"` field containing one of the codes below.
