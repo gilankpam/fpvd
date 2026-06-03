@@ -28,5 +28,17 @@
     "idrForward": true,
     "idrPort": 11223,
     "tuning": {}
+  },
+  "pixelpilot": {
+    "enabled": true,
+    "bin": "/usr/bin/pixelpilot",
+    "configPath": "/etc/pixelpilot/pixelpilot.yaml",
+    "screenMode": "1920x1080@60",
+    "videoScale": 1.0,
+    "osdConfigPath": "/etc/pixelpilot/config_osd.json",
+    "dvrFramerate": 60,
+    "dvrDir": "/var/dvr",
+    "dvrTemplate": "record_%Y-%m-%d_%H-%M-%S.mp4",
+    "extraArgs": []
   }
 }
