@@ -1,9 +1,18 @@
-"""Spawn, monitor, and restart the wfb-runner child process.
+"""Spawn, monitor, and restart a child process.
 
-A background watcher thread auto-restarts the runner if it exits unexpectedly,
-with a crash-loop fault guard. Operator-initiated restarts (start/stop/restart,
-driven by API applies) do NOT count toward the crash-loop budget and clear any
-prior fault.
+A background watcher thread auto-restarts the child if it exits unexpectedly,
+with a crash-loop fault guard. Operator-initiated restarts (start/stop/restart)
+do NOT count toward the crash-loop budget and clear any prior fault.
+
+ProcessSupervisor is generic: parameterized by an argv (swappable at runtime
+via set_argv), an extra-env dict, and a readiness strategy:
+  - probe  : ready as soon as ready_check() is True before the timeout; a
+             timeout (or early exit) is a failed start. (wfb: port :8103.)
+  - settle : ready iff the process is still alive at the end of the timeout
+             window (ready_check=None, ready_on_timeout=True); an early exit is
+             a failed start. (pixelpilot: no port to probe.)
+
+RunnerSupervisor specializes it for the wfb data plane.
 """
 
 import os
@@ -34,16 +43,15 @@ def _port_open(port: int, host: str = "127.0.0.1") -> bool:
         return False
 
 
-class RunnerSupervisor:
-    def __init__(self, runner_cmd, cfg_out, profile, wlans, ready_port=8103,
-                 ready_timeout=10.0, log_path=None, max_restarts=5,
+class ProcessSupervisor:
+    def __init__(self, argv, env=None, ready_check=None, ready_timeout=10.0,
+                 ready_on_timeout=False, log_path=None, max_restarts=5,
                  restart_window=60.0, poll_interval=0.5, backoff=0.5):
-        self.runner_cmd = runner_cmd
-        self.cfg_out = cfg_out
-        self.profile = profile
-        self.wlans = wlans
-        self.ready_port = ready_port
+        self._argv_list = list(argv)
+        self._extra_env = dict(env or {})
+        self._ready_check = ready_check
         self.ready_timeout = ready_timeout
+        self._ready_on_timeout = ready_on_timeout
         self.log_path = log_path
         self.max_restarts = max_restarts
         self.restart_window = restart_window
@@ -62,18 +70,20 @@ class RunnerSupervisor:
         self._stop_evt = threading.Event()
         self._lock = threading.RLock()
 
-    # ---- process plumbing -------------------------------------------------
-    def _argv(self):
-        return list(self.runner_cmd) + ["--profiles", self.profile, "--wlans", *self.wlans]
+    # ---- runtime argv -----------------------------------------------------
+    def set_argv(self, argv):
+        with self._lock:
+            self._argv_list = list(argv)
 
+    # ---- process plumbing -------------------------------------------------
     def _env(self):
         env = dict(os.environ)
-        env["WIFIBROADCAST_CFG"] = self.cfg_out
+        env.update(self._extra_env)
         return env
 
     def _spawn(self):
         self._log_fh = open(self.log_path, "ab") if self.log_path else None
-        self._proc = subprocess.Popen(self._argv(), env=self._env(),
+        self._proc = subprocess.Popen(self._argv_list, env=self._env(),
                                       stdout=(self._log_fh or subprocess.DEVNULL),
                                       stderr=subprocess.STDOUT,
                                       start_new_session=True)
@@ -84,10 +94,10 @@ class RunnerSupervisor:
             if self._proc.poll() is not None:
                 self._last_exit = self._proc.returncode
                 return False
-            if _port_open(self.ready_port):
+            if self._ready_check is not None and self._ready_check():
                 return True
             time.sleep(0.2)
-        return False
+        return self._ready_on_timeout
 
     def _spawn_and_wait(self):
         self._spawn()
@@ -135,7 +145,7 @@ class RunnerSupervisor:
                 self._on_crash_locked()
 
     def _on_crash_locked(self):
-        # the runner exited unexpectedly while we were supervising it
+        # the child exited unexpectedly while we were supervising it
         self._last_exit = self._proc.returncode
         self._proc = None
         self._close_log()
@@ -190,3 +200,20 @@ class RunnerSupervisor:
                 "lastExit": self._last_exit,
                 "fault": self._fault,
             }
+
+
+class RunnerSupervisor(ProcessSupervisor):
+    """The wfb data plane: argv = runner_cmd --profiles P --wlans W..., env sets
+    WIFIBROADCAST_CFG, readiness = the wfb-ng stats port (:8103) opening."""
+
+    def __init__(self, runner_cmd, cfg_out, profile, wlans, ready_port=8103,
+                 ready_timeout=10.0, log_path=None, max_restarts=5,
+                 restart_window=60.0, poll_interval=0.5, backoff=0.5):
+        argv = list(runner_cmd) + ["--profiles", profile, "--wlans", *wlans]
+        super().__init__(
+            argv, env={"WIFIBROADCAST_CFG": cfg_out},
+            ready_check=lambda: _port_open(ready_port),
+            ready_timeout=ready_timeout, ready_on_timeout=False,
+            log_path=log_path, max_restarts=max_restarts,
+            restart_window=restart_window, poll_interval=poll_interval,
+            backoff=backoff)
