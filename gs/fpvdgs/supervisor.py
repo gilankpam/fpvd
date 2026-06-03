@@ -1,6 +1,7 @@
 """fpvd supervisor: owns config + HTTP API + runner supervision. Pure stdlib."""
 
 import argparse
+import signal
 import sys
 import time
 
@@ -11,19 +12,24 @@ from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot
 from .link import LinkCoordinator
-from .runner_supervisor import RunnerSupervisor, resolve_wlans
+from .pixelpilot import render_pixelpilot_argv
+from .runner_supervisor import RunnerSupervisor, ProcessSupervisor, resolve_wlans
 
 
 class App:
-    def __init__(self, store, runner, http_server, api, dynlink):
+    def __init__(self, store, runner, http_server, api, dynlink, pixelpilot=None):
         self.store = store
         self.runner = runner
         self.http = http_server
         self.api = api
         self.dynlink = dynlink
+        self.pixelpilot = pixelpilot
 
     def start(self):
         self.runner.start()
+        if (self.pixelpilot is not None
+                and self.store.effective().get("pixelpilot", {}).get("enabled", True)):
+            self.pixelpilot.start()
         if self.store.effective().get("dynamicLink", {}).get("enabled"):
             self.dynlink.start()
 
@@ -33,6 +39,8 @@ class App:
     def shutdown(self):
         self.http.shutdown()
         self.dynlink.stop()
+        if self.pixelpilot is not None:
+            self.pixelpilot.shutdown()
         self.runner.shutdown()
 
 
@@ -54,6 +62,11 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
     drone = DroneClient(effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080"))
 
     dynlink = DynamicLinkController(make_dl_snapshot(effective))
+
+    pixelpilot = ProcessSupervisor(
+        argv=render_pixelpilot_argv(effective),
+        ready_timeout=1.5, ready_on_timeout=True,   # settle: alive through the window
+        log_path="/tmp/pixelpilot.log")
 
     def renderer_write(eff):
         render_mod.write_cfg(cfg_out, render_mod.render_cfg(eff))
@@ -81,6 +94,12 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
                        "hello": st.pop("hello", "none")}
         return st
 
+    def _pixelpilot_status():
+        pp_cfg = store.effective().get("pixelpilot", {})
+        if not bool(pp_cfg.get("enabled", True)):
+            return {"enabled": False, "running": False}
+        return {"enabled": True, **pixelpilot.state()}
+
     def status_fn():
         wlan_info = {w: status_mod.iw_info(w) for w in resolve_wlans(store.effective())}
         reachable = drone.healthz()
@@ -90,14 +109,15 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         uptime_ms = int((time.monotonic() - started) * 1000)
         return status_mod.build_status(__version__, runner.state(), wlan_info, probe,
                                        uptime_ms=uptime_ms,
-                                       dynamic_link=_dynamic_link_status(reachable))
+                                       dynamic_link=_dynamic_link_status(reachable),
+                                       pixelpilot=_pixelpilot_status())
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out,
-              dynlink=dynlink)
+              dynlink=dynlink, pixelpilot=pixelpilot)
 
     http_server = make_http_server(api, host, port)
-    return App(store, runner, http_server, api, dynlink)
+    return App(store, runner, http_server, api, dynlink, pixelpilot=pixelpilot)
 
 
 def main(argv=None):
@@ -116,6 +136,11 @@ def main(argv=None):
                   else [sys.executable, "-m", "fpvdgs.runner"])
     app = build_app(args.defaults, args.config, args.cfg_out, args.host, args.port,
                     runner_cmd, log_path=args.log)
+
+    def _on_sigterm(signum, frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, _on_sigterm)
+
     app.start()
     sys.stderr.write(f"fpvd: listening on {args.host}:{args.port}\n")
     try:

@@ -38,6 +38,7 @@ def daemon(tmp_path, fake_drone):
                  "linkId": 7669206, "wlans": ["wlan0"]},
         "wfb": {"profile": "gs"},
         "drone": {"endpoint": fake_drone["endpoint"]},
+        "pixelpilot": {"enabled": False},
     }))
     fake_runner = ["python3", "-c",
                    ("import socket,time;s=socket.socket();"
