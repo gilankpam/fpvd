@@ -7,7 +7,7 @@ from urllib.parse import urlparse, parse_qs
 
 from .schema import SchemaError
 from .dynlink.config_build import make_dl_snapshot
-from .pixelpilot import render_pixelpilot_argv
+from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 
 
 class Api:
@@ -126,6 +126,7 @@ class Api:
         was, now = bool(pp_old.get("enabled", True)), bool(pp_new.get("enabled", True))
         if now:
             self.pixelpilot.set_argv(render_pixelpilot_argv(pending))
+            self.pixelpilot.set_env(render_pixelpilot_env(pending))
             if was:
                 self.pixelpilot.restart()
             else:

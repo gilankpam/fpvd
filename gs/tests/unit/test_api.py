@@ -240,6 +240,8 @@ class _FakePP:
         self.calls = []
     def set_argv(self, argv):
         self.calls.append(("set_argv", argv))
+    def set_env(self, env):
+        self.calls.append(("set_env", env))
     def start(self):
         self.calls.append(("start", None))
     def stop(self):

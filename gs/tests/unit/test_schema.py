@@ -109,7 +109,11 @@ def test_config_patch_accepts_pixelpilot():
 def test_validate_effective_accepts_pixelpilot_block():
     cfg = {"link": {"channel": 132, "width": 40, "region": "US"},
            "pixelpilot": {"enabled": True, "videoScale": 1.0,
-                          "dvrFramerate": 60, "screenMode": "1920x1080@60",
+                          "screenMode": "1920x1080@60",
+                          "rtpPort": 5600, "rtpJitterMs": 1,
+                          "codec": "h265",
+                          "env": {},
+                          "dvr": {"framerate": 60},
                           "extraArgs": []}}
     schema.validate_effective(cfg)  # no raise
 
@@ -120,12 +124,19 @@ def test_validate_effective_rejects_bad_pixelpilot():
         {"videoScale": 0},
         {"videoScale": -1.0},
         {"videoScale": "x"},
-        {"dvrFramerate": 0},
-        {"dvrFramerate": 1.5},
         {"enabled": "yes"},
         {"screenMode": ""},
         {"extraArgs": "not-a-list"},
         {"extraArgs": [1, 2]},
+        {"rtpPort": 0},
+        {"rtpPort": 70000},
+        {"rtpJitterMs": -1},
+        {"codec": ""},
+        {"dvr": {"reencBitrate": 0}},
+        {"dvr": {"mode": ""}},
+        {"dvr": {"osd": "yes"}},
+        {"env": {"A": 1}},
+        {"env": "x"},
     ):
         with pytest.raises(schema.SchemaError):
             schema.validate_effective({**base, "pixelpilot": bad})

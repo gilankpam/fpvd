@@ -109,21 +109,37 @@ When `enabled` is false the block is `{"enabled": false, "running": false}`.
 
 ### `pixelpilot`
 
-fpvd-GS spawns and supervises the `pixelpilot` binary as a managed child and
-builds its argv from this block (reproducing the stock `ExecStart` at defaults).
-Changes apply by restarting PixelPilot only — the radio link is untouched.
+fpvd-GS spawns and supervises the `pixelpilot` binary (PixelPilot FPV Decoder
+for Rockchip ≥1.3) as a managed child. Flag order in the rendered argv is
+canonical (stable); the getopt-style parser accepts any order. Changes apply by
+restarting PixelPilot only — the radio link is untouched.
 
 ```json
 "pixelpilot": {
   "enabled": true,
   "bin": "/usr/bin/pixelpilot",
-  "configPath": "/etc/pixelpilot/pixelpilot.yaml",
+  "env": {},
+  "configPath": "/etc/pixelpilot.yaml",
+  "osdConfigPath": "/etc/pixelpilot/osd.json",
   "screenMode": "1920x1080@60",
   "videoScale": 1.0,
-  "osdConfigPath": "/etc/pixelpilot/config_osd.json",
-  "dvrFramerate": 60,
-  "dvrDir": "/var/dvr",
-  "dvrTemplate": "record_%Y-%m-%d_%H-%M-%S.mp4",
+  "codec": "h265",
+  "rtpPort": 5600,
+  "rtpJitterMs": 1,
+  "dvr": {
+    "framerate": 60,
+    "dir": "/media/dvr",
+    "template": "record_%Y-%m-%d_%H-%M-%S.mp4",
+    "fmp4": true,
+    "sequencedFiles": true,
+    "osd": false,
+    "mode": "raw",
+    "maxSizeMb": 4000,
+    "reencCodec": "h264",
+    "reencBitrate": 8000,
+    "reencFps": 30,
+    "reencResolution": "1080p"
+  },
   "extraArgs": []
 }
 ```
@@ -131,11 +147,27 @@ Changes apply by restarting PixelPilot only — the radio link is untouched.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `true` | Arms PixelPilot supervision; toggle via `PATCH /config` + `POST /apply`. |
+| `bin` | string | `/usr/bin/pixelpilot` | Path to the pixelpilot binary. |
+| `env` | object | `{}` | Extra child-process environment variables (e.g. `LD_LIBRARY_PATH`). Merged over `os.environ` by the supervisor. |
+| `configPath` | string | `/etc/pixelpilot.yaml` | `--config` (pixelpilot main config file). |
+| `osdConfigPath` | string | `/etc/pixelpilot/osd.json` | `--osd-config`. |
 | `screenMode` | string | `1920x1080@60` | `--screen-mode` (HDMI output mode). |
 | `videoScale` | number | `1.0` | `--video-scale`. |
-| `osdConfigPath` | string | `/etc/pixelpilot/config_osd.json` | `--osd-config`. |
-| `dvrFramerate` | int | `60` | `--dvr-framerate`. |
-| `bin`/`configPath`/`dvrDir`/`dvrTemplate` | string | (see above) | Structural paths (rarely changed). |
+| `codec` | string | `h265` | `--codec` (video codec: `h264` or `h265`). |
+| `rtpPort` | int | `5600` | `-p` (RTP video input port). |
+| `rtpJitterMs` | int | `1` | `--rtp-jitter-ms`. |
+| `dvr.framerate` | int | `60` | `--dvr-framerate`. |
+| `dvr.dir` | string | `/media/dvr` | DVR output directory (joined with `dvr.template`). |
+| `dvr.template` | string | `record_%Y-%m-%d_%H-%M-%S.mp4` | `--dvr-template` filename (joined with `dvr.dir`). |
+| `dvr.fmp4` | bool | `true` | `--dvr-fmp4` flag (fragmented MP4). |
+| `dvr.sequencedFiles` | bool | `true` | `--dvr-sequenced-files` flag. |
+| `dvr.osd` | bool | `false` | `--dvr-osd` flag (burn OSD into DVR). |
+| `dvr.mode` | string | `raw` | `--dvr-mode` (`raw` or `reencode`). |
+| `dvr.maxSizeMb` | int | `4000` | `--dvr-max-size` (MB). |
+| `dvr.reencCodec` | string | `h264` | `--dvr-reenc-codec`. |
+| `dvr.reencBitrate` | int | `8000` | `--dvr-reenc-bitrate` (kbps). |
+| `dvr.reencFps` | int | `30` | `--dvr-reenc-fps`. |
+| `dvr.reencResolution` | string | `1080p` | `--dvr-reenc-resolution`. |
 | `extraArgs` | list[str] | `[]` | Verbatim-appended flags (escape hatch for un-modeled options). |
 
 `GET /status.pixelpilot` shows `{enabled, running, pid, restarts, autoRestarts,

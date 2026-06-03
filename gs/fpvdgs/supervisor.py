@@ -12,7 +12,7 @@ from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot
 from .link import LinkCoordinator
-from .pixelpilot import render_pixelpilot_argv
+from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .runner_supervisor import RunnerSupervisor, ProcessSupervisor, resolve_wlans
 
 
@@ -65,6 +65,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     pixelpilot = ProcessSupervisor(
         argv=render_pixelpilot_argv(effective),
+        env=render_pixelpilot_env(effective),
         ready_timeout=1.5, ready_on_timeout=True,   # settle: alive through the window
         log_path="/tmp/pixelpilot.log")
 

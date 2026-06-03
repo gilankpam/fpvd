@@ -75,6 +75,10 @@ class ProcessSupervisor:
         with self._lock:
             self._argv_list = list(argv)
 
+    def set_env(self, env):
+        with self._lock:
+            self._extra_env = dict(env or {})
+
     # ---- process plumbing -------------------------------------------------
     def _env(self):
         env = dict(os.environ)
