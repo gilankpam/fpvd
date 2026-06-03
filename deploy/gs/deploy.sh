@@ -76,6 +76,14 @@ remote '
         [ -x /etc/init.d/S99dynamic-link-gs ] && /etc/init.d/S99dynamic-link-gs stop >/dev/null 2>&1 || true
         mv /etc/init.d/S99dynamic-link-gs /root/fpvd-gs-rollback/S99dynamic-link-gs
     fi
+    # Retire the stock PixelPilot init script — fpvd now spawns/supervises the
+    # pixelpilot binary directly (single owner of process + config). Stop it,
+    # move it to the rollback dir. Idempotent: never clobber on re-deploy.
+    for pp in /etc/init.d/S*pixelpilot*; do
+        [ -e "$pp" ] || continue
+        [ -x "$pp" ] && "$pp" stop >/dev/null 2>&1 || true
+        mv "$pp" /root/fpvd-gs-rollback/
+    done
     : > /tmp/fpvd.log
     /etc/init.d/S99fpvd restart   # restart: reloads code on re-deploy; starts on first install
 '
@@ -87,6 +95,7 @@ remote '
     printf "  dlstd: "; ps w | grep -q "[d]ynamic_link.service" && echo "STILL RUNNING (!)" || echo retired
     printf "  procs: "; for p in wfb_rx wfb_tx; do
         printf "%s=%s " "$p" "$(pidof $p 2>/dev/null | cut -d" " -f1 || echo -)"; done; echo
+    printf "  pp:    "; pidof pixelpilot >/dev/null 2>&1 && echo running || echo DOWN
     printf "  api:   "; curl -s http://127.0.0.1:8080/status | head -c 200; echo
     printf "  8103:  "; ss -tln 2>/dev/null | grep -q ":8103" && echo listening || echo down
 '

@@ -25,5 +25,14 @@ ssh -o StrictHostKeyChecking=accept-new "$TARGET" '
         chmod +x /etc/init.d/S99dynamic-link-gs
         /etc/init.d/S99dynamic-link-gs start >/dev/null 2>&1 || true
     fi
+    # restore the stock PixelPilot init script retired by deploy.sh (fpvd
+    # shutdown already stopped its pixelpilot child when S99fpvd stopped).
+    for pp in /root/fpvd-gs-rollback/S*pixelpilot*; do
+        [ -e "$pp" ] || continue
+        name="$(basename "$pp")"
+        mv "$pp" "/etc/init.d/$name"
+        chmod +x "/etc/init.d/$name"
+        "/etc/init.d/$name" start >/dev/null 2>&1 || true
+    done
     echo rollback-done
 '
