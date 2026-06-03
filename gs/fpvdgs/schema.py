@@ -3,7 +3,7 @@
 from pathlib import Path
 
 LINK_KEYS = {"channel", "width", "txpower", "region", "linkId", "beamforming", "wlans"}
-CONFIG_TOP_KEYS = {"wfb", "drone", "dynamicLink"}   # link is excluded on purpose
+CONFIG_TOP_KEYS = {"wfb", "drone", "dynamicLink", "pixelpilot"}   # link is excluded on purpose
 DL_BANDWIDTHS = {20, 40}
 DL_PROFILES_DIR = Path(__file__).resolve().parent / "dynlink" / "profiles"
 ALL_TOP_KEYS = {"link"} | CONFIG_TOP_KEYS
@@ -48,6 +48,9 @@ def validate_effective(cfg: dict) -> None:
     dl = cfg.get("dynamicLink")
     if dl is not None:
         _validate_dynamic_link(dl)
+    pp = cfg.get("pixelpilot")
+    if pp is not None:
+        _validate_pixelpilot(pp)
 
 
 def _validate_dynamic_link(dl: dict) -> None:
@@ -76,3 +79,22 @@ def _validate_dynamic_link(dl: dict) -> None:
         raise SchemaError(
             f"dynamicLink.radioProfile {profile!r} not found; available: {available}"
         )
+
+
+def _validate_pixelpilot(pp: dict) -> None:
+    if not isinstance(pp.get("enabled", True), bool):
+        raise SchemaError("pixelpilot.enabled must be a bool")
+    vs = pp.get("videoScale", 1.0)
+    if isinstance(vs, bool) or not isinstance(vs, (int, float)) or vs <= 0:
+        raise SchemaError("pixelpilot.videoScale must be a positive number")
+    fps = pp.get("dvrFramerate", 60)
+    if isinstance(fps, bool) or not isinstance(fps, int) or fps <= 0:
+        raise SchemaError("pixelpilot.dvrFramerate must be a positive int")
+    for key in ("screenMode", "bin", "configPath", "osdConfigPath",
+                "dvrDir", "dvrTemplate"):
+        val = pp.get(key)
+        if val is not None and (not isinstance(val, str) or not val):
+            raise SchemaError(f"pixelpilot.{key} must be a non-empty string")
+    extra = pp.get("extraArgs", [])
+    if not isinstance(extra, list) or not all(isinstance(a, str) for a in extra):
+        raise SchemaError("pixelpilot.extraArgs must be a list of strings")

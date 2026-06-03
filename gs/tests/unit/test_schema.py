@@ -99,3 +99,34 @@ def test_effective_accepts_known_radio_profile():
 def test_effective_rejects_bad_idr_port():
     with pytest.raises(SchemaError):
         schema.validate_effective(_eff(idrPort=70000))
+
+
+def test_config_patch_accepts_pixelpilot():
+    # should not raise
+    schema.validate_config_patch({"pixelpilot": {"screenMode": "1280x720@60"}})
+
+
+def test_validate_effective_accepts_pixelpilot_block():
+    cfg = {"link": {"channel": 132, "width": 40, "region": "US"},
+           "pixelpilot": {"enabled": True, "videoScale": 1.0,
+                          "dvrFramerate": 60, "screenMode": "1920x1080@60",
+                          "extraArgs": []}}
+    schema.validate_effective(cfg)  # no raise
+
+
+def test_validate_effective_rejects_bad_pixelpilot():
+    base = {"link": {"channel": 132, "width": 40, "region": "US"}}
+    import pytest
+    for bad in (
+        {"videoScale": 0},
+        {"videoScale": -1.0},
+        {"videoScale": "x"},
+        {"dvrFramerate": 0},
+        {"dvrFramerate": 1.5},
+        {"enabled": "yes"},
+        {"screenMode": ""},
+        {"extraArgs": "not-a-list"},
+        {"extraArgs": [1, 2]},
+    ):
+        with pytest.raises(schema.SchemaError):
+            schema.validate_effective({**base, "pixelpilot": bad})
