@@ -49,3 +49,22 @@ def test_build_status_omits_dynamic_link_when_absent():
     from fpvdgs import status
     out = status.build_status("0.1.0", {"running": True}, {}, {"reachable": True})
     assert "dynamicLink" not in out
+
+
+def _runner_state():
+    return {"running": True, "pid": 1, "restarts": 0, "autoRestarts": 0,
+            "lastExit": None, "fault": False}
+
+
+def test_status_omits_pixelpilot_when_not_given():
+    out = build_status("1.0", _runner_state(), {}, {"reachable": True})
+    assert "pixelpilot" not in out
+
+
+def test_status_includes_pixelpilot_block():
+    pp = {"enabled": True, "running": True, "pid": 42, "restarts": 0,
+          "autoRestarts": 0, "lastExit": None, "fault": False}
+    out = build_status("1.0", _runner_state(), {}, {"reachable": True},
+                       pixelpilot=pp)
+    assert out["pixelpilot"]["running"] is True
+    assert out["pixelpilot"]["pid"] == 42
