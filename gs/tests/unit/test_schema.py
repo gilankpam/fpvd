@@ -1,5 +1,6 @@
 import pytest
 
+from fpvdgs import schema
 from fpvdgs.schema import (
     SchemaError,
     validate_config_patch,
@@ -51,3 +52,50 @@ def test_validate_effective_ok():
         "wfb": {"profile": "gs", "mavlink": {"peer": "connect://127.0.0.1:14550"}, "raw": {}},
         "drone": {"endpoint": "http://10.5.0.10:8080"},
     })
+
+
+def _eff(**dl):
+    base = {"link": {"channel": 132, "width": 40, "region": "US"},
+            "dynamicLink": {"enabled": False, "maxMcs": 5, "bandwidth": 20,
+                            "txpower": {"min": 18, "max": 28},
+                            "radioProfile": "m8812eu2", "dronePort": 9999,
+                            "tuning": {}}}
+    base["dynamicLink"].update(dl)
+    return base
+
+
+def test_config_patch_allows_dynamiclink():
+    schema.validate_config_patch({"dynamicLink": {"enabled": True}})  # no raise
+
+
+def test_effective_accepts_valid_dynamiclink():
+    schema.validate_effective(_eff())  # no raise
+
+
+def test_effective_rejects_bad_max_mcs():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(_eff(maxMcs=9))
+
+
+def test_effective_rejects_bad_bandwidth():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(_eff(bandwidth=15))
+
+
+def test_effective_rejects_inverted_txpower():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(_eff(txpower={"min": 30, "max": 10}))
+
+
+def test_effective_rejects_unknown_radio_profile():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(_eff(radioProfile="nonexistent"))
+
+
+def test_effective_accepts_known_radio_profile():
+    schema.validate_effective(_eff(radioProfile="m8812eu2"))  # no raise
+
+
+def test_effective_rejects_bad_idr_port():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(_eff(idrPort=70000))

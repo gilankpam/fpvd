@@ -24,6 +24,9 @@ def render_cfg(effective: dict) -> str:
     if link.get("txpower") is not None:
         # NOTE: wfb-ng wifi_txpower is in mBm; leave unset to keep the driver default.
         lines.append(f"wifi_txpower = {_lit(link['txpower'])}")
+    # Dynamic-link needs 10 Hz stats (log_interval ms). Emitted unconditionally
+    # so enabling/disabling dynamic-link never requires a runner bounce.
+    lines.append("log_interval = 100")
     # link.linkId is NOT emitted: wfb-ng derives link_id by hashing link_domain,
     # there is no link_id config key. The default link_domain already yields the
     # shared id. (Wiring linkId -> link_domain is future work.)

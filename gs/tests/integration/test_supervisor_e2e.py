@@ -84,3 +84,44 @@ def test_air_proxy_roundtrip(daemon):
     code, _ = _req(base, "PATCH", "/air/config", {"video": {"bitrate": 9000}})
     assert code == 200
     assert any(p == "/config" for (_m, p, _b) in fake_drone["calls"])
+
+
+def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkeypatch):
+    """build_app constructs a controller; status_fn merges its state.
+    Uses a stub controller via monkeypatch so no sockets/threads are needed."""
+    import json
+    from fpvdgs import supervisor
+
+    class _StubController:
+        def __init__(self, *a, **k):
+            self.started = False
+        def start(self): self.started = True
+        def stop(self): self.started = False
+        def set_config(self, snap): pass
+        def status(self):
+            return {"running": self.started, "statsConnected": False,
+                    "decision": None, "lastEmitMs": None, "emitSeq": 0,
+                    "reason": "", "hello": "none"}
+
+    monkeypatch.setattr(supervisor, "DynamicLinkController", _StubController)
+    # Avoid spawning the real runner / radio probing.
+    monkeypatch.setattr(supervisor, "resolve_wlans", lambda cfg: ["wlan0"])
+
+    defaults = tmp_path / "defaults.json"
+    defaults.write_text(json.dumps({
+        "link": {"channel": 132, "width": 40, "region": "US"},
+        "wfb": {"profile": "gs", "raw": {}},
+        "drone": {"endpoint": "http://127.0.0.1:1"},
+        "dynamicLink": {"enabled": False, "maxMcs": 5, "bandwidth": 20,
+                        "txpower": {"min": 18, "max": 28},
+                        "radioProfile": "m8812eu2", "droneAddr": None,
+                        "dronePort": 9999, "tuning": {}}}))
+    cfg_out = tmp_path / "wfb.cfg"
+
+    app = supervisor.build_app(str(defaults), str(tmp_path / "config.json"),
+                               str(cfg_out), "127.0.0.1", 0,
+                               runner_cmd=["true"])
+    code, body = app.api.handle("GET", "/status", {}, b"")
+    assert code == 200
+    assert "dynamicLink" in body
+    assert body["dynamicLink"]["running"] is False

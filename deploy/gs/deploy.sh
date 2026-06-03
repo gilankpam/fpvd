@@ -30,11 +30,22 @@ remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 # import without any sys.path/PYTHONPATH hacks.
 SITE="$(remote 'python3 -c "import site; print(site.getsitepackages()[0])"')"
 echo "[push] fpvdgs -> $TARGET:$SITE/fpvdgs  (+ init + defaults)"
-remote "mkdir -p /etc/fpvd '$SITE/fpvdgs'"
+remote "mkdir -p /etc/fpvd '$SITE/fpvdgs' '$SITE/fpvdgs/dynlink/profiles'"
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs"/*.py "$TARGET:$SITE/fpvdgs/"
+# dynlink subpackage (in-process GS dynamic-link controller) + JSON radio profiles
+scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/dynlink"/*.py "$TARGET:$SITE/fpvdgs/dynlink/"
+scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/dynlink/profiles"/*.json "$TARGET:$SITE/fpvdgs/dynlink/profiles/"
 # defaults (do not clobber an existing user overlay /etc/fpvd/config.json)
 scp -O "${SSH_OPTS[@]}" "$GS/etc/defaults.json" "$TARGET:/etc/fpvd/defaults.json"
 scp -O "${SSH_OPTS[@]}" "$GS/scripts/S99fpvd"  "$TARGET:/etc/init.d/S99fpvd"
+# initial dynamic-link overlay (production tuning translated from the standalone's
+# gs.yaml) — installed ONLY on first deploy; never clobbers operator edits.
+if remote 'test -e /etc/fpvd/config.json'; then
+    echo "[skip] /etc/fpvd/config.json exists — operator overlay preserved"
+else
+    echo "[push] initial config.json -> $TARGET:/etc/fpvd/config.json"
+    scp -O "${SSH_OPTS[@]}" "$REPO/deploy/gs/config.json" "$TARGET:/etc/fpvd/config.json"
+fi
 
 echo "[install] fpvd launcher + backup/disable S98wifibroadcast"
 remote '
@@ -55,6 +66,16 @@ remote '
     [ -x /etc/init.d/S98wifibroadcast ] && /etc/init.d/S98wifibroadcast stop >/dev/null 2>&1 || true
     sleep 2
     rm -f /etc/init.d/S98wifibroadcast
+
+    # Retire the standalone dynamic-link-gs service — now folded into fpvd as the
+    # in-process dynlink controller + IDR relay. Stop it (also stops its bundled
+    # idr-forwarder socat) and disable boot autostart, keeping the init script in
+    # the rollback dir so the GS dynamic-link role is fully owned by fpvd. fpvd
+    # then binds the HELLO listener on UDP 5801 and the IDR relay on 127.0.0.1:11223.
+    if [ -f /etc/init.d/S99dynamic-link-gs ]; then
+        [ -x /etc/init.d/S99dynamic-link-gs ] && /etc/init.d/S99dynamic-link-gs stop >/dev/null 2>&1 || true
+        mv /etc/init.d/S99dynamic-link-gs /root/fpvd-gs-rollback/S99dynamic-link-gs
+    fi
     : > /tmp/fpvd.log
     /etc/init.d/S99fpvd restart   # restart: reloads code on re-deploy; starts on first install
 '
@@ -63,6 +84,7 @@ echo "[verify]"
 sleep 5
 remote '
     printf "  fpvd:  "; ps w | grep -q "[f]pvdgs.supervisor" && echo running || echo DOWN
+    printf "  dlstd: "; ps w | grep -q "[d]ynamic_link.service" && echo "STILL RUNNING (!)" || echo retired
     printf "  procs: "; for p in wfb_rx wfb_tx; do
         printf "%s=%s " "$p" "$(pidof $p 2>/dev/null | cut -d" " -f1 || echo -)"; done; echo
     printf "  api:   "; curl -s http://127.0.0.1:8080/status | head -c 200; echo
