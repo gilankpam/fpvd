@@ -300,6 +300,16 @@ def test_pixelpilot_disable_then_enable(tmp_path):
     assert ("restart", None) not in pp.calls
 
 
+def test_combined_wfb_and_pixelpilot_change_bounces_both(tmp_path):
+    api, store, pp, runner = _api_with_pp(tmp_path)
+    store.patch({"wfb": {"raw": {"common": {"foo": 1}}},
+                 "pixelpilot": {"screenMode": "1280x720@60"}})
+    code, _ = api.handle("POST", "/apply", {}, b"")
+    assert code == 200
+    assert runner.restarts == 1               # wfb bounced
+    assert ("restart", None) in pp.calls      # pixelpilot bounced too
+
+
 def test_patch_config_accepts_pixelpilot(tmp_path):
     api, store, pp, runner = _api_with_pp(tmp_path)
     code, _ = api.handle("PATCH", "/config", {},

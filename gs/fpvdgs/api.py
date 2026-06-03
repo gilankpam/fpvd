@@ -120,6 +120,9 @@ class Api:
         runner. Mirrors _route_dynamic_link (set_argv ≈ set_config)."""
         if self.pixelpilot is None or pp_old == pp_new:
             return
+        # enabled defaults to True here (unlike dynamicLink's False): pixelpilot
+        # ships enabled in defaults.json and App boot-starts it under the same
+        # default, so a missing key means "running", not "off".
         was, now = bool(pp_old.get("enabled", True)), bool(pp_new.get("enabled", True))
         if now:
             self.pixelpilot.set_argv(render_pixelpilot_argv(pending))
