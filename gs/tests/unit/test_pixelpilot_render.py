@@ -53,3 +53,10 @@ def test_missing_block_uses_builtin_defaults():
     argv = render_pixelpilot_argv({})
     assert argv[0] == "/usr/bin/pixelpilot"
     assert "--config" in argv
+
+
+def test_custom_dvr_dir_and_template_compose():
+    cfg = {"pixelpilot": dict(DEFAULTS["pixelpilot"],
+                              dvrDir="/mnt/usb", dvrTemplate="rec_%Y.mp4")}
+    argv = render_pixelpilot_argv(cfg)
+    assert argv[argv.index("--dvr-template") + 1] == "/mnt/usb/rec_%Y.mp4"

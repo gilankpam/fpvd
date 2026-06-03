@@ -8,6 +8,8 @@ The always-on flags are baked in here; the four operator knobs and the
 structural paths come from the `pixelpilot` config block.
 """
 
+import os
+
 
 def render_pixelpilot_argv(effective: dict) -> list[str]:
     pp = effective.get("pixelpilot", {})
@@ -21,7 +23,7 @@ def render_pixelpilot_argv(effective: dict) -> list[str]:
         "--video-scale", str(pp.get("videoScale", 1.0)),
         "--dvr-framerate", str(pp.get("dvrFramerate", 60)),
         "--dvr-fmp4", "--dvr-sequenced-files",
-        "--dvr-template", f"{dvr_dir}/{dvr_template}",
+        "--dvr-template", os.path.join(dvr_dir, dvr_template),
         "--config", pp.get("configPath", "/etc/pixelpilot/pixelpilot.yaml"),
         *pp.get("extraArgs", []),
     ]
