@@ -1048,7 +1048,7 @@ curl -X PATCH http://127.0.0.1:8080/air/config \            # drone-only config
 | `wfb.raw` | object | `{}` | passthrough escape hatch |
 | `drone.endpoint` | string | `http://10.5.0.10:8080` | drone fpvd base URL |
 
-There is intentionally **no** `mcs`/`fec`/`ldpc`/`stbc` on the GS: video downlink FEC/modulation is auto-detected by `wfb_rx` (drone-owned), and the GS uplink TX uses wfb-ng's defaults. There are also no `video`/`image`/`telemetry`/`recording`/`dynamicLink`/`services` sections — those are drone-only.
+There is intentionally **no** `mcs`/`fec`/`ldpc`/`stbc` on the GS: video downlink FEC/modulation is auto-detected by `wfb_rx` (drone-owned), and the GS uplink TX uses wfb-ng's defaults. There are also no `video`/`image`/`telemetry`/`recording`/`services` sections — those are drone-only. (`dynamicLink` and `pixelpilot` are GS-side sections — see below and the GS adaptive-link section above.)
 
 ## PixelPilot managed service
 
