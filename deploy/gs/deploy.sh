@@ -84,6 +84,11 @@ remote '
         [ -x "$pp" ] && "$pp" stop >/dev/null 2>&1 || true
         mv "$pp" /root/fpvd-gs-rollback/
     done
+    # the init stop runs the wrapper in the foreground and may orphan its
+    # pixelpilot child (which keeps DRM + the RTP UDP port); reap any stragglers
+    # so fpvd can spawn its own cleanly.
+    killall -q pixelpilot pixelpilot.sh 2>/dev/null || true
+    sleep 1
     : > /tmp/fpvd.log
     /etc/init.d/S99fpvd restart   # restart: reloads code on re-deploy; starts on first install
 '
