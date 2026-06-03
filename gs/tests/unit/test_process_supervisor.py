@@ -48,3 +48,19 @@ def test_set_argv_is_used_on_restart():
         assert "31" in out
     finally:
         sup.shutdown()
+
+
+def test_missing_binary_is_failed_start_not_raise():
+    # A non-existent binary makes Popen raise synchronously; start() must
+    # convert that to a failed start (return False), NOT propagate the error.
+    sup = ProcessSupervisor(["/nonexistent/binary/definitely-not-here"],
+                            ready_check=None, ready_timeout=0.2,
+                            ready_on_timeout=True, poll_interval=0.05,
+                            backoff=0.05)
+    try:
+        assert sup.start() is False           # does not raise FileNotFoundError
+        st = sup.state()
+        assert st["running"] is False
+        assert st["lastExit"] is not None     # errno surfaced
+    finally:
+        sup.shutdown()

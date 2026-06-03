@@ -83,10 +83,15 @@ class ProcessSupervisor:
 
     def _spawn(self):
         self._log_fh = open(self.log_path, "ab") if self.log_path else None
-        self._proc = subprocess.Popen(self._argv_list, env=self._env(),
-                                      stdout=(self._log_fh or subprocess.DEVNULL),
-                                      stderr=subprocess.STDOUT,
-                                      start_new_session=True)
+        try:
+            self._proc = subprocess.Popen(self._argv_list, env=self._env(),
+                                          stdout=(self._log_fh or subprocess.DEVNULL),
+                                          stderr=subprocess.STDOUT,
+                                          start_new_session=True)
+        except OSError:
+            self._close_log()
+            self._proc = None
+            raise
 
     def _wait_ready(self):
         deadline = time.monotonic() + self.ready_timeout
@@ -100,7 +105,11 @@ class ProcessSupervisor:
         return self._ready_on_timeout
 
     def _spawn_and_wait(self):
-        self._spawn()
+        try:
+            self._spawn()
+        except OSError as e:
+            self._last_exit = e.errno if e.errno is not None else -1
+            return False
         return self._wait_ready()
 
     def _close_log(self):
