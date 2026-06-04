@@ -71,7 +71,7 @@ remote '
     # in-process dynlink controller + IDR relay. Stop it (also stops its bundled
     # idr-forwarder socat) and disable boot autostart, keeping the init script in
     # the rollback dir so the GS dynamic-link role is fully owned by fpvd. fpvd
-    # then binds the HELLO listener on UDP 5801 and the IDR relay on 127.0.0.1:11223.
+    # then binds the HELLO listener on UDP 5801 and the IDR relay on 0.0.0.0:11223.
     if [ -f /etc/init.d/S99dynamic-link-gs ]; then
         [ -x /etc/init.d/S99dynamic-link-gs ] && /etc/init.d/S99dynamic-link-gs stop >/dev/null 2>&1 || true
         mv /etc/init.d/S99dynamic-link-gs /root/fpvd-gs-rollback/S99dynamic-link-gs

@@ -184,29 +184,26 @@ def test_non_video_streams_are_ignored():
         sock.close()
 
 
-def test_idr_relay_forwards_player_tokens_to_drone():
-    # Relay listens on 127.0.0.1:idrPort and forwards to droneAddr:idrPort.
-    # Use a distinct loopback alias (127.0.0.2) for the fake drone so the
-    # same port doesn't loop back on itself.
+def test_idr_relay_binds_inaddr_any_so_it_can_forward_off_loopback():
+    # Regression: the relay reuses its listen socket to forward each token to
+    # the drone. If it binds 127.0.0.1, that forward sendto() fails with EINVAL
+    # for any non-loopback drone (the error is swallowed, so every IDR request
+    # is dropped silently). The listen socket MUST bind INADDR_ANY (0.0.0.0).
+    #
+    # We can't also assert delivery to a fake same-host drone: a 0.0.0.0:idrPort
+    # bind overlaps any 127.0.0.x:idrPort a fake drone would use (EADDRINUSE).
+    # Forwarding loopback->loopback works with either bind anyway, so it would
+    # never catch this bug — assert the bound listen address directly instead.
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     probe.bind(("127.0.0.1", 0))
     idr_port = probe.getsockname()[1]
     probe.close()
 
-    drone = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    drone.bind(("127.0.0.2", idr_port))
-    drone.settimeout(2.0)
-
     c = DynamicLinkController(
-        _snapshot(40010, droneAddr="127.0.0.2", idrForward=True, idrPort=idr_port),
+        _snapshot(40010, droneAddr="10.255.255.1", idrForward=True, idrPort=idr_port),
         stats_client_factory=_IdleStatsClient, gs_listen_port=0)
     c.start()
     try:
-        player = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        player.sendto(b"IDR!", ("127.0.0.1", idr_port))
-        player.close()
-        data, _ = drone.recvfrom(64)
-        assert data == b"IDR!"
+        assert c.status()["idrListen"] == "0.0.0.0:%d" % idr_port
     finally:
         c.stop()
-        drone.close()

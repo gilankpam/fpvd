@@ -64,7 +64,7 @@ class DynamicLinkController:
         self._started = threading.Event()
         self._status = {"running": False, "statsConnected": False,
                         "decision": None, "lastEmitMs": None, "emitSeq": 0,
-                        "reason": "", "hello": "none"}
+                        "reason": "", "hello": "none", "idrListen": None}
 
     # ---- thread-safe public API -----------------------------------------
     def start(self):
@@ -158,17 +158,27 @@ class DynamicLinkController:
             log.warning("dl: HELLO listener bind %s failed: %s", self._gs_listen, e)
             listener = None
 
-        # IDR-token relay: 127.0.0.1:idrPort -> droneAddr:idrPort. Non-fatal if
+        # IDR-token relay: 0.0.0.0:idrPort -> droneAddr:idrPort. Non-fatal if
         # the local port is taken (e.g. a leftover socat); the controller runs on.
+        #
+        # The listen address MUST be 0.0.0.0 (INADDR_ANY), never 127.0.0.1: we
+        # reuse this same socket to forward each token on to the (non-loopback)
+        # drone, and a socket bound to 127.0.0.1 cannot send off-loopback — the
+        # sendto() fails with EINVAL, which _IdrRelay swallows, so every IDR
+        # request gets dropped silently. INADDR_ANY still accepts the player's
+        # loopback tokens and lets the kernel pick the source for the drone route.
         idr_transport = None
+        self._set(idrListen=None)
         if snap.get("idrForward", True):
             idr_port = int(snap.get("idrPort", 11223))
             try:
                 idr_transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(
                     lambda: _IdrRelay((snap["droneAddr"], idr_port)),
-                    local_addr=("127.0.0.1", idr_port))
+                    local_addr=("0.0.0.0", idr_port))
+                sa = idr_transport.get_extra_info("sockname")
+                self._set(idrListen="%s:%d" % (sa[0], sa[1]) if sa else None)
             except OSError as e:
-                log.warning("dl: IDR relay bind 127.0.0.1:%d failed: %s", idr_port, e)
+                log.warning("dl: IDR relay bind 0.0.0.0:%d failed: %s", idr_port, e)
                 idr_transport = None
 
         # The wfb stats feed (:8103) interleaves rx records for every service
@@ -214,7 +224,7 @@ class DynamicLinkController:
             if idr_transport is not None:
                 idr_transport.close()
             return_link.close()
-            self._set(running=False, statsConnected=False)
+            self._set(running=False, statsConnected=False, idrListen=None)
 
     async def _stats_loop(self, on_event):
         """Run the stats client, reconnecting across runner bounces until
