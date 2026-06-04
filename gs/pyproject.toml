@@ -15,6 +15,9 @@ fpvd-runner = "fpvdgs.runner:main"
 [tool.setuptools.packages.find]
 include = ["fpvdgs*"]
 
+[tool.setuptools.package-data]
+"fpvdgs.dynlink" = ["profiles/*.json"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

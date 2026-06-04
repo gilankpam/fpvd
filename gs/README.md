@@ -1,7 +1,8 @@
 # fpvd (ground station)
 
-Python peer to the drone `fpvd`. Owns the GS wfb radio config and supervises
-the wfb data plane (built on the `wfb_ng` library, replacing `wfb-server`).
+Python peer to the drone `fpvd`. Owns the GS wfb radio config, supervises
+the wfb data plane (built on the `wfb_ng` library, replacing `wfb-server`),
+and spawns/supervises the `pixelpilot` display process.
 Single front-door HTTP API on `:8080`.
 
 See `../docs/superpowers/specs/2026-06-02-fpvd-gs-design.md`.
@@ -106,6 +107,73 @@ GS-armed / drone-not mismatch is immediately visible:
 When `enabled` is false the block is `{"enabled": false, "running": false}`.
 `hello` is one of `"announcing"`, `"keepalive"`, `"none"`.
 
+### `pixelpilot`
+
+fpvd-GS spawns and supervises the `pixelpilot` binary (PixelPilot FPV Decoder
+for Rockchip ≥1.3) as a managed child. Flag order in the rendered argv is
+canonical (stable); the getopt-style parser accepts any order. Changes apply by
+restarting PixelPilot only — the radio link is untouched.
+
+```json
+"pixelpilot": {
+  "enabled": true,
+  "bin": "/usr/bin/pixelpilot",
+  "env": {},
+  "configPath": "/etc/pixelpilot.yaml",
+  "osdConfigPath": "/etc/pixelpilot/osd.json",
+  "screenMode": "1920x1080@60",
+  "videoScale": 1.0,
+  "codec": "h265",
+  "rtpPort": 5600,
+  "rtpJitterMs": 1,
+  "dvr": {
+    "framerate": 60,
+    "dir": "/media/dvr",
+    "template": "record_%Y-%m-%d_%H-%M-%S.mp4",
+    "fmp4": true,
+    "sequencedFiles": true,
+    "osd": false,
+    "mode": "raw",
+    "maxSizeMb": 4000,
+    "reencCodec": "h264",
+    "reencBitrate": 8000,
+    "reencFps": 30,
+    "reencResolution": "1080p"
+  },
+  "extraArgs": []
+}
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Arms PixelPilot supervision; toggle via `PATCH /config` + `POST /apply`. |
+| `bin` | string | `/usr/bin/pixelpilot` | Path to the pixelpilot binary. |
+| `env` | object | `{}` | Extra child-process environment variables (e.g. `LD_LIBRARY_PATH`). Merged over `os.environ` by the supervisor. |
+| `configPath` | string | `/etc/pixelpilot.yaml` | `--config` (pixelpilot main config file). |
+| `osdConfigPath` | string | `/etc/pixelpilot/osd.json` | `--osd-config`. |
+| `screenMode` | string | `1920x1080@60` | `--screen-mode` (HDMI output mode). |
+| `videoScale` | number | `1.0` | `--video-scale`. |
+| `codec` | string | `h265` | `--codec` (video codec: `h264` or `h265`). |
+| `rtpPort` | int | `5600` | `-p` (RTP video input port). |
+| `rtpJitterMs` | int | `1` | `--rtp-jitter-ms`. |
+| `dvr.framerate` | int | `60` | `--dvr-framerate`. |
+| `dvr.dir` | string | `/media/dvr` | DVR output directory (joined with `dvr.template`). |
+| `dvr.template` | string | `record_%Y-%m-%d_%H-%M-%S.mp4` | `--dvr-template` filename (joined with `dvr.dir`). |
+| `dvr.fmp4` | bool | `true` | `--dvr-fmp4` flag (fragmented MP4). |
+| `dvr.sequencedFiles` | bool | `true` | `--dvr-sequenced-files` flag. |
+| `dvr.osd` | bool | `false` | `--dvr-osd` flag (burn OSD into DVR). |
+| `dvr.mode` | string | `raw` | `--dvr-mode` (`raw` or `reencode`). |
+| `dvr.maxSizeMb` | int | `4000` | `--dvr-max-size` (MB). |
+| `dvr.reencCodec` | string | `h264` | `--dvr-reenc-codec`. |
+| `dvr.reencBitrate` | int | `8000` | `--dvr-reenc-bitrate` (kbps). |
+| `dvr.reencFps` | int | `30` | `--dvr-reenc-fps`. |
+| `dvr.reencResolution` | string | `1080p` | `--dvr-reenc-resolution`. |
+| `extraArgs` | list[str] | `[]` | Verbatim-appended flags (escape hatch for un-modeled options). |
+
+`GET /status.pixelpilot` shows `{enabled, running, pid, restarts, autoRestarts,
+lastExit, fault}`; `{enabled:false, running:false}` when disabled. Changes to
+`pixelpilot.*` restart only PixelPilot; a link/wfb change leaves it running.
+
 ## On-device smoke (run after deploy; needs the drone reachable for /air and /link "both")
 
 1. `pidof fpvd wfb_rx wfb_tx` — all present; no `wfb-server`/`S98wifibroadcast`.
@@ -115,3 +183,4 @@ When `enabled` is false the block is `{"enabled": false, "running": false}`.
 5. Link bootstrap (drone reachable): `curl -XPATCH :8080/link -d '{"link":{"channel":100}}'` then `curl -XPOST :8080/link/apply -d '{"applyTo":"both"}'` — `{gsApplied:true,droneApplied:true}`; link re-establishes on the new channel.
 6. Link bootstrap (drone offline / different channel): same with `{"applyTo":"gs"}` — `droneApplied:false`, GS moves to the drone's channel and the link comes up.
 7. `/air`: `curl :8080/air/status` round-trips the drone fpvd's status.
+8. PixelPilot: `pidof pixelpilot` present; `curl -s :8080/status` shows `pixelpilot.running:true`. `curl -XPATCH :8080/config -d '{"pixelpilot":{"videoScale":1.5}}'` then `curl -XPOST :8080/apply` — 200; only PixelPilot restarts (wfb_rx/wfb_tx PIDs unchanged).

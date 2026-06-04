@@ -38,6 +38,7 @@ def daemon(tmp_path, fake_drone):
                  "linkId": 7669206, "wlans": ["wlan0"]},
         "wfb": {"profile": "gs"},
         "drone": {"endpoint": fake_drone["endpoint"]},
+        "pixelpilot": {"enabled": False},
     }))
     fake_runner = ["python3", "-c",
                    ("import socket,time;s=socket.socket();"
@@ -124,4 +125,5 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
     code, body = app.api.handle("GET", "/status", {}, b"")
     assert code == 200
     assert "dynamicLink" in body
+    assert "pixelpilot" in body
     assert body["dynamicLink"]["running"] is False

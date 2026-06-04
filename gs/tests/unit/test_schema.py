@@ -99,3 +99,53 @@ def test_effective_accepts_known_radio_profile():
 def test_effective_rejects_bad_idr_port():
     with pytest.raises(SchemaError):
         schema.validate_effective(_eff(idrPort=70000))
+
+
+def test_config_patch_accepts_pixelpilot():
+    # should not raise
+    schema.validate_config_patch({"pixelpilot": {"screenMode": "1280x720@60"}})
+
+
+def test_validate_effective_accepts_pixelpilot_block():
+    cfg = {"link": {"channel": 132, "width": 40, "region": "US"},
+           "pixelpilot": {"enabled": True, "videoScale": 1.0,
+                          "screenMode": "1920x1080@60",
+                          "rtpPort": 5600, "rtpJitterMs": 1,
+                          "codec": "h265",
+                          "env": {},
+                          "dvr": {"framerate": 60},
+                          "extraArgs": []}}
+    schema.validate_effective(cfg)  # no raise
+
+
+def test_validate_effective_rejects_bad_pixelpilot():
+    base = {"link": {"channel": 132, "width": 40, "region": "US"}}
+    for bad in (
+        {"videoScale": 0},
+        {"videoScale": -1.0},
+        {"videoScale": "x"},
+        {"enabled": "yes"},
+        {"screenMode": ""},
+        {"extraArgs": "not-a-list"},
+        {"extraArgs": [1, 2]},
+        {"rtpPort": 0},
+        {"rtpPort": 70000},
+        {"rtpJitterMs": -1},
+        {"codec": ""},
+        {"dvr": {"reencBitrate": 0}},
+        {"dvr": {"mode": ""}},
+        {"dvr": {"osd": "yes"}},
+        {"env": {"A": 1}},
+        {"env": "x"},
+    ):
+        with pytest.raises(schema.SchemaError):
+            schema.validate_effective({**base, "pixelpilot": bad})
+
+
+def test_shipped_defaults_include_pixelpilot_and_validate():
+    import json, pathlib
+    p = pathlib.Path(__file__).resolve().parents[2] / "etc" / "defaults.json"
+    cfg = json.loads(p.read_text())
+    assert "pixelpilot" in cfg
+    assert cfg["pixelpilot"]["enabled"] is True
+    schema.validate_effective(cfg)  # no raise

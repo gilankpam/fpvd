@@ -28,5 +28,32 @@
     "idrForward": true,
     "idrPort": 11223,
     "tuning": {}
+  },
+  "pixelpilot": {
+    "enabled": true,
+    "bin": "/usr/bin/pixelpilot",
+    "env": {},
+    "configPath": "/etc/pixelpilot.yaml",
+    "osdConfigPath": "/etc/pixelpilot/osd.json",
+    "screenMode": "1920x1080@60",
+    "videoScale": 1.0,
+    "codec": "h265",
+    "rtpPort": 5600,
+    "rtpJitterMs": 1,
+    "dvr": {
+      "framerate": 60,
+      "dir": "/media/dvr",
+      "template": "record_%Y-%m-%d_%H-%M-%S.mp4",
+      "fmp4": true,
+      "sequencedFiles": true,
+      "osd": false,
+      "mode": "raw",
+      "maxSizeMb": 4000,
+      "reencCodec": "h264",
+      "reencBitrate": 8000,
+      "reencFps": 30,
+      "reencResolution": "1080p"
+    },
+    "extraArgs": []
   }
 }
