@@ -48,14 +48,65 @@ def test_apply_both_reachable_pushes_drone_then_applies_gs():
     store.patch({"link": {"channel": 100}})
     runner, drone, written = FakeRunner(), FakeDrone(reachable=True), []
     res = _coord(store, runner, drone, written).apply_link("both")
-    # Only the shared subset (channel/width/linkId) is pushed — not region.
-    assert drone.patched == {"link": {"channel": 100, "width": 40}}
+    # Only the CHANGED shared key is pushed. Unchanged width is omitted so it
+    # can't trip the drone's dynamic-link lock; region is GS-only and never sent.
+    assert drone.patched == {"link": {"channel": 100}}
     assert drone.applied is True
     assert runner.restarts == 1
     assert store.effective()["link"]["channel"] == 100
     # no retune wired -> bounce path
     assert res == {"gsApplied": True, "droneApplied": True, "droneReachable": True,
                    "inSync": True, "mode": "bounce"}
+
+
+def test_apply_both_omits_unchanged_locked_width():
+    # Regression for the dynamic-link-locked channel bug. The drone refuses any
+    # PATCH that *writes* link.width while DL is enabled — even to its current
+    # value (the lock counts writes by structure, not by value-change). So a
+    # channel-only apply must push ONLY {channel}; bundling the unchanged width
+    # gets the whole patch (incl. the allowed channel) rejected and the drone
+    # never retunes -> "GS changed, drone stays".
+    from fpvdgs.drone_client import DroneUnreachable
+
+    class DlLockedDrone:
+        """Mirrors the drone's checkDynamicLinkLock: a body writing link.width is
+        refused with dynamic_link_locked, surfaced to us as a 4xx -> Unreachable."""
+        def __init__(self):
+            self.patched = None
+            self.applied = False
+
+        def healthz(self):
+            return True
+
+        def patch_config(self, sparse):
+            if "width" in sparse.get("link", {}):
+                raise DroneUnreachable("drone PATCH /config -> 400 dynamic_link_locked")
+            self.patched = sparse
+            return {}
+
+        def apply(self):
+            self.applied = True
+            return {}
+
+    store = _store()                          # channel 132, width 40
+    store.patch({"link": {"channel": 100}})   # ONLY channel changes
+    runner, drone, written = FakeRunner(), DlLockedDrone(), []
+    res = _coord(store, runner, drone, written).apply_link("both")
+
+    assert drone.patched == {"link": {"channel": 100}}   # unchanged width NOT bundled
+    assert drone.applied is True
+    assert res["droneApplied"] is True
+    assert res["inSync"] is True
+
+
+def test_apply_both_pushes_width_when_width_actually_changes():
+    # The delta push must still send width when it genuinely changes (DL off).
+    store = _store()                          # width 40
+    store.patch({"link": {"width": 20}})      # width changes
+    runner, drone, written = FakeRunner(), FakeDrone(reachable=True), []
+    res = _coord(store, runner, drone, written).apply_link("both")
+    assert drone.patched == {"link": {"width": 20}}
+    assert res["droneApplied"] is True
 
 
 def test_apply_both_drone_down_still_applies_gs():
