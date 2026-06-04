@@ -52,17 +52,30 @@ class LinkCoordinator:
         if self.validate is not None:
             self.validate(pending_cfg)   # raises (e.g. SchemaError) on bad values
         link = pending_cfg.get("link", {})
+        # Last-good (pre-commit) snapshot. Used to compute the drone push delta
+        # below, and to roll the cfg back on a failed GS apply further down.
+        last_good = self.store.effective()
+        old_link = last_good.get("link", {})
 
         drone_applied = False
         drone_reachable = False
         if apply_to == "both":
             drone_reachable = self.drone.healthz()
             if drone_reachable:
-                push = {k: link[k] for k in DRONE_PUSH_KEYS if k in link}
+                # Push only the shared keys that actually CHANGED — not the whole
+                # subset. Re-sending an unchanged value is NOT free: link.width is
+                # a dynamic-link-locked path on the drone, and the lock counts any
+                # write by structure (not by value-change). Bundling the unchanged
+                # width into a channel-only change makes the drone reject the whole
+                # PATCH with dynamic_link_locked while DL is enabled, so the allowed
+                # channel change is thrown out with it and the drone never retunes.
+                push = {k: link[k] for k in DRONE_PUSH_KEYS
+                        if k in link and link[k] != old_link.get(k)}
                 try:
-                    self.drone.patch_config({"link": push})
-                    self.drone.apply()
-                    drone_applied = True
+                    if push:
+                        self.drone.patch_config({"link": push})
+                        self.drone.apply()
+                    drone_applied = True   # empty push => already in sync
                 except DroneUnreachable:
                     drone_reachable = False
 
@@ -70,8 +83,6 @@ class LinkCoordinator:
         #  - live iw retune the cards (no process restart), or
         #  - bounce the runner.
         # Commit only on success; otherwise roll the cfg back to last-good.
-        last_good = self.store.effective()
-        old_link = last_good.get("link", {})
         live = self._can_retune_live(old_link, link)
 
         self.renderer_write(pending_cfg)
