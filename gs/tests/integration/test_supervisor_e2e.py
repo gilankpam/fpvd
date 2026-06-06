@@ -127,3 +127,68 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
     assert "dynamicLink" in body
     assert "pixelpilot" in body
     assert body["dynamicLink"]["running"] is False
+
+
+class _FakeProc:
+    """Idle fake proc: never emits stdout, killable, awaitable wait()."""
+    def __init__(self):
+        self.stdout = self
+        self.killed = False
+    async def readline(self):
+        import asyncio
+        await asyncio.sleep(3600)
+    def kill(self): self.killed = True
+    async def wait(self): return 0
+
+
+def test_status_has_probe_block(tmp_path, monkeypatch):
+    """build_app wires a ProbeController; status_fn exposes its state under
+    'probe' when enabled. A fake probe_spawn guarantees no real wfb_rx runs.
+    Exercises the full start/shutdown lifecycle (probe.start()/stop()) by
+    serving in a thread, mirroring the `daemon` fixture."""
+    import json
+    from fpvdgs import supervisor
+
+    # Avoid spawning the real runner / radio probing.
+    monkeypatch.setattr(supervisor, "resolve_wlans", lambda cfg: ["wlan0"])
+
+    ready_port = _free_port()
+    api_port = _free_port()
+
+    spawned = []
+    def fake_spawn(cmd):
+        spawned.append(cmd)
+        return _FakeProc()
+
+    defaults = tmp_path / "defaults.json"
+    defaults.write_text(json.dumps({
+        "link": {"channel": 132, "width": 40, "region": "US", "linkId": 7669206},
+        "wfb": {"profile": "gs", "raw": {}},
+        "drone": {"endpoint": "http://127.0.0.1:1"},
+        "pixelpilot": {"enabled": False},
+        "probe": {"enabled": True, "basePort": 50, "maxStreams": 2, "rxL": 50}}))
+    cfg_out = tmp_path / "wfb.cfg"
+    fake_runner = ["python3", "-c",
+                   ("import socket,time;s=socket.socket();"
+                    "s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);"
+                    f"s.bind(('127.0.0.1',{ready_port}));s.listen(1);time.sleep(30)")]
+
+    app = supervisor.build_app(
+        defaults_path=str(defaults), overlay_path=str(tmp_path / "config.json"),
+        cfg_out=str(cfg_out), host="127.0.0.1", port=api_port,
+        runner_cmd=fake_runner, ready_port=ready_port, ready_timeout=5.0,
+        probe_spawn=fake_spawn)
+    app.start()
+    t = threading.Thread(target=app.serve_forever, daemon=True)
+    t.start()
+    time.sleep(0.3)
+    try:
+        # probe.start() ran (config enabled) and launched maxStreams=2 fakes.
+        assert len(spawned) == 2
+        code, body = _req(f"http://127.0.0.1:{api_port}", "GET", "/status")
+        assert code == 200
+        assert "probe" in body
+        assert body["probe"]["enabled"] is True
+        assert body["probe"]["running"] is True
+    finally:
+        app.shutdown()

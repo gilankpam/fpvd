@@ -13,17 +13,20 @@ from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot
 from .link import LinkCoordinator
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
+from .probe.controller import ProbeController
 from .runner_supervisor import RunnerSupervisor, ProcessSupervisor, resolve_wlans
 
 
 class App:
-    def __init__(self, store, runner, http_server, api, dynlink, pixelpilot=None):
+    def __init__(self, store, runner, http_server, api, dynlink,
+                 pixelpilot=None, probe=None):
         self.store = store
         self.runner = runner
         self.http = http_server
         self.api = api
         self.dynlink = dynlink
         self.pixelpilot = pixelpilot
+        self.probe = probe
 
     def start(self):
         self.runner.start()
@@ -32,6 +35,9 @@ class App:
             self.pixelpilot.start()
         if self.store.effective().get("dynamicLink", {}).get("enabled"):
             self.dynlink.start()
+        if (self.probe is not None
+                and self.store.effective().get("probe", {}).get("enabled")):
+            self.probe.start()
 
     def serve_forever(self):
         self.http.serve_forever()
@@ -41,11 +47,14 @@ class App:
         self.dynlink.stop()
         if self.pixelpilot is not None:
             self.pixelpilot.shutdown()
+        if self.probe is not None:
+            self.probe.stop()
         self.runner.shutdown()
 
 
 def build_app(defaults_path, overlay_path, cfg_out, host, port,
-              runner_cmd, ready_port=8103, ready_timeout=10.0, log_path=None):
+              runner_cmd, ready_port=8103, ready_timeout=10.0, log_path=None,
+              probe_spawn=None):
     store = ConfigStore.load(defaults_path, overlay_path)
     effective = store.effective()
     schema.validate_effective(effective)
@@ -62,6 +71,15 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
     drone = DroneClient(effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080"))
 
     dynlink = DynamicLinkController(make_dl_snapshot(effective))
+
+    def _probe_snapshot(eff):
+        p = dict(eff.get("probe", {}))
+        p["key"] = "/etc/gs.key"
+        p["linkId"] = eff.get("link", {}).get("linkId")
+        p["wlans"] = resolve_wlans(eff)
+        return p
+
+    probe_ctrl = ProbeController(_probe_snapshot(effective), spawn=probe_spawn)
 
     pixelpilot = ProcessSupervisor(
         argv=render_pixelpilot_argv(effective),
@@ -101,6 +119,11 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
             return {"enabled": False, "running": False}
         return {"enabled": True, **pixelpilot.state()}
 
+    def _probe_status():
+        if not store.effective().get("probe", {}).get("enabled"):
+            return {"enabled": False, "running": False}
+        return probe_ctrl.status()
+
     def status_fn():
         wlan_info = {w: status_mod.iw_info(w) for w in resolve_wlans(store.effective())}
         reachable = drone.healthz()
@@ -111,14 +134,16 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         return status_mod.build_status(__version__, runner.state(), wlan_info, probe,
                                        uptime_ms=uptime_ms,
                                        dynamic_link=_dynamic_link_status(reachable),
-                                       pixelpilot=_pixelpilot_status())
+                                       pixelpilot=_pixelpilot_status(),
+                                       probe=_probe_status())
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out,
               dynlink=dynlink, pixelpilot=pixelpilot)
 
     http_server = make_http_server(api, host, port)
-    return App(store, runner, http_server, api, dynlink, pixelpilot=pixelpilot)
+    return App(store, runner, http_server, api, dynlink,
+               pixelpilot=pixelpilot, probe=probe_ctrl)
 
 
 def main(argv=None):
