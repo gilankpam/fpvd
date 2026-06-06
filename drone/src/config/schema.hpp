@@ -162,17 +162,6 @@ struct Service {
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Service, enabled, exec, args, env,
                                    startAfter, restart)
 
-struct Probe {
-    bool enabled{false};
-    std::vector<int> mcsList{};   // candidate MCS rungs; each gets its own radio_port
-    int pps{25};                  // packets/sec per stream
-    int packetBytes{1400};        // datagram size (mirror video MTU)
-    int basePort{50};             // radio_port for mcsList[0]; +i per stream
-    int baseFeedPort{6700};       // wfb_tx -u feed port for mcsList[0]; +i per stream
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Probe, enabled, mcsList, pps,
-                                                packetBytes, basePort, baseFeedPort)
-
 struct Config {
     Link link{};
     Video video{};
@@ -181,10 +170,9 @@ struct Config {
     Recording recording{};
     DynamicLink dynamicLink{};
     std::map<std::string, Service> services{};
-    Probe probe{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, link, video, image,
                                                telemetry, recording,
-                                               dynamicLink, services, probe)
+                                               dynamicLink, services)
 
 } // namespace fpvd
