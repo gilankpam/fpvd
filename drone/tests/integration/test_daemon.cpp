@@ -699,6 +699,36 @@ TEST_CASE("daemon: probe specs seeded into orchestrator when probe is enabled") 
     fs::remove_all(tmp);
 }
 
+TEST_CASE("status: includes probe summary") {
+    auto tmp = fs::temp_directory_path() / "fpvd-test-probe-status";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    auto pr = d.patchPending(nlohmann::json::parse(
+        R"({"probe":{"enabled":true,"mcsList":[3,5]}})"));
+    REQUIRE(pr.ok);
+    auto ar = d.apply(/*reallyRestart=*/false);
+    REQUIRE(ar.ok);
+
+    auto j = fpvd::buildStatus(d);
+    REQUIRE(j.contains("probe"));
+    CHECK(j["probe"]["enabled"] == true);
+    CHECK(j["probe"]["mcsList"] == nlohmann::json::array({3, 5}));
+
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("apply: writes the system-stats OSD line when dynamic-link is off") {
     auto tmp = fs::temp_directory_path() / "fpvd-osd-base";
     auto paths = makeRoutingPaths(tmp, 46820);
