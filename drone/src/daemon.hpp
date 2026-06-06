@@ -88,6 +88,11 @@ public:
 
 private:
     void seedOrchestrator();
+    // Targeted add/remove of the observe-only probe pair (probe-tx + probe-feed)
+    // on the live dynamicLink on<->off transition — never bounces wfb/video.
+    // add() registers the spec; restart() starts the not-yet-running process.
+    void addProbeStream();
+    void removeProbeStream();
     void reconcileBeamforming();
     void rewriteWaybeamJson();
     void startController();

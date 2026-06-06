@@ -106,8 +106,8 @@ nlohmann::json buildStatus(Daemon& d) {
         {"processes", procs},
         {"dynamicLink", dlj},
         {"probe", {
-            {"enabled", d.effective().probe.enabled},
-            {"mcsList", d.effective().probe.mcsList}
+            {"enabled", d.effective().dynamicLink.enabled},
+            {"running", d.orchestrator().get("probe-tx") != nullptr}
         }}
     };
 }

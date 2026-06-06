@@ -22,9 +22,6 @@ SubsystemDiff diffSubsystems(const Config& a, const Config& b) {
     if (ja["link"]["mtu"] != jb["link"]["mtu"]) d.dynamicLink = true;
     if (ja["video"]["fps"] != jb["video"]["fps"]) d.dynamicLink = true;
 
-    // probe
-    if (ja["probe"] != jb["probe"]) d.probeChanged = true;
-
     // services
     for (auto& [name, sa] : a.services) {
         auto it = b.services.find(name);

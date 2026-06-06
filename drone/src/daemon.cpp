@@ -9,6 +9,8 @@
 #include "translate/wfb_control.hpp"
 #include "link_width.hpp"
 #include "probe/probe_specs.hpp"
+#include "probe/probe_constants.hpp"
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <fstream>
@@ -133,10 +135,16 @@ void Daemon::seedOrchestrator() {
         orch_.add(std::move(spec));
     }
 
-    // Observe-only probe link: extra FEC-off wfb_tx + feeder per probe MCS.
-    static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
-    for (auto& s : buildProbeSpecs(effective_, iface, key, kProbeFeeder))
-        orch_.add(std::move(s));
+    // Observe-only probe link: ONE FEC-off wfb_tx tracking current+1, owned by
+    // the dynamic-link lifecycle. Seeded only when dynamicLink is enabled; the
+    // controller retunes it live on each {mcs} (see DynamicLinkController).
+    if (effective_.dynamicLink.enabled) {
+        static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
+        const int probeMcs = std::min(effective_.dynamicLink.safe.mcs + 1,
+                                      kProbeMcsCeiling);
+        for (auto& s : buildProbeSpecs(effective_, iface, key, kProbeFeeder, probeMcs))
+            orch_.add(std::move(s));
+    }
 }
 
 void Daemon::restartOsd() {
@@ -229,6 +237,24 @@ void Daemon::startController() {
     dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface), dlGenerationId_);
 }
 
+void Daemon::addProbeStream() {
+    const std::string iface = radio_.iface.empty() ? "wlan0" : radio_.iface;
+    static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
+    const int probeMcs = std::min(effective_.dynamicLink.safe.mcs + 1,
+                                  kProbeMcsCeiling);
+    for (auto& s : buildProbeSpecs(effective_, iface, "/etc/drone.key",
+                                   kProbeFeeder, probeMcs)) {
+        const std::string name = s.name;
+        orch_.add(std::move(s));
+        orch_.restart(name);   // add() registers; restart() starts a not-running spec
+    }
+}
+
+void Daemon::removeProbeStream() {
+    orch_.remove("probe-feed");   // remove feeder first (it startAfter the tx)
+    orch_.remove("probe-tx");
+}
+
 PatchResult Daemon::patchPending(const nlohmann::json& patch) {
     std::lock_guard<std::mutex> g(mu_);
     nlohmann::json next = deepMergeJson(nlohmann::json(pending_), patch);
@@ -273,7 +299,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     const bool encChanged = encRestart || encLive;
 
     // A full orchestrator rebuild is needed only for non-encoder subsystems.
-    const bool needsRebuild = subs.telemetry || subs.probeChanged ||
+    const bool needsRebuild = subs.telemetry ||
         !subs.servicesAffected.empty() || link.fullRestart;
 
     // Transactional LIVE push: apply before committing so a failed push fails the
@@ -374,10 +400,13 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // runs regardless of which hot return is taken below (the deferred
         // nicChannel return detaches a worker and returns early). start() binds
         // sockets + launches the thread; setConfig() hot-reloads; stop() joins.
-        if (!enabledOld && enabledNew)
+        if (!enabledOld && enabledNew) {
+            addProbeStream();      // targeted orch_.add + start (no video bounce)
             startController();
+        }
         else if (enabledOld && !enabledNew) {
             dl_.stop();
+            removeProbeStream();   // targeted orch_.remove (no video bounce)
             restateStaticLink();   // revert radio + encoder to the static config
         }
         else if (enabledOld && enabledNew && (subs.dynamicLink || link.videoRadiotap))

@@ -430,19 +430,31 @@ TEST_CASE("apply: enabled false->true starts controller; true->false stops it") 
     CHECK_FALSE(d.dynamicLinkStatus().running);
     auto namesBefore = d.orchestrator().names();
 
-    // false -> true: starts the controller, no full rebuild needed for this alone.
+    // false -> true: starts the controller, no full rebuild. The only orchestrator
+    // delta is the targeted probe pair add (probe-tx + probe-feed) — every other
+    // supervised process keeps its identity (no stopAll/startAll).
     REQUIRE(d.patchPending(nlohmann::json::parse(
         R"({"dynamicLink":{"enabled":true}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     CHECK(d.dynamicLinkStatus().running);
-    CHECK(d.orchestrator().names() == namesBefore);  // no rebuild
+    {
+        auto namesAfter = d.orchestrator().names();
+        std::vector<std::string> added;
+        for (auto& n : namesAfter)
+            if (std::find(namesBefore.begin(), namesBefore.end(), n) ==
+                namesBefore.end())
+                added.push_back(n);
+        std::sort(added.begin(), added.end());
+        CHECK(added == std::vector<std::string>{"probe-feed", "probe-tx"});
+    }
 
-    // true -> false: stops the controller.
+    // true -> false: stops the controller AND removes the probe pair — names back
+    // to the pre-toggle set (still no rebuild).
     REQUIRE(d.patchPending(nlohmann::json::parse(
         R"({"dynamicLink":{"enabled":false}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     CHECK_FALSE(d.dynamicLinkStatus().running);
-    CHECK(d.orchestrator().names() == namesBefore);  // still no rebuild
+    CHECK(d.orchestrator().names() == namesBefore);  // probe removed, no rebuild
 
     fs::remove_all(tmp);
 }
@@ -459,11 +471,17 @@ TEST_CASE("apply: restart-class encoder change bounces waybeam + msposd, leaves 
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     REQUIRE(d.dynamicLinkStatus().running);
 
+    // Enabling DL auto-started the probe pair (probe-tx/probe-feed). This test
+    // seeds its own fakes and calls startAll(); drop the already-running probe
+    // supervisors first so startAll() doesn't double-start them.
+    auto& orch = d.orchestrator();
+    orch.remove("probe-feed");
+    orch.remove("probe-tx");
+
     // Seed the orchestrator with fakes so the bounce is observable: a real full
     // rebuild would wipe/replace these; a hot apply preserves them. The restart-
     // class path bounces "waybeam" AND "msposd" (the OSD renderer, which draws
     // onto waybeam's pipeline), but leaves wfb untouched.
-    auto& orch = d.orchestrator();
     orch.add({"wfb_video_tx", {"/bin/sh", "-c", "sleep 30"}, {},
               fpvd::RestartPolicy::Always, {}});
     orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {},
@@ -669,85 +687,50 @@ TEST_CASE("apply: disabling dynamic-link restates the static encoder bitrate") {
     fs::remove_all(tmp);
 }
 
-TEST_CASE("daemon: probe specs seeded into orchestrator when probe is enabled") {
-    auto tmp = fs::temp_directory_path() / "fpvd-daemon-probe-seed";
-    fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
-    fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
-                  fs::copy_options::overwrite_existing);
-    fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+TEST_CASE("daemon: probe stream seeded only when dynamicLink is enabled") {
+    auto tmp = fs::temp_directory_path() / "fpvd-probe-dl-seed";
+    auto paths = makeRoutingPaths(tmp, 46850);
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
-    // Enable probe with MCS 5, then apply (dry) to re-seed the orchestrator.
-    auto pr = d.patchPending(nlohmann::json::parse(
-        R"({"probe":{"enabled":true,"mcsList":[5]}})"));
-    REQUIRE(pr.ok);
-    auto ar = d.apply(/*reallyRestart=*/false);
-    REQUIRE(ar.ok);
+    // dynamicLink disabled by default -> no probe specs.
+    CHECK(d.orchestrator().get("probe-tx") == nullptr);
+    CHECK(d.orchestrator().get("probe-feed") == nullptr);
 
-    CHECK(d.orchestrator().get("probe-tx-mcs5")   != nullptr);
-    CHECK(d.orchestrator().get("probe-feed-mcs5") != nullptr);
-
-    fs::remove_all(tmp);
-}
-
-TEST_CASE("status: includes probe summary") {
-    auto tmp = fs::temp_directory_path() / "fpvd-test-probe-status";
-    fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
-    fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
-    fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
-    fpvd::Daemon d(paths);
-    d.bootstrap(false);
-
-    auto pr = d.patchPending(nlohmann::json::parse(
-        R"({"probe":{"enabled":true,"mcsList":[3,5]}})"));
-    REQUIRE(pr.ok);
-    auto ar = d.apply(/*reallyRestart=*/false);
-    REQUIRE(ar.ok);
-
-    auto j = fpvd::buildStatus(d);
-    REQUIRE(j.contains("probe"));
-    CHECK(j["probe"]["enabled"] == true);
-    CHECK(j["probe"]["mcsList"] == nlohmann::json::array({3, 5}));
-
-    fs::remove_all(tmp);
-}
-
-TEST_CASE("apply: probe change triggers orchestrator rebuild (probe-tx-mcs5 appears)") {
-    // Fix 1: probe subtree changes must be detected by diffSubsystems() and
-    // fold into needsRebuild so seedOrchestrator() re-runs on a live apply.
-    auto tmp = fs::temp_directory_path() / "fpvd-probe-rebuild";
-    auto paths = makeRoutingPaths(tmp, 46830);
-    fpvd::Daemon d(paths);
-    d.bootstrap(false);
-
-    // Before the patch: probe disabled, no probe specs.
-    CHECK(d.orchestrator().get("probe-tx-mcs5") == nullptr);
-
+    // Enabling dynamicLink adds the probe pair WITHOUT a full rebuild: the video
+    // tx keeps its identity (no stopAll/startAll).
     REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"probe":{"enabled":true,"mcsList":[5]}})")).ok);
+        R"({"dynamicLink":{"enabled":true}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
+    CHECK(d.orchestrator().get("probe-tx")   != nullptr);
+    CHECK(d.orchestrator().get("probe-feed") != nullptr);
 
-    // After the apply: orchestrator must contain the probe specs.
-    CHECK(d.orchestrator().get("probe-tx-mcs5")   != nullptr);
-    CHECK(d.orchestrator().get("probe-feed-mcs5") != nullptr);
+    // Disabling removes them again.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":false}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+    CHECK(d.orchestrator().get("probe-tx") == nullptr);
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("status: probe summary reflects dynamicLink + running tx") {
+    auto tmp = fs::temp_directory_path() / "fpvd-probe-status";
+    auto paths = makeRoutingPaths(tmp, 46851);
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    auto j0 = fpvd::buildStatus(d);
+    REQUIRE(j0.contains("probe"));
+    CHECK(j0["probe"]["enabled"] == false);   // dynamicLink off
+
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+    auto j1 = fpvd::buildStatus(d);
+    CHECK(j1["probe"]["enabled"] == true);
+    CHECK(j1["probe"]["running"] == (d.orchestrator().get("probe-tx") != nullptr));
 
     fs::remove_all(tmp);
 }

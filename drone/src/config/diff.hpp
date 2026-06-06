@@ -9,7 +9,6 @@ struct SubsystemDiff {
     bool encoder{false};
     bool telemetry{false};
     bool dynamicLink{false};
-    bool probeChanged{false};
     std::set<std::string> servicesAffected{};
 };
 
