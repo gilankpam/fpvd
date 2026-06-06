@@ -32,6 +32,8 @@
 | `src/probe/probe_specs.hpp` / `.cpp` | modify | build ONE fixed FEC-off `wfb_tx` (+`-C`) + feeder at an initial MCS |
 | `src/config/schema.hpp` | modify | delete the `Probe` struct + `probe` field |
 | `src/config/diff.cpp` / `diff.hpp` | modify | delete `probeChanged` |
+| `src/config/validate.cpp` | modify | delete the probe-config validation block (`c.probe`) |
+| `tests/unit/test_probe_schema.cpp` | delete | drone probe schema is gone (also drop it from `CMakeLists.txt` `target_sources`) |
 | `src/daemon.cpp` | modify | seed/add/remove probe on `dynamicLink.enabled`; drop probe from `needsRebuild` |
 | `src/dynlink/controller.{hpp,cpp}` | modify | a probe `WfbControlClient`; retune to `min(mcs+1,7)` in `dispatchTxApply` |
 | `src/dynlink/runtime_config.{hpp,cpp}` | modify | carry the probe control port + ceiling into `DlRuntimeConfig` |
@@ -363,6 +365,12 @@ Add `#include "probe/probe_constants.hpp"` and `#include <algorithm>` to `daemon
     const bool needsRebuild = subs.telemetry ||
         !subs.servicesAffected.empty() || link.fullRestart;
 ```
+
+(b2) **Remove the drone's probe-config validation + test** (these reference the removed `Probe` struct, blocking the `fpvd_core` link):
+- In `src/config/validate.cpp`, delete the probe-validation block (the lines referencing `c.probe` around line 158 — the `c.probe.enabled`/`mcsList`/`basePort`/etc. checks). Verify with `grep -n "probe" src/config/validate.cpp` that none remain.
+- `git rm drone/tests/unit/test_probe_schema.cpp` and remove its line from `target_sources(fpvd_tests ...)` in `drone/CMakeLists.txt` (~line 78).
+
+> Removing `Config::probe` breaks the whole `fpvd_core` link until validate.cpp, diff.cpp (A3), daemon.cpp (A4), and status.cpp (A6) are all fixed — so this unit must land A3 + A4 + A6 + (b2) together to restore a green `./build/fpvd_tests`. Run the full build only after all are done.
 
 (c) In the **hot path** of `apply()` add probe add/remove on the dynamicLink transition. Locate the existing transition block (`daemon.cpp:378-388`):
 ```cpp
