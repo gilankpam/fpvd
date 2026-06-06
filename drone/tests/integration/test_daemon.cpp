@@ -730,7 +730,8 @@ TEST_CASE("status: probe summary reflects dynamicLink + running tx") {
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     auto j1 = fpvd::buildStatus(d);
     CHECK(j1["probe"]["enabled"] == true);
-    CHECK(j1["probe"]["running"] == (d.orchestrator().get("probe-tx") != nullptr));
+    CHECK(j1["probe"]["running"] == true);              // probe tx running
+    CHECK(d.orchestrator().get("probe-tx") != nullptr); // ...and seeded into the orchestrator
 
     fs::remove_all(tmp);
 }
