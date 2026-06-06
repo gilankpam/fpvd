@@ -44,6 +44,7 @@ target_sources(fpvd_core PRIVATE
     src/translate/waybeam.cpp
     src/waybeam/client.cpp
     src/translate/wfb.cpp
+    src/probe/probe_specs.cpp
     src/translate/wfb_control.cpp
     src/translate/telemetry.cpp
 
@@ -98,6 +99,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/integration/test_daemon.cpp
         tests/integration/test_http_server.cpp
         tests/integration/test_http_handlers.cpp
+        tests/unit/test_probe_specs.cpp
         tests/unit/test_dl_encoder_client.cpp
         tests/unit/test_dl_radio_txpower.cpp
         tests/unit/test_dl_hello.cpp
