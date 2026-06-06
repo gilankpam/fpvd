@@ -153,6 +153,31 @@ std::vector<ValidationError> validate(const Config& c) {
             errs.push_back({"dynamicLink.roiQp.step", "must be >= 1"});
     }
 
+    // probe
+    {
+        const auto& pr = c.probe;
+        if (pr.enabled) {
+            if (pr.mcsList.empty())
+                errs.push_back({"probe.mcsList", "must be non-empty when enabled"});
+            for (int m : pr.mcsList)
+                if (m < 0 || m > 7)
+                    errs.push_back({"probe.mcsList", "each MCS must be 0..7"});
+            if (pr.pps < 1 || pr.pps > 1000)
+                errs.push_back({"probe.pps", "must be 1..1000"});
+            if (pr.packetBytes < 12 || pr.packetBytes > 1445)
+                errs.push_back({"probe.packetBytes", "must be 12..1445"});
+            static const std::set<int> reserved{0, 16, 32, 144, 160};
+            for (size_t i = 0; i < pr.mcsList.size(); ++i) {
+                int port = pr.basePort + static_cast<int>(i);
+                if (reserved.count(port)) {
+                    errs.push_back({"probe.basePort",
+                        "probe radio_port collides with a reserved port (0/16/32/144/160)"});
+                    break;
+                }
+            }
+        }
+    }
+
     return errs;
 }
 
