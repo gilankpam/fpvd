@@ -119,7 +119,7 @@ On each `{mcs}` (or bandwidth) change, the drone recomputes the encoder bitrate 
 
 ```
 probe_kbps   = probe_pps × probe_packet_bytes × 8 / 1000             # constant (≈ 280 at 25 pps, 1400 B)
-probe_util   = probe_kbps / baseRate[bw][gi][min(mcs+1, maxMcs)]     # 0 when the probe idles (mcs = maxMcs)
+probe_util   = probe_kbps / baseRate[bw][gi][min(mcs+1, maxMcs)]     # clamps to maxMcs at the ceiling
 bitrate_kbps = min( cap, round( baseRate[bw][gi][mcs] × (2/3 - probe_util) × fec_data / fec_total ) )
              clamped to [min_bitrate_kbps, max_bitrate_kbps]
 ```
@@ -128,7 +128,7 @@ bitrate_kbps = min( cap, round( baseRate[bw][gi][mcs] × (2/3 - probe_util) × f
   - 20 MHz — long `[6500, 12000, 15500, 20000, 25000, 42000, 47500, 55000]`; short `[7200, 13400, 18700, 21900, 28300, 43800, 50000, 55200]`
   - 40 MHz — long `[9800, 18600, 30400, 40200, 55800, 80400, 90200, 97000]`; short `[12000, 24000, 36000, 48000, 60000, 91000, 98000, 100000]` (upstream has an obvious typo `980000` at 40/short/MCS6 — use `98000`)
 - `2/3` is the utilization factor; `fec_data/fec_total` is the FEC data fraction (`k/n`). Default `8/12` ⇒ factor = `4/9 ≈ 0.444` (e.g. MCS0/20/long → `6500 × 4/9 = 2888 kbps`, comfortably under the ~3.2 Mbps measured ceiling). **Naming gotcha:** the upstream calculator computes `floor((baseRate × 2 × fec_n + floor(3·fec_k/2)) / (3 × fec_k))` where **its `fec_n` is the *data* count and `fec_k` is the *total* count** — opposite to wfb's `-k` (data) / `-n` (total). The result is identical to `baseRate × 2/3 × data/total`.
-- **Probe airtime reserve** (added by the probe-plumbing design): the side-channel probe runs continuously while dynamic link is enabled, costing `probe_util` of channel airtime at its rung (`current+1`). Subtracting it from the `2/3` utilization keeps video + probe within the same committed-airtime budget — table-only, no airtime model. `probe_util` ≈ 0.7 % (probe on a high rung) up to ≈ 2.3 % at the floor, and is **0 at the ceiling** (the single probe stream idles when `mcs = maxMcs`), so video bitrate drops ≈ 0–3.5 %, largest where the channel is tightest. `probe_pps`/`probe_packet_bytes` are fixed constants (see the probe-plumbing design).
+- **Probe airtime reserve** (added by the probe-plumbing design): the side-channel probe runs continuously while dynamic link is enabled, costing `probe_util` of channel airtime at its rung (`current+1`). Subtracting it from the `2/3` utilization keeps video + probe within the same committed-airtime budget — table-only, no airtime model. The probe is **FEC-off (`k/n = 1/1`)**, so `probe_kbps` is its true on-air rate (no FEC inflation). `probe_util` ≈ 0.7 % (probe on a high rung) up to ≈ 2.3 % at the floor; at the ceiling the single stream **clamps to `maxMcs`** (re-reads the top rung rather than idling), so `probe_util` stays small-but-nonzero (~0.5 %). Net video bitrate drop ≈ 0.5–3.5 %, largest where the channel is tightest. `probe_pps`/`probe_packet_bytes` are fixed constants (see the probe-plumbing design).
 - GI = **long** (constant). Bandwidth from the commanded value.
 
 The bitrate jumps as a feed-forward on MCS change. **Open-loop by design** — the only thing that lowers bitrate under bad RF is the GS dropping MCS (which it does on PER), recomputing the formula down. The conservative `0.44` factor is the margin; §2.3 shows it sits safely under the real ceiling.
