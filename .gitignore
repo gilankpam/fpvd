@@ -10,3 +10,6 @@ __pycache__/
 .venv/
 *.egg-info/
 dist/
+
+# MVP validation rig (throwaway; kept local)
+tools/probe-mvp/
