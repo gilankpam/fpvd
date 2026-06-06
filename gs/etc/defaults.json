@@ -55,6 +55,5 @@
       "reencResolution": "1080p"
     },
     "extraArgs": []
-  },
-  "probe": { "enabled": false, "basePort": 50, "maxStreams": 4, "rxL": 50 }
+  }
 }
