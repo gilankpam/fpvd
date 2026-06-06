@@ -58,3 +58,12 @@ def test_load_and_persist_roundtrip(tmp_path):
     assert json.loads(overlay.read_text()) == {"link": {"channel": 100}}
     s2 = ConfigStore.load(str(defaults), str(overlay))
     assert s2.effective() == {"link": {"channel": 100}}
+
+
+def test_legacy_probe_key_in_overlay_does_not_break_load(tmp_path):
+    (tmp_path / "defaults.json").write_text(json.dumps({"link": {"channel": 1}}))
+    (tmp_path / "config.json").write_text(json.dumps({"probe": {"enabled": True}}))
+    store = ConfigStore.load(str(tmp_path / "defaults.json"),
+                             str(tmp_path / "config.json"))
+    eff = store.effective()           # must not raise
+    assert eff["link"]["channel"] == 1
