@@ -3,7 +3,7 @@
 from pathlib import Path
 
 LINK_KEYS = {"channel", "width", "txpower", "region", "linkId", "beamforming", "wlans"}
-CONFIG_TOP_KEYS = {"wfb", "drone", "dynamicLink", "pixelpilot"}   # link is excluded on purpose
+CONFIG_TOP_KEYS = {"wfb", "drone", "dynamicLink", "pixelpilot", "probe"}   # link is excluded on purpose
 DL_BANDWIDTHS = {20, 40}
 DL_PROFILES_DIR = Path(__file__).resolve().parent / "dynlink" / "profiles"
 ALL_TOP_KEYS = {"link"} | CONFIG_TOP_KEYS
@@ -51,6 +51,9 @@ def validate_effective(cfg: dict) -> None:
     pp = cfg.get("pixelpilot")
     if pp is not None:
         _validate_pixelpilot(pp)
+    probe = cfg.get("probe")
+    if probe is not None:
+        _validate_probe(probe)
 
 
 def _validate_dynamic_link(dl: dict) -> None:
@@ -118,3 +121,19 @@ def _validate_pixelpilot(pp: dict) -> None:
     extra = pp.get("extraArgs", [])
     if not isinstance(extra, list) or not all(isinstance(a, str) for a in extra):
         raise SchemaError("pixelpilot.extraArgs must be a list of strings")
+
+
+def _validate_probe(probe: dict) -> None:
+    if not isinstance(probe.get("enabled", False), bool):
+        raise SchemaError("probe.enabled must be a bool")
+    base_port = probe.get("basePort", 50)
+    if isinstance(base_port, bool) or not isinstance(base_port, int) or not 1 <= base_port <= 255:
+        raise SchemaError("probe.basePort must be an int in 1..255 (a wfb radio_port)")
+    max_streams = probe.get("maxStreams", 4)
+    if isinstance(max_streams, bool) or not isinstance(max_streams, int) or not 1 <= max_streams <= 8:
+        raise SchemaError("probe.maxStreams must be an int in 1..8")
+    if base_port + max_streams - 1 > 255:
+        raise SchemaError("probe.basePort + maxStreams exceeds radio_port 255")
+    rx_l = probe.get("rxL", 50)
+    if isinstance(rx_l, bool) or not isinstance(rx_l, int) or not 1 <= rx_l <= 1000:
+        raise SchemaError("probe.rxL must be an int in 1..1000 (ms)")
