@@ -33,8 +33,9 @@
 
 **Reserved `radio_port`s (must not collide):** video=0, tlm=16, tun=32, tlm-rx=144, tun-rx=160. Probe defaults start at `basePort=50`.
 
-**Build/test commands (run from `drone/`):**
-- Host tests: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build -j && ctest --test-dir build --output-on-failure`
+**Build/test commands (ALWAYS run from `drone/` — `test_daemon.cpp` copies a fixture via the relative path `tests/fixtures/defaults.json`, which only resolves when cwd is `drone/`):**
+- Configure + build: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build -j`
+- Run all tests: `./build/fpvd_tests`  ← run the binary directly from `drone/`. **Do NOT use `ctest`** (it runs from `build/` and the daemon fixture copy fails → 44 false failures). Baseline is 277/277 passing this way.
 - Run one test: `./build/fpvd_tests --test-case="<name>"`
 
 ---
@@ -552,8 +553,8 @@ Expected: PASS.
 
 - [ ] **Step 4: Run the full suite (no regressions)**
 
-Run: `ctest --test-dir build --output-on-failure`
-Expected: all pass.
+Run (from `drone/`): `./build/fpvd_tests`
+Expected: all pass (278+ cases, was 277 at baseline).
 
 - [ ] **Step 5: Commit**
 
