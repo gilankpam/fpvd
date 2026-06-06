@@ -80,10 +80,7 @@ class ProbeController:
     def status(self):
         with self._lock:
             st = dict(self._status)
-            mcs = {str(m): v for m, v in self._agg.snapshot().items()}
-            enabled = bool(self._snap.get("enabled"))
-        st["enabled"] = enabled
-        st["mcs"] = mcs
+            st["mcs"] = {str(m): v for m, v in self._agg.snapshot().items()}
         return st
 
     # ---- internals ------------------------------------------------------
@@ -138,29 +135,20 @@ class ProbeController:
         self._stop_event = asyncio.Event()
         snap = self._snap
         procs, tasks = [], []
-        enabled = bool(snap.get("enabled"))
         try:
-            if enabled:
-                base, n = int(snap["basePort"]), int(snap.get("maxStreams", 4))
-                for i in range(n):
-                    cmd = self._build_cmd(base + i, 7000 + i)   # 7000+i = throwaway sink (discarded)
-                    res = self._spawn(cmd)
-                    proc = await res if asyncio.iscoroutine(res) else res
-                    # append BEFORE creating the read task so a spawn failure on a
-                    # later stream still finds this proc in `procs` for cleanup.
-                    procs.append(proc)
-                    tasks.append(asyncio.ensure_future(self._read_stream(proc)))
-            # Observe-only and disabled-aware: a disabled controller spawns
-            # nothing and reports running=False (it still parks on stop_event so
-            # stop() can join the thread cleanly).
-            self._set(running=enabled, streams=len(procs))
+            cmd = self._build_cmd(int(snap["port"]), 7000)   # 7000 = throwaway sink
+            res = self._spawn(cmd)
+            proc = await res if asyncio.iscoroutine(res) else res
+            procs.append(proc)
+            tasks.append(asyncio.ensure_future(self._read_stream(proc)))
+            self._set(running=True, streams=len(procs))
             self._started.set()
             await self._stop_event.wait()
         finally:
-            # Runs on the normal stop path AND on a mid-loop spawn failure, so
-            # already-spawned wfb_rx procs are never orphaned holding radio_ports.
+            # Runs on normal stop AND on a spawn failure, so the wfb_rx is never
+            # orphaned holding the radio_port.
             self._set(running=False, streams=0)
-            self._started.set()   # ensure start() never hangs on a spawn failure
+            self._started.set()
             for p in procs:
                 try:
                     p.kill()
