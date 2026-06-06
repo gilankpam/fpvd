@@ -74,6 +74,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/unit/test_link_width.cpp
         tests/unit/test_sanity.cpp
         tests/unit/test_schema.cpp
+        tests/unit/test_probe_schema.cpp
         tests/unit/test_store.cpp
         tests/unit/test_validate.cpp
         tests/unit/test_diff.cpp

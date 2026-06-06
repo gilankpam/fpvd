@@ -28,7 +28,9 @@ TEST_CASE("schema: round-trip a minimal config through json") {
             "safe":{"mcs":1,"k":8,"n":12,"depth":1,
                     "bandwidth":20,"txPowerDbm":20,"bitrateKbps":2000}
         },
-        "services":{}
+        "services":{},
+        "probe":{"enabled":false,"mcsList":[],"pps":25,"packetBytes":1400,
+                 "basePort":50,"baseFeedPort":6700}
     })");
 
     Config c = j.get<Config>();
