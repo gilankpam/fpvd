@@ -162,11 +162,28 @@ std::vector<ValidationError> validate(const Config& c) {
             for (int m : pr.mcsList)
                 if (m < 0 || m > 7)
                     errs.push_back({"probe.mcsList", "each MCS must be 0..7"});
+            {
+                std::unordered_set<int> seen;
+                for (int m : pr.mcsList) {
+                    if (!seen.insert(m).second) {
+                        errs.push_back({"probe.mcsList", "must not contain duplicates"});
+                        break;
+                    }
+                }
+            }
             if (pr.pps < 1 || pr.pps > 1000)
                 errs.push_back({"probe.pps", "must be 1..1000"});
             if (pr.packetBytes < 12 || pr.packetBytes > 1445)
                 errs.push_back({"probe.packetBytes", "must be 12..1445"});
             static const std::set<int> reserved{0, 16, 32, 144, 160};
+            if (pr.baseFeedPort < 1024 ||
+                pr.baseFeedPort + static_cast<int>(pr.mcsList.size()) - 1 > 65535)
+                errs.push_back({"probe.baseFeedPort",
+                    "must keep baseFeedPort+streams within 1024..65535"});
+            if (pr.basePort < 0 || pr.basePort > 255 ||
+                pr.basePort + static_cast<int>(pr.mcsList.size()) - 1 > 255)
+                errs.push_back({"probe.basePort",
+                    "must keep basePort+streams within 0..255"});
             for (size_t i = 0; i < pr.mcsList.size(); ++i) {
                 int port = pr.basePort + static_cast<int>(i);
                 if (reserved.count(port)) {

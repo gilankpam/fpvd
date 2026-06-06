@@ -63,3 +63,26 @@ TEST_CASE("probe validate: accepts a sane enabled config") {
     auto errs = validate(c);
     for (auto& e : errs) CHECK(e.path.rfind("probe", 0) != 0);
 }
+
+TEST_CASE("probe validate: rejects duplicate MCS values") {
+    Config c{};
+    c.probe.enabled = true;
+    c.probe.mcsList = {5, 5};
+    CHECK(has_path(validate(c), "probe.mcsList"));
+}
+
+TEST_CASE("probe validate: rejects baseFeedPort=0 (below 1024)") {
+    Config c{};
+    c.probe.enabled = true;
+    c.probe.mcsList = {5};
+    c.probe.baseFeedPort = 0;
+    CHECK(has_path(validate(c), "probe.baseFeedPort"));
+}
+
+TEST_CASE("probe validate: rejects baseFeedPort that overflows 65535") {
+    Config c{};
+    c.probe.enabled = true;
+    c.probe.mcsList = {1, 2, 3};
+    c.probe.baseFeedPort = 65534;  // 65534 + 2 = 65536 > 65535
+    CHECK(has_path(validate(c), "probe.baseFeedPort"));
+}

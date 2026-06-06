@@ -273,7 +273,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     const bool encChanged = encRestart || encLive;
 
     // A full orchestrator rebuild is needed only for non-encoder subsystems.
-    const bool needsRebuild = subs.telemetry ||
+    const bool needsRebuild = subs.telemetry || subs.probeChanged ||
         !subs.servicesAffected.empty() || link.fullRestart;
 
     // Transactional LIVE push: apply before committing so a failed push fails the

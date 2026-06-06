@@ -729,6 +729,29 @@ TEST_CASE("status: includes probe summary") {
     fs::remove_all(tmp);
 }
 
+TEST_CASE("apply: probe change triggers orchestrator rebuild (probe-tx-mcs5 appears)") {
+    // Fix 1: probe subtree changes must be detected by diffSubsystems() and
+    // fold into needsRebuild so seedOrchestrator() re-runs on a live apply.
+    auto tmp = fs::temp_directory_path() / "fpvd-probe-rebuild";
+    auto paths = makeRoutingPaths(tmp, 46830);
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // Before the patch: probe disabled, no probe specs.
+    CHECK(d.orchestrator().get("probe-tx-mcs5") == nullptr);
+
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"probe":{"enabled":true,"mcsList":[5]}})")).ok);
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);
+
+    // After the apply: orchestrator must contain the probe specs.
+    CHECK(d.orchestrator().get("probe-tx-mcs5")   != nullptr);
+    CHECK(d.orchestrator().get("probe-feed-mcs5") != nullptr);
+
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("apply: writes the system-stats OSD line when dynamic-link is off") {
     auto tmp = fs::temp_directory_path() / "fpvd-osd-base";
     auto paths = makeRoutingPaths(tmp, 46820);

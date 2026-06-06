@@ -36,6 +36,7 @@ int main(int argc, char **argv) {
     if (connect(fd, (struct sockaddr *)&a, sizeof a) < 0) { perror("connect"); return 1; }
 
     unsigned char *buf = malloc(size);
+    if (!buf) { perror("malloc"); return 1; }
     memset(buf, 0xA5, size);
     memcpy(buf, "PRB0", 4);
 

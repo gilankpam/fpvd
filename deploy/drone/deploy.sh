@@ -50,16 +50,16 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
     ( cd "$CPP" && nix-shell --run "cmake -S . -B build/ssc338q \
         -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-ssc338q.cmake -DCMAKE_BUILD_TYPE=Release \
         && cmake --build build/ssc338q --target fpvd -j" )
+
+    # Cross-build the probe feeder (tiny static C binary; not part of the CMake CXX target).
+    ( cd "$CPP" && nix-shell --run \
+      "armv7l-unknown-linux-musleabihf-gcc -static -Os -o '$PROBE_FEEDER' src/probe/feeder.c && \
+       armv7l-unknown-linux-musleabihf-strip -s '$PROBE_FEEDER'" )
+    echo "[build] probe-feeder: $(stat -c %s "$PROBE_FEEDER") bytes"
 fi
 [ -f "$BIN" ] || { echo "[error] no binary at $BIN (build failed, or --skip-build with no prior build)"; exit 1; }
 ( cd "$CPP" && nix-shell --run "armv7l-unknown-linux-musleabihf-strip -s -o '$STRIPPED' '$BIN'" )
 echo "[build] stripped binary: $(stat -c %s "$STRIPPED") bytes"
-
-# Cross-build the probe feeder (tiny static C binary; not part of the CMake CXX target).
-( cd "$CPP" && nix-shell --run \
-  "armv7l-unknown-linux-musleabihf-gcc -static -Os -o '$PROBE_FEEDER' src/probe/feeder.c && \
-   armv7l-unknown-linux-musleabihf-strip -s '$PROBE_FEEDER'" )
-echo "[build] probe-feeder: $(stat -c %s "$PROBE_FEEDER") bytes"
 
 # ---- 2. detect install vs update ----------------------------------------
 if remote 'test -f /etc/init.d/S99fpvd'; then MODE=update; else MODE=install; fi
