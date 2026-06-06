@@ -13,6 +13,7 @@ from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot
 from .link import LinkCoordinator
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
+from .probe.config_build import make_probe_snapshot
 from .probe.controller import ProbeController
 from .runner_supervisor import RunnerSupervisor, ProcessSupervisor, resolve_wlans
 
@@ -72,14 +73,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     dynlink = DynamicLinkController(make_dl_snapshot(effective))
 
-    def _probe_snapshot(eff):
-        p = dict(eff.get("probe", {}))
-        p["key"] = "/etc/gs.key"
-        p["linkId"] = eff.get("link", {}).get("linkId")
-        p["wlans"] = resolve_wlans(eff)
-        return p
-
-    probe_ctrl = ProbeController(_probe_snapshot(effective), spawn=probe_spawn)
+    probe_ctrl = ProbeController(make_probe_snapshot(effective), spawn=probe_spawn)
 
     pixelpilot = ProcessSupervisor(
         argv=render_pixelpilot_argv(effective),
@@ -139,7 +133,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out,
-              dynlink=dynlink, pixelpilot=pixelpilot)
+              dynlink=dynlink, pixelpilot=pixelpilot, probe=probe_ctrl)
 
     http_server = make_http_server(api, host, port)
     return App(store, runner, http_server, api, dynlink,

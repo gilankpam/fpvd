@@ -105,8 +105,11 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
                     "reason": "", "hello": "none"}
 
     monkeypatch.setattr(supervisor, "DynamicLinkController", _StubController)
-    # Avoid spawning the real runner / radio probing.
+    # Avoid spawning the real runner / radio probing. make_probe_snapshot
+    # resolves wlans through its own module, so patch that too.
     monkeypatch.setattr(supervisor, "resolve_wlans", lambda cfg: ["wlan0"])
+    from fpvdgs.probe import config_build as _probe_cb
+    monkeypatch.setattr(_probe_cb, "resolve_wlans", lambda cfg: ["wlan0"])
 
     defaults = tmp_path / "defaults.json"
     defaults.write_text(json.dumps({
@@ -149,8 +152,11 @@ def test_status_has_probe_block(tmp_path, monkeypatch):
     import json
     from fpvdgs import supervisor
 
-    # Avoid spawning the real runner / radio probing.
+    # Avoid spawning the real runner / radio probing. make_probe_snapshot
+    # resolves wlans through its own module, so patch that too.
     monkeypatch.setattr(supervisor, "resolve_wlans", lambda cfg: ["wlan0"])
+    from fpvdgs.probe import config_build as _probe_cb
+    monkeypatch.setattr(_probe_cb, "resolve_wlans", lambda cfg: ["wlan0"])
 
     ready_port = _free_port()
     api_port = _free_port()
