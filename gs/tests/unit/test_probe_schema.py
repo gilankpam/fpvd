@@ -16,6 +16,12 @@ def test_probe_defaults_valid():
     {"enabled": True, "basePort": 70000},
     {"enabled": True, "maxStreams": 0},
     {"enabled": True, "rxL": -1},
+    # bool-coercion rejection on numeric fields
+    {"enabled": True, "basePort": True},
+    {"enabled": True, "maxStreams": True},
+    {"enabled": True, "rxL": True},
+    # cross-field overflow: 253+4-1 = 256 > 255
+    {"enabled": True, "basePort": 253, "maxStreams": 4},
 ])
 def test_probe_rejects(bad):
     cfg = {"link": {"width": 20, "region": "US", "channel": 161}, "probe": bad}
