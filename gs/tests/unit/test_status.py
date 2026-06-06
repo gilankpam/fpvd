@@ -70,19 +70,16 @@ def test_status_includes_pixelpilot_block():
     assert out["pixelpilot"]["pid"] == 42
 
 
-from fpvdgs import status as status_mod
-
-
 def test_build_status_includes_probe_when_present():
     drone_probe = {"reachable": True, "linkId": 7669206, "inSync": True}
-    j = status_mod.build_status("vX", {"running": True}, {}, drone_probe,
-                                probe={"enabled": True, "running": True,
-                                       "streams": 2, "mcs": {"3": {"per": 0.0}}})
+    j = build_status("vX", {"running": True}, {}, drone_probe,
+                     probe={"enabled": True, "running": True,
+                            "streams": 2, "mcs": {"3": {"per": 0.0}}})
     assert j["probe"]["enabled"] is True
     assert j["probe"]["mcs"]["3"]["per"] == 0.0
 
 
 def test_build_status_omits_probe_when_none():
-    j = status_mod.build_status("vX", {"running": True}, {},
-                                {"reachable": False, "linkId": 1, "inSync": None})
+    j = build_status("vX", {"running": True}, {},
+                     {"reachable": False, "linkId": 1, "inSync": None})
     assert "probe" not in j
