@@ -8,6 +8,7 @@
 #include "translate/wfb.hpp"
 #include "translate/wfb_control.hpp"
 #include "link_width.hpp"
+#include "probe/probe_specs.hpp"
 #include <chrono>
 #include <ctime>
 #include <fstream>
@@ -131,6 +132,11 @@ void Daemon::seedOrchestrator() {
                      : RestartPolicy::Never;
         orch_.add(std::move(spec));
     }
+
+    // Observe-only probe link: extra FEC-off wfb_tx + feeder per probe MCS.
+    static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
+    for (auto& s : buildProbeSpecs(effective_, iface, key, kProbeFeeder))
+        orch_.add(std::move(s));
 }
 
 void Daemon::restartOsd() {
