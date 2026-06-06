@@ -31,3 +31,9 @@ def test_aggregator_blackout_window_is_full_loss():
     agg = parser.McsAggregator(alpha=1.0)
     agg.on_pkt(mcs=7, data=0, lost=0)     # nothing decoded this window
     assert agg.snapshot()[7]["per"] == 1.0
+
+def test_aggregator_per_none_before_first_pkt():
+    agg = parser.McsAggregator()
+    agg.on_rx_ant(mcs=3, rssi=-55, snr=22)
+    assert agg.snapshot()[3]["per"] is None
+    assert agg.snapshot()[3]["windows"] == 0

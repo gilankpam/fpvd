@@ -18,7 +18,7 @@ def parse_line(line: str):
     kind = cols[1]
     try:
         if kind == "RX_ANT" and len(cols) >= 5:
-            freq, mcs, bw = (int(x) for x in cols[2].split(":"))
+            _freq, mcs, _bw = (int(x) for x in cols[2].split(":"))
             vals = [int(x) for x in cols[4].split(":")]
             if len(vals) < 7:
                 return None
