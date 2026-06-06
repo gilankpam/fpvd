@@ -37,7 +37,7 @@ class App:
         if self.store.effective().get("dynamicLink", {}).get("enabled"):
             self.dynlink.start()
         if (self.probe is not None
-                and self.store.effective().get("probe", {}).get("enabled")):
+                and self.store.effective().get("dynamicLink", {}).get("enabled")):
             self.probe.start()
 
     def serve_forever(self):
@@ -114,9 +114,9 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         return {"enabled": True, **pixelpilot.state()}
 
     def _probe_status():
-        if not store.effective().get("probe", {}).get("enabled"):
+        if not store.effective().get("dynamicLink", {}).get("enabled"):
             return {"enabled": False, "running": False}
-        return probe_ctrl.status()
+        return {"enabled": True, **probe_ctrl.status()}
 
     def status_fn():
         wlan_info = {w: status_mod.iw_info(w) for w in resolve_wlans(store.effective())}

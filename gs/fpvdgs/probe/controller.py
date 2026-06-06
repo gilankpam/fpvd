@@ -1,5 +1,5 @@
-"""GS-side probe measurement: spawn a FEC-off wfb_rx per probe radio_port,
-parse each one's stdout for per-MCS PER/RSSI. Threaded asyncio, mirroring
+"""GS-side probe measurement: spawn a single FEC-off wfb_rx on the fixed probe
+radio_port, parse its stdout for per-MCS PER/RSSI. Threaded asyncio, mirroring
 DynamicLinkController. Observe-only; independent of the wfb-ng runner."""
 from __future__ import annotations
 

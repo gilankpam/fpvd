@@ -320,8 +320,16 @@ def test_patch_config_accepts_pixelpilot(tmp_path):
     assert store.pending()["pixelpilot"]["videoScale"] == 1.5
 
 
-# --- probe apply routing (observe-only: must NEVER bounce the wfb runner) ---
-def _api_with_probe(tmp_path):
+# --- probe lifecycle rides the dynamicLink transition (no probe config) ---
+class _FakeProbe:
+    def __init__(self): self.started = False; self.cfgs = []
+    def start(self): self.started = True
+    def stop(self): self.started = False
+    def set_config(self, snap): self.cfgs.append(snap)
+    def status(self): return {"running": self.started, "streams": 1, "mcs": {}}
+
+
+def _api_with_dl_and_probe(tmp_path):
     from fpvdgs.api import Api
     from fpvdgs.config import ConfigStore
     from fpvdgs.drone_client import DroneClient
@@ -331,57 +339,35 @@ def _api_with_probe(tmp_path):
                          "linkId": 7669206, "wlans": ["wlan0"]},
                 "wfb": {"profile": "gs", "raw": {}},
                 "drone": {"endpoint": "http://10.5.0.10:8080"},
-                "probe": {"enabled": False, "basePort": 50, "maxStreams": 4,
-                          "rxL": 50}}
+                "dynamicLink": {"enabled": False, "maxMcs": 5, "bandwidth": 20,
+                                "txpower": {"min": 18, "max": 28},
+                                "radioProfile": "m8812eu2", "droneAddr": None,
+                                "dronePort": 9999, "tuning": {}}}
     store = ConfigStore(defaults)
-    ctrl = _FakeController()     # reused: records start/stop/set_config in .calls
+    ctrl = _FakeController()     # existing fake dynlink controller in this file
+    probe = _FakeProbe()
     runner = _FakeRunner()
     cfg_out = str(tmp_path / "wfb.cfg")
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=DroneClient("http://127.0.0.1:1"), link=None,
-              status_fn=lambda: {}, cfg_out=cfg_out, probe=ctrl)
-    return api, store, ctrl, runner
+              status_fn=lambda: {}, cfg_out=cfg_out, dynlink=ctrl, probe=probe)
+    return api, store, ctrl, probe, runner
 
 
-def test_enable_probe_starts_controller_without_bouncing_runner(tmp_path):
-    api, store, ctrl, runner = _api_with_probe(tmp_path)
-    store.patch({"probe": {"enabled": True}})
-    code, body = api.handle("POST", "/apply", {}, b"")
-    assert code == 200 and body["applied"] is True
-    assert ("start", None) in ctrl.calls
-    assert any(c[0] == "set_config" for c in ctrl.calls)
-    # THE CRITICAL REGRESSION: a probe-only apply must NOT bounce the runner.
-    assert runner.restarts == 0
-    assert store.effective()["probe"]["enabled"] is True
-
-
-def test_disable_probe_stops_controller(tmp_path):
-    api, store, ctrl, runner = _api_with_probe(tmp_path)
-    store.patch({"probe": {"enabled": True}})
-    api.handle("POST", "/apply", {}, b"")
-    store.patch({"probe": {"enabled": False}})
-    api.handle("POST", "/apply", {}, b"")
-    assert ("stop", None) in ctrl.calls
-    assert runner.restarts == 0
-
-
-def test_probe_tuning_change_while_enabled_calls_set_config(tmp_path):
-    api, store, ctrl, runner = _api_with_probe(tmp_path)
-    store.patch({"probe": {"enabled": True}})
-    api.handle("POST", "/apply", {}, b"")
-    ctrl.calls.clear()
-    store.patch({"probe": {"maxStreams": 3}})
-    api.handle("POST", "/apply", {}, b"")
-    assert any(c[0] == "set_config" for c in ctrl.calls)
-    assert ("start", None) not in ctrl.calls
-    assert ("stop", None) not in ctrl.calls
-    assert runner.restarts == 0
-
-
-def test_wfb_change_does_not_touch_probe(tmp_path):
-    api, store, ctrl, runner = _api_with_probe(tmp_path)
-    store.patch({"wfb": {"raw": {"common": {"foo": 1}}}})
+def test_enable_dynamiclink_starts_probe(tmp_path):
+    api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path)
+    store.patch({"dynamicLink": {"enabled": True}})
     code, _ = api.handle("POST", "/apply", {}, b"")
     assert code == 200
-    assert runner.restarts == 1          # non-probe wfb change: bounce
-    assert ctrl.calls == []              # probe controller untouched (stayed off)
+    assert ("start", None) in ctrl.calls and probe.started is True
+    assert runner.restarts == 0           # no video bounce
+
+
+def test_disable_dynamiclink_stops_probe(tmp_path):
+    api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path)
+    store.patch({"dynamicLink": {"enabled": True}})
+    api.handle("POST", "/apply", {}, b"")
+    store.patch({"dynamicLink": {"enabled": False}})
+    code, _ = api.handle("POST", "/apply", {}, b"")
+    assert code == 200
+    assert probe.started is False and runner.restarts == 0
