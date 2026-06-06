@@ -30,6 +30,13 @@ public:
     void setConfig(const DlRuntimeConfig& snap);  // hot reload (stub for now; Task 17 fills it)
     DlStatus status() const;                       // snapshot of published status
 
+    // Probe rung selector: the observe-only probe rides one rung above the video
+    // MCS, clamped to the hardware ceiling. Static + header-inline so it is unit
+    // testable without constructing the controller (which binds sockets/threads).
+    static int probeRungFor(int mcs, int ceiling) {
+        return mcs + 1 < ceiling ? mcs + 1 : ceiling;
+    }
+
 private:
     void run(int evfd);                            // the poll(2) loop (Tasks 14-17); evfd passed from start()
     void stopLocked();                             // assumes lifetimeMu_ is already held
@@ -57,6 +64,8 @@ private:
     // control thread), so they need no locking. Held by unique_ptr/optional
     // because their ctors take args and they are (re)constructed per start().
     std::unique_ptr<WfbControlClient> wfb_;
+    std::unique_ptr<WfbControlClient> probeWfb_;   // probe tx retune (nullptr if disabled)
+    int lastProbeMcs_{-1};                          // last rung pushed to the probe
     std::optional<EncoderClient>      enc_;
     std::optional<RadioTxpower>       radio_;
     std::optional<OsdWriter>          osd_;

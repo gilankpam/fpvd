@@ -99,6 +99,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/integration/test_http_server.cpp
         tests/integration/test_http_handlers.cpp
         tests/unit/test_probe_specs.cpp
+        tests/unit/test_probe_rung.cpp
         tests/unit/test_dl_encoder_client.cpp
         tests/unit/test_dl_radio_txpower.cpp
         tests/unit/test_dl_hello.cpp

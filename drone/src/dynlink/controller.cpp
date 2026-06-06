@@ -121,6 +121,12 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap, uint32_t generati
     // Construct backend clients fresh from the snapshot + endpoints. They are
     // used only from the run() thread, so no locking is needed on them.
     wfb_      = std::make_unique<WfbControlClient>(ep_.wfbCtlAddr, ep_.wfbCtlPort);
+    // Probe retune client: built only when a control port is configured; a fresh
+    // unique_ptr per start() (reset first) so a stop()+start() cycle rebuilds it,
+    // mirroring wfb_. Held nullptr when the probe is disabled.
+    probeWfb_.reset();
+    if (snap.probeCtlPort != 0)
+        probeWfb_ = std::make_unique<WfbControlClient>("127.0.0.1", snap.probeCtlPort);
     enc_.emplace(wb_, snap.minIdrIntervalMs, snap.roiQp);
     radio_.emplace(snap.iface);
     osd_.emplace(ep_.osdMsgPath, snap.osdEnabled, ep_.osdUpdateIntervalMs, snap.osdDebugLatency);
@@ -138,6 +144,7 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap, uint32_t generati
     lastRadio_ = Decision{};
     lastEnc_ = Decision{};
     lastApplied_ = Decision{};
+    lastProbeMcs_ = -1;            // force the probe to re-tune on the first decision
     lastDecisionMs_ = 0;
 
     int efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -197,6 +204,21 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
                        /*ldpc=*/cfg.ldpc, /*shortGi=*/false,
                        /*bandwidth=*/d.bandwidth, /*mcs=*/d.mcs,
                        /*vhtMode=*/false, /*vhtNss=*/1);
+        // Retune the observe-only probe to current+1 (clamped), mirroring the
+        // video PHY flags. Best-effort: a soft failure (probe not yet up) is
+        // retried on the next decision. The probe rides its own radio_port, so
+        // this never touches the video stream.
+        if (probeWfb_) {
+            int rung = probeRungFor(d.mcs, cfg.probeMcsCeiling);
+            if (rung != lastProbeMcs_) {
+                probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0),
+                                    cfg.ldpc, /*shortGi=*/false,
+                                    /*bandwidth=*/d.bandwidth,
+                                    /*mcs=*/static_cast<uint8_t>(rung),
+                                    /*vhtMode=*/false, /*vhtNss=*/1);
+                lastProbeMcs_ = rung;
+            }
+        }
     }
     lastTx_ = d;
 }
@@ -217,6 +239,14 @@ void DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
                    /*ldpc=*/cfg.ldpc, /*shortGi=*/false,
                    /*bandwidth=*/cfg.safe.bandwidth, /*mcs=*/cfg.safe.mcs,
                    /*vhtMode=*/false, /*vhtNss=*/1);
+    // Move the probe down with the video on a watchdog safe-recovery so it never
+    // sits above the (now reduced) video rung. Best-effort, like dispatchTxApply.
+    if (probeWfb_) {
+        int rung = probeRungFor(cfg.safe.mcs, cfg.probeMcsCeiling);
+        probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc, false,
+                            cfg.safe.bandwidth, static_cast<uint8_t>(rung), false, 1);
+        lastProbeMcs_ = rung;
+    }
 }
 
 // ---- poll loop --------------------------------------------------------------

@@ -35,6 +35,8 @@ struct DlRuntimeConfig {
     // these config values through unchanged rather than the old hardcoded 0/false.
     bool     stbc;
     bool     ldpc;
+    uint16_t probeCtlPort{0};   // probe wfb_tx -C port; 0 disables probe retune
+    int      probeMcsCeiling{7};
     std::string  iface;
 };
 
