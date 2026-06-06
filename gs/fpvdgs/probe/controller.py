@@ -69,7 +69,12 @@ class ProbeController:
             with self._lock:
                 self._snap = dict(snapshot)
                 self._agg = McsAggregator(alpha=self._alpha)
-            if running and snapshot.get("enabled"):
+            # Restart unconditionally if it was running (mirrors the sibling
+            # DynamicLinkController). A disabled snapshot just re-runs _run,
+            # spawns nothing, reports running=False and parks — restarting on a
+            # disable→enable round-trip would otherwise be impossible, since the
+            # disabling set_config clears _thread.
+            if running:
                 self.start()
 
     def status(self):
@@ -105,16 +110,11 @@ class ProbeController:
                 self._started.set()   # unblock start() even on early failure
 
     def _build_cmd(self, port: int, sink: int) -> list[str]:
-        # wfb_rx (rx.cpp getopt "K:fa:c:u:U:p:l:i:e:R:s:") — every short option
-        # takes optarg via atoi, so the attached form ("-l50") is valid and
-        # parses identically to the separated form. We attach the log_interval
-        # value to keep the radio_port the only standalone numeric token (the
-        # downstream parser/aggregator routes per radio_port), so rxL can never
-        # be mistaken for a port.
+        # wfb_rx (rx.cpp getopt "K:fa:c:u:U:p:l:i:e:R:s:") — -l is the log_interval.
         snap = self._snap
         return [WFB_RX, "-K", str(snap["key"]), "-i", str(snap["linkId"]),
                 "-p", str(port), "-c", "127.0.0.1", "-u", str(sink),
-                "-l%d" % int(snap.get("rxL", 50)), *list(snap["wlans"])]
+                "-l", str(snap.get("rxL", 50)), *list(snap["wlans"])]
 
     async def _read_stream(self, proc):
         cur_mcs = None
@@ -137,25 +137,30 @@ class ProbeController:
     async def _run(self):
         self._stop_event = asyncio.Event()
         snap = self._snap
-        enabled = bool(snap.get("enabled"))
         procs, tasks = [], []
-        if enabled:
-            base, n = int(snap["basePort"]), int(snap.get("maxStreams", 4))
-            for i in range(n):
-                cmd = self._build_cmd(base + i, 7000 + i)   # 7000+i = throwaway sink (discarded)
-                res = self._spawn(cmd)
-                proc = await res if asyncio.iscoroutine(res) else res
-                procs.append(proc)
-                tasks.append(asyncio.ensure_future(self._read_stream(proc)))
-        # Observe-only and disabled-aware: a disabled controller spawns nothing
-        # and reports running=False (it still parks on stop_event so stop() can
-        # join the thread cleanly).
-        self._set(running=enabled, streams=len(procs))
-        self._started.set()
+        enabled = bool(snap.get("enabled"))
         try:
+            if enabled:
+                base, n = int(snap["basePort"]), int(snap.get("maxStreams", 4))
+                for i in range(n):
+                    cmd = self._build_cmd(base + i, 7000 + i)   # 7000+i = throwaway sink (discarded)
+                    res = self._spawn(cmd)
+                    proc = await res if asyncio.iscoroutine(res) else res
+                    # append BEFORE creating the read task so a spawn failure on a
+                    # later stream still finds this proc in `procs` for cleanup.
+                    procs.append(proc)
+                    tasks.append(asyncio.ensure_future(self._read_stream(proc)))
+            # Observe-only and disabled-aware: a disabled controller spawns
+            # nothing and reports running=False (it still parks on stop_event so
+            # stop() can join the thread cleanly).
+            self._set(running=enabled, streams=len(procs))
+            self._started.set()
             await self._stop_event.wait()
         finally:
+            # Runs on the normal stop path AND on a mid-loop spawn failure, so
+            # already-spawned wfb_rx procs are never orphaned holding radio_ports.
             self._set(running=False, streams=0)
+            self._started.set()   # ensure start() never hangs on a spawn failure
             for p in procs:
                 try:
                     p.kill()

@@ -2,7 +2,10 @@ import asyncio
 from fpvdgs.probe.controller import ProbeController
 
 def _snap(**over):
-    s = {"enabled": True, "basePort": 50, "maxStreams": 2, "rxL": 50,
+    # rxL=20 deliberately avoids colliding with the radio_ports (50/51) or the
+    # throwaway sink ports (7000/7001) so the "50"/"51" routing in the tests
+    # below matches only the -p port token.
+    s = {"enabled": True, "basePort": 50, "maxStreams": 2, "rxL": 20,
          "key": "/etc/gs.key", "linkId": 7669206, "wlans": ["wlanA", "wlanB"]}
     s.update(over)
     return s
@@ -68,5 +71,73 @@ def test_disabled_spawns_nothing():
     try:
         assert spawned == []
         assert c.status()["running"] is False
+    finally:
+        c.stop()
+
+
+def _wait_until(pred, timeout=2.0, interval=0.01):
+    """Poll pred() until truthy or timeout. Returns pred()'s last value."""
+    import time
+    deadline = time.monotonic() + timeout
+    val = pred()
+    while not val and time.monotonic() < deadline:
+        time.sleep(interval)
+        val = pred()
+    return val
+
+
+def test_spawn_failure_cleans_up_prior_procs():
+    # Fix-1 regression: a spawn that succeeds for stream 0 (-p 50) but RAISES on
+    # stream 1 (-p 51) must not orphan the stream-0 wfb_rx. The _run finally
+    # block kills it; the loop thread tears down and start() must not hang.
+    made = []
+    def spawn(cmd):
+        if "51" in cmd:
+            raise RuntimeError("boom")
+        p = _FakeProc([]); made.append(p); return p
+    c = ProbeController(_snap(), spawn=spawn)
+    c.start()   # must return (not hang) even though _run raised
+    try:
+        # the stream-0 proc is killed by _run's finally as the loop unwinds
+        assert _wait_until(lambda: made and all(p.killed for p in made))
+    finally:
+        c.stop()
+    assert made and all(p.killed for p in made)   # stream 0 killed, not orphaned
+    assert c.status()["running"] is False
+
+
+def test_hot_reconfig_changes_stream_count():
+    # Fix-2 regression (restart path): a running controller restarts on
+    # set_config and reflects the new maxStreams.
+    c = ProbeController(_snap(maxStreams=2), spawn=lambda cmd: _FakeProc([]))
+    c.start()
+    try:
+        assert _wait_until(lambda: c.status()["streams"] == 2)
+        c.set_config(_snap(maxStreams=3))
+        assert _wait_until(lambda: c.status()["streams"] == 3)
+        assert c.status()["running"] is True
+    finally:
+        c.stop()
+
+
+def test_disable_enable_round_trip_respawns():
+    # Fix-2 trap regression: disable clears _thread; the OLD guard
+    # (`running and enabled`) computed running=False on the later enable and
+    # never restarted. The unconditional `if running` guard must respawn.
+    spawned = []
+    def spawn(cmd):
+        spawned.append(cmd)
+        return _FakeProc([])
+    c = ProbeController(_snap(maxStreams=2), spawn=spawn)
+    c.start()
+    try:
+        assert _wait_until(lambda: c.status()["streams"] == 2)
+        c.set_config(_snap(enabled=False))
+        assert _wait_until(lambda: c.status()["running"] is False)
+        before = len(spawned)
+        c.set_config(_snap(enabled=True, maxStreams=2))
+        assert _wait_until(lambda: c.status()["running"] is True)
+        assert _wait_until(lambda: c.status()["streams"] == 2)
+        assert len(spawned) == before + 2   # genuinely respawned after re-enable
     finally:
         c.stop()
