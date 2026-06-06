@@ -41,8 +41,8 @@ SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o LogLevel=error
 remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 copy()   { scp -O "${SSH_OPTS[@]}" "$1" "$TARGET:$2"; }
 
-STRIPPED="$(mktemp)"; INIT="$(mktemp)"
-trap 'rm -f "$STRIPPED" "$INIT"' EXIT
+STRIPPED="$(mktemp)"; INIT="$(mktemp)"; PROBE_FEEDER="$(mktemp)"
+trap 'rm -f "$STRIPPED" "$INIT" "$PROBE_FEEDER"' EXIT
 
 # ---- 1. build (cross, Release) + strip ----------------------------------
 if [ "$SKIP_BUILD" -eq 0 ]; then
@@ -55,6 +55,12 @@ fi
 ( cd "$CPP" && nix-shell --run "armv7l-unknown-linux-musleabihf-strip -s -o '$STRIPPED' '$BIN'" )
 echo "[build] stripped binary: $(stat -c %s "$STRIPPED") bytes"
 
+# Cross-build the probe feeder (tiny static C binary; not part of the CMake CXX target).
+( cd "$CPP" && nix-shell --run \
+  "armv7l-unknown-linux-musleabihf-gcc -static -Os -o '$PROBE_FEEDER' src/probe/feeder.c && \
+   armv7l-unknown-linux-musleabihf-strip -s '$PROBE_FEEDER'" )
+echo "[build] probe-feeder: $(stat -c %s "$PROBE_FEEDER") bytes"
+
 # ---- 2. detect install vs update ----------------------------------------
 if remote 'test -f /etc/init.d/S99fpvd'; then MODE=update; else MODE=install; fi
 echo "[mode]  $MODE  ($TARGET)"
@@ -65,6 +71,7 @@ remote 'mkdir -p /etc/fpvd /usr/libexec/fpvd'
 copy "$STRIPPED"                   /usr/bin/fpvd.new
 copy "$CPP/scripts/radio-up.sh"   /usr/libexec/fpvd/radio-up.sh
 copy "$CPP/scripts/radio-tune.sh" /usr/libexec/fpvd/radio-tune.sh
+copy "$PROBE_FEEDER"              /usr/libexec/fpvd/probe-feeder
 copy "$CPP/etc/defaults.json"     /etc/fpvd/defaults.json   # baseline; overlay /etc/fpvd/config.json (user edits) is untouched
 
 # init script: manual-deploy variant — /rom is read-only on a live system, so
@@ -96,7 +103,7 @@ case "$1" in
 esac
 EOF
 copy "$INIT" /etc/init.d/S99fpvd
-remote 'chmod +x /usr/bin/fpvd.new /usr/libexec/fpvd/radio-up.sh /usr/libexec/fpvd/radio-tune.sh /etc/init.d/S99fpvd'
+remote 'chmod +x /usr/bin/fpvd.new /usr/libexec/fpvd/radio-up.sh /usr/libexec/fpvd/radio-tune.sh /usr/libexec/fpvd/probe-feeder /etc/init.d/S99fpvd'
 
 # ---- 4. switch over / restart -------------------------------------------
 if [ "$MODE" = install ]; then
