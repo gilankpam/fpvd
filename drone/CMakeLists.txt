@@ -30,6 +30,7 @@ target_sources(fpvd_core PRIVATE
     src/dynlink/encoder_client.cpp
     src/dynlink/radio_txpower.cpp
     src/dynlink/roi_qp.cpp
+    src/dynlink/bitrate.cpp
     src/dynlink/watchdog.cpp
     src/dynlink/wire.cpp
     src/dynlink/hello.cpp
@@ -89,6 +90,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 
         tests/unit/test_dl_apply_direction.cpp
         tests/unit/test_dl_roi_qp.cpp
+        tests/unit/test_dl_bitrate.cpp
         tests/integration/test_process.cpp
         tests/integration/test_supervisor.cpp
         tests/integration/test_orchestrator.cpp
