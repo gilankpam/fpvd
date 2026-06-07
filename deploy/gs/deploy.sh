@@ -93,7 +93,16 @@ remote '
     killall -q pixelpilot pixelpilot.sh 2>/dev/null || true
     sleep 1
     : > /tmp/fpvd.log
-    /etc/init.d/S99fpvd restart   # restart: reloads code on re-deploy; starts on first install
+    # Explicit stop + settle + clear stale pidfile, then start — NOT `restart`.
+    # `restart` is stop;sleep 1;start: the 1s settle is too short, so the new fpvd
+    # races the old one for its ports and dies just after "Starting fpvd: OK",
+    # leaving a stale /var/run/fpvd.pid (the documented restart race — observed
+    # live 2026-06-07 deploying the probe-driven selector: video dropped until a
+    # manual `rm pidfile; S99fpvd start`). Mirrors the drone deploy fix (935424d).
+    /etc/init.d/S99fpvd stop >/dev/null 2>&1 || true
+    sleep 2
+    rm -f /var/run/fpvd.pid
+    /etc/init.d/S99fpvd start
 '
 
 echo "[verify]"
