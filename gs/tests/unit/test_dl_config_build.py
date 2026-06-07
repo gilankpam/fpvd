@@ -102,3 +102,18 @@ def test_learned_prior_defaults_when_absent():
     assert cfg.learned_prior.enabled is True
     assert cfg.learned_prior.bin_width_db == 2.0
     assert cfg.flightlog.enabled is True
+
+
+def test_flightlog_dir_default_is_dvr_and_gap_default():
+    from fpvdgs.dynlink.config_build import build_policy_config
+    cfg = build_policy_config({"tuning": {}})
+    assert cfg.flightlog.dir == "/media/dvr/log/dynamic-link/"
+    assert cfg.flightlog.flight_gap_s == 15.0
+
+
+def test_flightlog_flight_gap_s_parsed():
+    from fpvdgs.dynlink.config_build import build_policy_config
+    cfg = build_policy_config({"tuning": {"learned_prior": {"flightlog": {
+        "flight_gap_s": 8.0, "dir": "/tmp/fl"}}}})
+    assert cfg.flightlog.flight_gap_s == 8.0
+    assert cfg.flightlog.dir == "/tmp/fl"

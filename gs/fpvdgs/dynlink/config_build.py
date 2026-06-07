@@ -226,9 +226,10 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
     )
     flightlog = FlightLogConfig(
         enabled=bool(fl_raw.get("enabled", True)),
-        dir=str(fl_raw.get("dir", "/etc/fpvd/flightlog")),
+        dir=str(fl_raw.get("dir", "/media/dvr/log/dynamic-link/")),
         max_files=int(fl_raw.get("max_files", 8)),
         max_mb=float(fl_raw.get("max_mb", 4.0)),
+        flight_gap_s=float(fl_raw.get("flight_gap_s", 15.0)),
     )
 
     return PolicyConfig(

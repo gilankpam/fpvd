@@ -16,9 +16,10 @@ log = logging.getLogger("fpvdgs.dynlink")
 @dataclass
 class FlightLogConfig:
     enabled: bool = True
-    dir: str = "/etc/fpvd/flightlog"
+    dir: str = "/media/dvr/log/dynamic-link/"
     max_files: int = 8
     max_mb: float = 4.0
+    flight_gap_s: float = 15.0   # link gone > this (s) => next healthy tick = new flight file
 
 
 class FlightLog:
