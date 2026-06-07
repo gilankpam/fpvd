@@ -36,11 +36,10 @@ from fpvdgs.dynlink.wire import Hello
 PACKAGED_DIR = Path(__file__).resolve().parents[2] / "fpvdgs" / "dynlink" / "profiles"
 
 
-def _sigs(ts_ms: float, *, snr: float, residual_loss: float = 0.0,
+def _sigs(ts_ms: float, *, residual_loss: float = 0.0,
           fec_work: float = 0.0, link_starved: bool = False) -> Signals:
     return Signals(
         rssi=-55.0, rssi_min_w=-55.0, rssi_max_w=-55.0,
-        snr=snr, snr_min_w=snr, snr_max_w=snr,
         residual_loss_w=residual_loss, fec_work=fec_work,
         timestamp=ts_ms / 1000.0,
         link_starved_w=link_starved,
@@ -78,9 +77,7 @@ def test_dynamic_fec_stays_within_bounds_over_50_ticks():
                    [0.0] * 12 + [0.02] * 5 + [0.0] * 5
     decisions = []
     for i, loss in enumerate(loss_pattern):
-        # SNR sweep gives the leading selector room to step MCS.
-        snr = 20.0 + (i % 15)
-        d = p.tick(_sigs(i * 100.0, snr=snr, residual_loss=loss,
+        d = p.tick(_sigs(i * 100.0, residual_loss=loss,
                          fec_work=0.05 if loss > 0 else 0.0))
         decisions.append(d)
 
@@ -109,7 +106,7 @@ def test_dynamic_fec_emit_gate_debounces_solo_kn_changes():
                    [0.0] * 20
     decisions = []
     for i, loss in enumerate(loss_pattern):
-        d = p.tick(_sigs(i * 100.0, snr=28.0, residual_loss=loss,
+        d = p.tick(_sigs(i * 100.0, residual_loss=loss,
                          fec_work=0.05 if loss > 0 else 0.0))
         decisions.append(d)
 
@@ -134,7 +131,7 @@ def test_dynamic_fec_first_tick_always_emits_computed_values():
     the safe defaults — because EmitGate has no prior state."""
     p = _build_policy()
     safe = p.cfg.safe
-    d = p.tick(_sigs(0.0, snr=25.0))
+    d = p.tick(_sigs(0.0))
     # The decision should reflect computed dynamic-FEC values, not the
     # SafeDefaults pre-sync placeholder. With mtu=1400, fps=60 and a
     # real bitrate, k will be at the k_min floor (4) or above.
@@ -160,9 +157,9 @@ def test_death_spiral_does_not_oversubscribe_wire():
     from fpvdgs.dynlink.bitrate import compute_wire_target_kbps
 
     prof = load_profile("m8812eu2", [PACKAGED_DIR])
-    # Force MCS to stay at 0 by using a very low SNR.  The gate's
-    # emergency_loss_rate fires at 5 % loss, stepping MCS down; the
-    # low SNR prevents any climb back up.
+    # MCS stays at the floor: the gate's emergency_loss_rate fires at
+    # 5 % loss, stepping MCS down, and with no probe wired the selector
+    # can never promote back up.
     cfg = PolicyConfig(
         leading=LeadingLoopConfig(
             tx_power_min_dBm=5.0, tx_power_max_dBm=30.0,
@@ -182,10 +179,10 @@ def test_death_spiral_does_not_oversubscribe_wire():
     for tick_i in range(60):
         loss = 0.05 if tick_i < 30 else 0.0
         fec_pressure = 0.20 if loss > 0 else 0.0
-        # SNR=2 keeps the selector near the floor and prevents MCS climbs.
+        # No probe wired → the selector never promotes; the 5% loss
+        # emergency keeps the selector pinned near the floor.
         sigs = _sigs(
             tick_i * 100.0,
-            snr=2.0,
             residual_loss=loss,
             fec_work=fec_pressure,
         )

@@ -40,10 +40,9 @@ log = logging.getLogger(__name__)
 class LeadingLoopConfig:
     """Static / hardware-side knobs that aren't part of the gate.
 
-    The dual-gate selector (Channel A SNR-margin / Channel B emergency)
-    lives in `GateConfig` and `ProfileSelectionConfig`. This dataclass
-    only carries the inputs the selector needs from the radio side
-    plus deprecated keys kept for back-compat YAML parsing.
+    Carries the TX-power range and bandwidth the probe-driven selector
+    needs from the radio side, plus deprecated keys kept for back-compat
+    YAML parsing (parsed and ignored by the current selector).
     """
     bandwidth: int = 20
     # MCS-coupled TX power: power = max - (mcs / max_mcs) * (max - min).
@@ -178,25 +177,24 @@ class LeadingState:
     # condition holds in tests where ts_ms starts near zero.
     last_change_time_ms: float = -1.0e9
     last_mcs_change_time_ms: float = -1.0e9
-    up_confidence_count: int = 0           # alink_gs confidence loop
-    up_target_mcs: int = -1                # MCS the confidence counter aims at
 
 
 class LeadingSelector:
-    """MCS / TX power selector — dual-gate (Channel A SNR-margin / B
-    emergency).
+    """MCS / TX power selector — probe-driven promote + reactive demote.
 
-    Port of `alink_gs.ProfileSelector.select()` adapted to dynamic-link's
-    split-loop architecture. The selector decides MCS only; FEC ladder,
-    bitrate, and depth are computed downstream by the trailing loop and
-    bitrate helper.
+    The selector decides MCS only; FEC ladder, bitrate, and depth are
+    computed downstream by the trailing loop and bitrate helper.
 
-    Channel A (slow/symmetric): SNR-margin hysteresis with predictive
-    horizon (snr_slope) and confidence-loop gating on upgrades.
+    Promote (slow/deliberate): the `current+1` probe rung must read
+    clean (EWMA success `1 - per >= probe_viable_threshold`) and fresh
+    (sample age `<= probe_freshness_ms`) for `promote_debounce_windows`
+    consecutive ticks. The climb naturally stops at the ceiling — a
+    cliffed `current+1` rung (per≈1.0, or absent) never debounces.
 
-    Channel B (fast/asymmetric): emergency triggers — loss_rate,
-    fec_pressure, or link_starved force an immediate one-step
-    downgrade, bypassing rate limit and hold timers.
+    Demote (fast/reactive): the Channel-B emergency triggers (loss_rate,
+    fec_pressure, or link_starved) and a video on-air PER breach
+    (`loss_rate >= video_demote_per`) force an immediate one-step
+    downgrade, bypassing the promote rate limit and hold timers.
 
     TX power follows MCS via inverse coupling: low MCS → high power,
     high MCS → low power. Atomic per tick.
@@ -222,8 +220,9 @@ class LeadingSelector:
                 f"profile {profile.name!r} (mcs_min={profile.mcs_min}, "
                 f"mcs_max={profile.mcs_max})"
             )
-        # rows: descending by MCS (highest first), to match how
-        # _pick_mcs walks the table.
+        # rows: descending by MCS (highest first). `_row()` and
+        # `current_row` look up the table by MCS; the probe-driven
+        # selector no longer walks it by SNR margin.
         rows = profile.snr_mcs_map(
             leading.bandwidth,
             snr_margin_db=0.0,           # static margin lives in gate
@@ -243,6 +242,9 @@ class LeadingSelector:
             tx_power_dBm=leading.tx_power_max_dBm,  # survival: start at max
         )
         self._reasons: list[str] = []
+        # Consecutive ticks the current+1 probe rung has read clean+fresh.
+        # Resets on any blip, stale read, demote, or applied promote.
+        self._promote_clean = 0
 
     # ---- helpers ----
 
@@ -255,29 +257,6 @@ class LeadingSelector:
     @property
     def current_row(self) -> MCSRow:
         return self._row(self.state.current_mcs)
-
-    def _stress_margin_dB(self, loss_rate: float, fec_pressure: float) -> float:
-        return (
-            self.gate.snr_safety_margin
-            + max(0.0, loss_rate) * self.gate.loss_margin_weight
-            + max(0.0, fec_pressure) * self.gate.fec_margin_weight
-        )
-
-    def _margin(self, mcs: int, snr_ema: float,
-                loss_rate: float, fec_pressure: float) -> float:
-        """Margin (dB) of `snr_ema` above the stress-widened MCS floor."""
-        floor = self._row(mcs).snr_floor_dB
-        return snr_ema - floor - self._stress_margin_dB(loss_rate, fec_pressure)
-
-    def _pick_mcs(self, snr_ema: float, loss_rate: float,
-                  fec_pressure: float) -> int:
-        """Highest MCS whose stress-widened threshold is cleared."""
-        for r in self.rows:                # rows are high-MCS first
-            if r.mcs > self._cap_mcs:
-                continue
-            if self._margin(r.mcs, snr_ema, loss_rate, fec_pressure) >= 0:
-                return r.mcs
-        return self.profile.mcs_min        # below MCS0 floor — bottom row
 
     def _emergency_active(
         self, loss_rate: float, fec_pressure: float, link_starved: bool
@@ -298,222 +277,99 @@ class LeadingSelector:
                    - self.leading.tx_power_min_dBm)
         )
 
-    def _try_confidence_feed(self, target: int, loss_rate: float) -> None:
-        """Bump the upward-confidence counter even when hysteresis blocks,
-        so when conditions improve the upgrade fires quickly."""
-        cur = self.state.current_mcs
-        if cur < 0 or target <= cur:
-            return
-        # Cap by max_mcs_step_up.
-        if self.gate.max_mcs_step_up > 0:
-            target = min(target, cur + self.gate.max_mcs_step_up)
-        if target == cur:
-            return
-        if loss_rate > 0:
-            if self.state.up_confidence_count > 0:
-                self._reasons.append(
-                    f"climb_blocked residual_loss={loss_rate:.3f} "
-                    f"mcs {self.state.current_mcs}->{target}"
-                )
-            self.state.up_confidence_count = 0
-            self.state.up_target_mcs = -1
-            return
-        if target != self.state.up_target_mcs:
-            self.state.up_target_mcs = target
-            self.state.up_confidence_count = 1
-        else:
-            self.state.up_confidence_count += 1
-
     # ---- main entry ----
 
     def select(
         self,
-        snr_ema: float | None,
-        snr_slope: float,
+        *,
+        probe: dict | None,
         loss_rate: float,
         fec_pressure: float,
         link_starved: bool,
         ts_ms: float,
-        snr_raw: float | None = None,
     ) -> tuple[int, float, bool]:
-        """Decide MCS for this tick. Returns (mcs, tx_power_dBm, changed).
+        """Probe-driven promote + reactive demote.
 
-        Asymmetric SNR: `snr_ema` (smoothed) gates upgrades — stable,
-        slow, ignores single-tick spikes. `snr_raw` (latest per-window
-        max(snr_avg) across antennas) gates downgrades — fresh, fast,
-        catches fast fades within one tick instead of waiting ~500 ms
-        for the EWMA to lag-track. If `snr_raw` is None we fall back
-        to symmetric behaviour (both decisions use `snr_ema`).
+        Returns (mcs, tx_power_dBm, changed).
+
+        Demote is reactive and bypasses the promote rate limit: a
+        Channel-B emergency (loss/fec/starvation) or a video on-air PER
+        breach forces an immediate one-step downgrade. Promote requires
+        the `current+1` probe rung to read clean+fresh for
+        `promote_debounce_windows` consecutive ticks AND the rate limit
+        (`min_between_changes_ms` / `hold_modes_down_ms`) to be clear.
+        The debounce counter accumulates across ticks even while the
+        rate limit blocks a commit, so the climb fires as soon as both
+        gates open.
         """
-        self._reasons = []
         st = self.state
-        cur = st.current_mcs
+        prev = st.current_mcs
+        reasons: list[str] = []
 
-        # Without an SNR reading, hold current state but still let
-        # emergency / starvation force a step-down.
-        if snr_ema is None and not link_starved:
-            tx = self._compute_tx_power(cur)
-            st.tx_power_dBm = tx
-            return cur, tx, False
+        def commit(new_mcs: int, why: str) -> None:
+            new_mcs = max(0, min(new_mcs, self._cap_mcs))
+            if new_mcs != st.current_mcs:
+                st.current_mcs = new_mcs
+                st.tx_power_dBm = self._compute_tx_power(new_mcs)
+                st.last_change_time_ms = ts_ms
+                st.last_mcs_change_time_ms = ts_ms
+                self._promote_clean = 0
+                reasons.append(why)
 
-        emergency = self._emergency_active(loss_rate, fec_pressure, link_starved)
-
-        # Channel B: rate limit doesn't apply during emergency.
-        if not emergency and (
-            ts_ms - st.last_change_time_ms < self.sel.min_between_changes_ms
-        ):
-            tx = self._compute_tx_power(cur)
-            st.tx_power_dBm = tx
-            return cur, tx, False
-
-        # Compute candidate from current link state. Asymmetric pick:
-        #   - candidate_up via smoothed snr (stable; upgrade-side)
-        #   - candidate_down via raw snr_max_w (fresh; downgrade-side)
-        # Take the more pessimistic of the two so a fast fade visible
-        # in raw drives MCS down before EWMA catches up. When raw
-        # spikes high above smoothed, candidate_up bounds us — we
-        # don't climb on noisy raw alone.
-        if snr_ema is None:
-            candidate = cur
-        else:
-            candidate_up = self._pick_mcs(snr_ema, loss_rate, fec_pressure)
-            candidate_down = (
-                self._pick_mcs(snr_raw, loss_rate, fec_pressure)
-                if snr_raw is not None else candidate_up
+        # --- Demote: emergency (Channel B) or video-PER breach (reactive) ---
+        if self._emergency_active(loss_rate, fec_pressure, link_starved):
+            commit(
+                prev - 1,
+                f"emergency loss={loss_rate:.3f} fec={fec_pressure:.3f} "
+                f"starved={link_starved}",
             )
-            candidate = min(candidate_up, candidate_down)
+            self._reasons = reasons
+            return (st.current_mcs, st.tx_power_dBm,
+                    st.current_mcs != prev)
+        if loss_rate >= self.gate.video_demote_per:
+            commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
+            self._reasons = reasons
+            return (st.current_mcs, st.tx_power_dBm,
+                    st.current_mcs != prev)
 
-        # Channel B emergency: at least one MCS step down. If already
-        # at the floor, refuse any climb — emergency means link state
-        # is bad, climbing on a survivor-biased SNR would walk us
-        # straight into a worse oscillation.
-        if emergency:
-            if cur > self.profile.mcs_min:
-                forced = cur - 1
-                if candidate > forced:
-                    candidate = forced
-            else:
-                candidate = cur
+        # --- Rate limit (promotes only; emergencies above bypass it) ---
+        within_hold = (ts_ms - st.last_change_time_ms) < self.sel.hold_modes_down_ms
+        within_rate = (
+            (ts_ms - st.last_change_time_ms) < self.sel.min_between_changes_ms
+        )
 
-        # Cap upward step size.
-        if (cur >= 0 and candidate > cur and self.gate.max_mcs_step_up > 0):
-            candidate = min(candidate, cur + self.gate.max_mcs_step_up)
-
-        # Channel A: SNR-margin hysteresis (skipped during emergency).
-        if not emergency and cur >= 0:
-            if candidate > cur:
-                tgt_margin = self._margin(
-                    candidate, snr_ema, loss_rate, fec_pressure
-                )
-                predicted = (
-                    tgt_margin
-                    + snr_slope * self.gate.snr_predict_horizon_ticks
-                )
-                if (tgt_margin < self.gate.hysteresis_up_db
-                        or predicted < 0):
-                    # Block the upgrade — keep confidence bumping toward it.
-                    self._try_confidence_feed(candidate, loss_rate)
-                    tx = self._compute_tx_power(cur)
-                    st.tx_power_dBm = tx
-                    return cur, tx, False
-            elif candidate < cur:
-                # Use raw snr for the down-margin so a fast fade
-                # triggers the drop within one tick instead of waiting
-                # ~500 ms for the EWMA to catch up. Falls back to
-                # smoothed if raw is unavailable.
-                snr_for_down = snr_raw if snr_raw is not None else snr_ema
-                cur_margin = self._margin(
-                    cur, snr_for_down, loss_rate, fec_pressure
-                )
-                predicted = (
-                    cur_margin
-                    + snr_slope * self.gate.snr_predict_horizon_ticks
-                )
-                if (cur_margin > -self.gate.hysteresis_down_db
-                        and predicted > -self.gate.hysteresis_down_db):
-                    tx = self._compute_tx_power(cur)
-                    st.tx_power_dBm = tx
-                    return cur, tx, False
-
-        # Same-MCS path: power follows current MCS, no log-worthy change.
-        if candidate == cur:
-            st.up_confidence_count = 0
-            st.up_target_mcs = -1
-            tx = self._compute_tx_power(cur)
-            st.tx_power_dBm = tx
-            return cur, tx, False
-
-        # Direction + timing + confidence gating.
-        is_downgrade = candidate < cur
-        elapsed_since_mcs_ms = ts_ms - st.last_mcs_change_time_ms
-
-        if is_downgrade and (emergency or self.sel.fast_downgrade):
-            st.up_confidence_count = 0
-            st.up_target_mcs = -1
-        elif is_downgrade:
-            # Slow downgrade — wait out the hold timer.
-            if elapsed_since_mcs_ms < self.sel.hold_modes_down_ms:
-                tx = self._compute_tx_power(cur)
-                st.tx_power_dBm = tx
-                return cur, tx, False
-            st.up_confidence_count = 0
-            st.up_target_mcs = -1
+        # --- Promote: clean+fresh current+1 for promote_debounce_windows ---
+        # The debounce counter accumulates even while the rate limit
+        # blocks a commit, so the climb fires as soon as both gates open.
+        target = st.current_mcs + 1
+        rung = (
+            (probe or {}).get("mcs", {}).get(str(target))
+            if target <= self._cap_mcs else None
+        )
+        fresh = (
+            rung is not None
+            and rung.get("ageMs") is not None
+            and rung["ageMs"] <= self.gate.probe_freshness_ms
+        )
+        clean = (
+            fresh
+            and rung.get("per") is not None
+            and (1.0 - rung["per"]) >= self.gate.probe_viable_threshold
+        )
+        if clean:
+            self._promote_clean += 1
+            if (self._promote_clean >= self.gate.promote_debounce_windows
+                    and not within_hold and not within_rate):
+                commit(target, f"probe_promote mcs{target} per={rung['per']:.4f}")
         else:
-            if loss_rate > 0:
-                if st.up_confidence_count > 0:
-                    self._reasons.append(
-                        f"climb_blocked residual_loss={loss_rate:.3f} "
-                        f"mcs {cur}->{st.up_target_mcs}"
-                    )
-                st.up_confidence_count = 0
-                st.up_target_mcs = -1
-                tx = self._compute_tx_power(cur)
-                st.tx_power_dBm = tx
-                return cur, tx, False
-            if candidate != st.up_target_mcs:
-                st.up_target_mcs = candidate
-                st.up_confidence_count = 1
-                tx = self._compute_tx_power(cur)
-                st.tx_power_dBm = tx
-                return cur, tx, False
-            st.up_confidence_count += 1
-            if st.up_confidence_count < self.sel.upward_confidence_loops:
-                tx = self._compute_tx_power(cur)
-                st.tx_power_dBm = tx
-                return cur, tx, False
-            if elapsed_since_mcs_ms < self.sel.hold_modes_down_ms:
-                tx = self._compute_tx_power(cur)
-                st.tx_power_dBm = tx
-                return cur, tx, False
+            self._promote_clean = 0
 
-        # Apply the change.
-        old = cur
-        st.current_mcs = candidate
-        st.last_change_time_ms = ts_ms
-        st.last_mcs_change_time_ms = ts_ms
-        st.up_confidence_count = 0
-        st.up_target_mcs = -1
-        if emergency and is_downgrade:
-            cause = "emergency"
-            if loss_rate >= self.gate.emergency_loss_rate:
-                cause += f" loss={loss_rate:.3f}"
-            elif fec_pressure >= self.gate.emergency_fec_pressure:
-                cause += f" fec={fec_pressure:.3f}"
-            elif link_starved:
-                cause += " starved"
-            self._reasons.append(f"{cause} mcs {old}->{candidate}")
-        elif is_downgrade:
-            self._reasons.append(
-                f"mcs_down snr={snr_ema:.1f} {old}->{candidate}"
-            )
-        else:
-            self._reasons.append(
-                f"mcs_up snr={snr_ema:.1f} {old}->{candidate}"
-            )
+        # Same-MCS path: keep power consistent with current MCS.
+        if st.current_mcs == prev:
+            st.tx_power_dBm = self._compute_tx_power(st.current_mcs)
 
-        tx = self._compute_tx_power(candidate)
-        st.tx_power_dBm = tx
-        return candidate, tx, True
+        self._reasons = reasons
+        return st.current_mcs, st.tx_power_dBm, (st.current_mcs != prev)
 
     @property
     def reasons(self) -> list[str]:
@@ -696,6 +552,7 @@ class Policy:
         profile: RadioProfile,
         *,
         drone_config: DroneConfigState | None = None,
+        probe_status=None,
     ) -> None:
         self.cfg = cfg
         self.profile = profile
@@ -703,6 +560,12 @@ class Policy:
         # sends its first HELLO (DroneConfigState transitions to SYNCED).
         # Left None for back-compat with tests that don't need the gate.
         self.drone_config = drone_config
+        # Probe snapshot provider (zero-arg callable returning the
+        # ProbeController.status() dict, or None). The selector promotes
+        # MCS only when the probed current+1 rung reads clean+fresh. When
+        # left None (e.g. tests / no probe) the selector can never
+        # promote — it only reacts to emergencies.
+        self._probe_status = probe_status
         self.leading = LeadingSelector(
             cfg.leading, cfg.gate, cfg.selection, profile
         )
@@ -801,9 +664,7 @@ class Policy:
         # power. Channel B (emergency) is owned by the selector; we
         # don't need to compute forced_drop here anymore.
         new_mcs, tx_power, mcs_changed = self.leading.select(
-            snr_ema=signals.snr,
-            snr_raw=signals.snr_max_w,
-            snr_slope=signals.snr_slope,
+            probe=self._probe_status() if self._probe_status else None,
             loss_rate=signals.residual_loss_w,
             fec_pressure=signals.fec_work,
             link_starved=sustained_starved,
@@ -965,10 +826,6 @@ class Policy:
                 "rssi": signals.rssi,
                 "rssi_min_w": signals.rssi_min_w,
                 "rssi_max_w": signals.rssi_max_w,
-                "snr": signals.snr,
-                "snr_min_w": signals.snr_min_w,
-                "snr_max_w": signals.snr_max_w,
-                "snr_slope": signals.snr_slope,
                 "residual_loss_w": signals.residual_loss_w,
                 "fec_work": signals.fec_work,
                 "burst_rate": signals.burst_rate,

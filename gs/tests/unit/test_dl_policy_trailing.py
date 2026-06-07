@@ -197,7 +197,6 @@ def _policy(**overrides) -> Policy:
 def _starved_sigs(ts_ms: float, *, link_starved: bool) -> Signals:
     return Signals(
         rssi=-55.0, rssi_min_w=-55.0, rssi_max_w=-55.0,
-        snr=30.0, snr_min_w=30.0, snr_max_w=30.0,
         residual_loss_w=0.0,
         timestamp=ts_ms / 1000.0,
         link_starved_w=link_starved,
@@ -208,10 +207,9 @@ def _starved_sigs(ts_ms: float, *, link_starved: bool) -> Signals:
     )
 
 
-def _clean_sigs(ts_ms: float, snr: float = 30.0) -> Signals:
+def _clean_sigs(ts_ms: float) -> Signals:
     return Signals(
         rssi=-55.0, rssi_min_w=-55.0, rssi_max_w=-55.0,
-        snr=snr, snr_min_w=snr, snr_max_w=snr,
         residual_loss_w=0.0, fec_work=0.0,
         timestamp=ts_ms / 1000.0,
         link_starved_w=False,
@@ -222,11 +220,9 @@ def _clean_sigs(ts_ms: float, snr: float = 30.0) -> Signals:
     )
 
 
-def _lossy_sigs(ts_ms: float, snr: float = 30.0,
-                residual_loss: float = 0.02) -> Signals:
+def _lossy_sigs(ts_ms: float, residual_loss: float = 0.02) -> Signals:
     return Signals(
         rssi=-55.0, rssi_min_w=-55.0, rssi_max_w=-55.0,
-        snr=snr, snr_min_w=snr, snr_max_w=snr,
         residual_loss_w=residual_loss, fec_work=0.10,
         timestamp=ts_ms / 1000.0,
         link_starved_w=False,

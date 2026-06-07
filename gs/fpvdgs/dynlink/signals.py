@@ -25,9 +25,6 @@ class Signals:
     rssi_min_w: float | None = None       # min across antennas of rssi_min
     rssi_avg_w: float | None = None       # diversity-combined estimate
     rssi_max_w: float | None = None       # max(rssi_avg) — best-antenna operating point
-    snr_min_w: float | None = None
-    snr_avg_w: float | None = None
-    snr_max_w: float | None = None        # max(snr_avg) — best-antenna SNR
     residual_loss_w: float = 0.0          # used raw — no smoothing (§3)
     fec_work_rate_w: float = 0.0
     packet_rate_w: float = 0.0            # fragments / sec
@@ -41,8 +38,6 @@ class Signals:
 
     # EWMA-smoothed controller inputs
     rssi: float | None = None
-    snr: float | None = None
-    snr_slope: float = 0.0    # EMA of per-tick Δs.snr (dB/tick); + = rising
     fec_work: float = 0.0
     burst_rate: float = 0.0
     holdoff_rate: float = 0.0
@@ -72,10 +67,6 @@ class SignalAggregator:
     ewma_alpha_rssi: float = 0.2
     ewma_alpha_fec: float = 0.2
     ewma_alpha_burst: float = 0.1
-    # SNR-slope EMA: smooths the per-tick Δsnr so the dual-gate
-    # selector can extrapolate trend. Higher α = faster trend
-    # tracking, more chatter under noise.
-    ewma_alpha_snr_slope: float = 0.3
     # link_starved_w threshold: data fragments/sec below this counts as
     # starved. Compared per-window against packet_rate_w. Default 50 pps
     # is well below an FPV video stream's nominal ~700-1500 pps but well
@@ -83,8 +74,6 @@ class SignalAggregator:
     starvation_threshold_pps: float = 50.0
 
     signals: Signals = field(default_factory=Signals)
-    # Last s.snr observed; used to compute Δsnr for the slope EMA.
-    _prev_snr: float | None = field(default=None, repr=False)
 
     def update_session(self, session: SessionInfo) -> None:
         self.signals.session = session
@@ -123,14 +112,9 @@ class SignalAggregator:
         if ev.rx_ant_stats:
             rssi_mins = [a.rssi_min for a in ev.rx_ant_stats]
             rssi_avgs = [a.rssi_avg for a in ev.rx_ant_stats]
-            snr_mins = [a.snr_min for a in ev.rx_ant_stats]
-            snr_avgs = [a.snr_avg for a in ev.rx_ant_stats]
             s.rssi_min_w = float(min(rssi_mins))
             s.rssi_avg_w = float(sum(rssi_avgs) / len(rssi_avgs))
             s.rssi_max_w = float(max(rssi_avgs))
-            s.snr_min_w = float(min(snr_mins))
-            s.snr_avg_w = float(sum(snr_avgs) / len(snr_avgs))
-            s.snr_max_w = float(max(snr_avgs))
             s.ant_count = len(ev.rx_ant_stats)
         # If no antenna lines this window, keep prior values — don't
         # reset; the RSSI operating point doesn't vanish just because
@@ -139,7 +123,7 @@ class SignalAggregator:
         # --- Starvation flag (post-blackout detection) -----------------
         # Only meaningful once we've seen a session — otherwise we'd
         # flag every pre-link tick. Bypasses the survivor-bias trap of
-        # rssi/snr because it watches packet_rate, not signal quality.
+        # rssi because it watches packet_rate, not signal quality.
         s.link_starved_w = (
             s.session is not None
             and s.packet_rate_w < self.starvation_threshold_pps
@@ -147,27 +131,12 @@ class SignalAggregator:
 
         # --- EWMA smoothing (§3) ---------------------------------------
         # Smoothed inputs feed the leading loop. Use best-antenna
-        # aggregations: max(rssi_avg) / max(snr_avg) match what the
-        # diversity receiver actually decodes against (and what the OSD
-        # shows). min(rssi_min) tracks the weakest antenna and misses
+        # aggregation: max(rssi_avg) matches what the diversity receiver
+        # actually decodes against (and what the OSD shows).
+        # min(rssi_min) tracks the weakest antenna and misses
         # best-antenna degradation entirely.
         if s.rssi_max_w is not None:
             s.rssi = _ewma(s.rssi, s.rssi_max_w, self.ewma_alpha_rssi)
-        if s.snr_max_w is not None:
-            s.snr = _ewma(s.snr, s.snr_max_w, self.ewma_alpha_rssi)
-
-        # SNR slope: EMA of Δs.snr per tick. First sample yields 0
-        # (no prior to diff against). Used by the dual-gate selector
-        # to predict whether margin will hold across the next horizon.
-        if s.snr is not None:
-            if self._prev_snr is None:
-                s.snr_slope = 0.0
-            else:
-                delta = s.snr - self._prev_snr
-                s.snr_slope = _ewma(
-                    s.snr_slope, delta, self.ewma_alpha_snr_slope
-                )
-            self._prev_snr = s.snr
 
         s.fec_work = _ewma(s.fec_work, s.fec_work_rate_w, self.ewma_alpha_fec)
         s.burst_rate = _ewma(s.burst_rate, s.burst_rate_w, self.ewma_alpha_burst)

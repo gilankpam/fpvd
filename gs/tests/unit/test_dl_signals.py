@@ -122,14 +122,6 @@ def test_rssi_max_is_max_of_avgs_across_antennas():
     assert s.rssi_max_w == -55.0  # best antenna's avg
 
 
-def test_snr_max_is_max_of_avgs_across_antennas():
-    agg = SignalAggregator()
-    s = agg.consume(_rx(0.1, ants=[(-55, -55, 20, 22),
-                                   (-72, -70, 15, 17),
-                                   (-60, -58, 18, 30)]))
-    assert s.snr_max_w == 30.0  # best antenna's snr_avg
-
-
 def test_ewma_smoothes_rssi_max_not_min():
     """Smoothed s.rssi must track best-antenna avg (max-of-avgs), not
     the worst-antenna min — that was the survivor-bias bug."""
@@ -137,7 +129,6 @@ def test_ewma_smoothes_rssi_max_not_min():
     s = agg.consume(_rx(0.1, ants=[(-55, -50, 25, 30),
                                    (-72, -70, 15, 17)]))
     assert s.rssi == -50.0   # max(rssi_avg) — the best antenna
-    assert s.snr == 30.0     # max(snr_avg)
 
 
 def test_link_starved_w_when_packet_rate_below_threshold():
@@ -167,39 +158,8 @@ def test_link_starved_false_when_packet_rate_high():
     assert s.link_starved_w is False
 
 
-def test_snr_slope_initialises_zero_on_first_window():
-    agg = SignalAggregator()
-    s = agg.consume(_rx(0.1, ants=[(-55, -55, 25, 25)]))
-    # First sample — no prior to diff against.
-    assert s.snr_slope == 0.0
-
-
-def test_snr_slope_tracks_per_tick_delta_with_alpha():
-    agg = SignalAggregator(ewma_alpha_rssi=1.0,         # no smoothing on s.snr
-                           ewma_alpha_snr_slope=1.0)    # no smoothing on slope
-    # Two windows with snr 20 → 25. Δ = +5.
-    s = agg.consume(_rx(0.1, ants=[(-50, -50, 20, 20)]))
-    assert s.snr == 20.0
-    s = agg.consume(_rx(0.2, ants=[(-50, -50, 25, 25)]))
-    # alpha=1.0 → slope = delta = 5.0
-    assert abs(s.snr_slope - 5.0) < 1e-9
-
-
-def test_snr_slope_stable_under_constant_snr():
-    agg = SignalAggregator(ewma_alpha_rssi=1.0,
-                           ewma_alpha_snr_slope=0.5)
-    # Repeated identical windows — slope should converge to 0.
-    for _ in range(10):
-        s = agg.consume(_rx(0.1, ants=[(-50, -50, 25, 25)]))
-    assert abs(s.snr_slope) < 1e-9
-
-
-def test_snr_slope_tracks_negative_trend():
-    agg = SignalAggregator(ewma_alpha_rssi=1.0,
-                           ewma_alpha_snr_slope=1.0)
-    # Falling SNR: 30 → 25 → 20 → 15.
-    agg.consume(_rx(0.1, ants=[(-50, -50, 30, 30)]))
-    s = agg.consume(_rx(0.2, ants=[(-50, -50, 25, 25)]))
-    assert s.snr_slope == -5.0
-    s = agg.consume(_rx(0.3, ants=[(-50, -50, 20, 20)]))
-    assert s.snr_slope == -5.0
+def test_signals_has_no_snr_fields():
+    from fpvdgs.dynlink.signals import Signals
+    s = Signals()
+    assert not hasattr(s, "snr") and not hasattr(s, "snr_slope")
+    assert not hasattr(s, "snr_max_w")
