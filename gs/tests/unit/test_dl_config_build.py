@@ -22,8 +22,8 @@ def test_curated_keys_map_into_policy_config():
 
 
 def test_tuning_passthrough_overrides_defaults():
-    cfg = build_policy_config(_block(tuning={"gate": {"hysteresis_up_db": 4.0}}))
-    assert cfg.gate.hysteresis_up_db == 4.0
+    cfg = build_policy_config(_block(tuning={"gate": {"probe_viable_threshold": 0.95}}))
+    assert cfg.gate.probe_viable_threshold == 0.95
     # curated key still wins over any tuning attempt at the same field
     cfg2 = build_policy_config(_block(maxMcs=3, tuning={"gate": {"max_mcs": 7}}))
     assert cfg2.gate.max_mcs == 3
@@ -53,3 +53,19 @@ def test_make_dl_snapshot_explicit_drone_addr_wins():
     snap = make_dl_snapshot(eff)
     assert snap["droneAddr"] == "10.5.0.99"
     assert snap["dronePort"] == 12345
+
+
+def test_gate_parses_probe_knobs():
+    cfg = build_policy_config(_block(tuning={"gate": {
+        "probe_viable_threshold": 0.97,
+        "probe_freshness_ms": 400,
+        "promote_debounce_windows": 2,
+        "video_demote_per": 0.04,
+    }}))
+    g = cfg.gate
+    assert g.probe_viable_threshold == 0.97
+    assert g.probe_freshness_ms == 400
+    assert g.promote_debounce_windows == 2
+    assert g.video_demote_per == 0.04
+    # emergency + bounds kept
+    assert g.emergency_loss_rate == 0.05 and g.max_mcs == 5  # _block() sets maxMcs=5

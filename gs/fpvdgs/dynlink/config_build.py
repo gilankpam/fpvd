@@ -83,6 +83,12 @@ _DEPRECATED_LEADING_KEYS = {
     "tx_power_step_max_db", "tx_power_gain_up_db", "tx_power_gain_down_db",
 }
 
+_DEPRECATED_GATE_KEYS = {
+    "snr_ema_alpha", "snr_slope_alpha", "snr_predict_horizon_ticks",
+    "snr_safety_margin", "loss_margin_weight", "fec_margin_weight",
+    "hysteresis_up_db", "hysteresis_down_db",
+}
+
 
 def _build_policy_config(raw: dict) -> PolicyConfig:
     leading_raw = raw.get("leading_loop", {})
@@ -140,17 +146,18 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
         ),
     )
 
+    dep_gate = sorted(k for k in _DEPRECATED_GATE_KEYS if k in gate_raw)
+    if dep_gate:
+        log.warning(
+            "gate has deprecated SNR knobs (ignored): %s. "
+            "MCS is now probe-driven.", ", ".join(dep_gate)
+        )
+
     gate = GateConfig(
-        snr_ema_alpha=float(gate_raw.get("snr_ema_alpha", 0.3)),
-        snr_slope_alpha=float(gate_raw.get("snr_slope_alpha", 0.3)),
-        snr_predict_horizon_ticks=float(
-            gate_raw.get("snr_predict_horizon_ticks", 3.0)
-        ),
-        snr_safety_margin=float(gate_raw.get("snr_safety_margin", 3.0)),
-        loss_margin_weight=float(gate_raw.get("loss_margin_weight", 20.0)),
-        fec_margin_weight=float(gate_raw.get("fec_margin_weight", 5.0)),
-        hysteresis_up_db=float(gate_raw.get("hysteresis_up_db", 2.5)),
-        hysteresis_down_db=float(gate_raw.get("hysteresis_down_db", 1.0)),
+        probe_viable_threshold=float(gate_raw.get("probe_viable_threshold", 0.99)),
+        probe_freshness_ms=float(gate_raw.get("probe_freshness_ms", 500.0)),
+        promote_debounce_windows=int(gate_raw.get("promote_debounce_windows", 3)),
+        video_demote_per=float(gate_raw.get("video_demote_per", 0.05)),
         emergency_loss_rate=float(gate_raw.get("emergency_loss_rate", 0.05)),
         emergency_fec_pressure=float(
             gate_raw.get("emergency_fec_pressure", 0.80)
@@ -294,14 +301,10 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
 
 def _build_aggregator(raw: dict) -> SignalAggregator:
     s = raw.get("smoothing", {})
-    gate = raw.get("gate", {})
     starv = s.get("starvation_threshold_pps", 50.0)
-    # snr_slope alpha lives under [gate] so operators can tune it
-    # alongside the other gate knobs; aggregator just consumes it.
     return SignalAggregator(
         ewma_alpha_rssi=float(s.get("ewma_alpha_rssi", 0.2)),
         ewma_alpha_fec=float(s.get("ewma_alpha_fec", 0.2)),
         ewma_alpha_burst=float(s.get("ewma_alpha_burst", 0.1)),
-        ewma_alpha_snr_slope=float(gate.get("snr_slope_alpha", 0.3)),
         starvation_threshold_pps=float(starv),
     )

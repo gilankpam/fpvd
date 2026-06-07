@@ -77,28 +77,20 @@ class LeadingLoopConfig:
 
 @dataclass
 class GateConfig:
-    """Two-channel gate (alink_gs port).
+    """Probe-driven promote + emergency (Channel-B) demote.
 
-    Channel A (slow/symmetric): SNR-margin hysteresis. Drives normal
-    upgrades and graceful downgrades, with stress-aware margin and
-    slope-based prediction.
-
-    Channel B (fast/asymmetric): emergency triggers. Loss or FEC
-    pressure above threshold force an immediate one-step downgrade
-    bypassing rate limit and hold timers.
+    Promote: the `current+1` probe rung must read clean (EWMA success
+    >= probe_viable_threshold) and fresh (within probe_freshness_ms) for
+    promote_debounce_windows consecutive ticks. Demote: the kept Channel-B
+    emergency (loss/fec/starvation) plus a video on-air PER breach
+    (video_demote_per on (lost+fec_rec)/(out+lost)).
     """
-    # SNR smoothing
-    snr_ema_alpha: float = 0.3
-    snr_slope_alpha: float = 0.3
-    snr_predict_horizon_ticks: float = 3.0
-    # Stress-widened margin: base + loss*loss_w + fec*fec_w
-    snr_safety_margin: float = 3.0
-    loss_margin_weight: float = 20.0  # +1 dB per 0.05 loss
-    fec_margin_weight: float = 5.0    # +0.5 dB per 0.10 fec_work
-    # Channel A hysteresis (in dB of margin)
-    hysteresis_up_db: float = 2.5
-    hysteresis_down_db: float = 1.0
-    # Channel B emergency thresholds
+    # Probe-driven promote
+    probe_viable_threshold: float = 0.99   # min EWMA success (1 - per) to climb
+    probe_freshness_ms: float = 500.0      # max age of the probed rung's sample
+    promote_debounce_windows: int = 3      # consecutive clean ticks before a climb
+    # Reactive demote
+    video_demote_per: float = 0.05         # (lost+fec_rec)/(out+lost) demote breach
     emergency_loss_rate: float = 0.05
     emergency_fec_pressure: float = 0.80
     # MCS bounds
