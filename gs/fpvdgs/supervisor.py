@@ -71,9 +71,10 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     drone = DroneClient(effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080"))
 
-    dynlink = DynamicLinkController(make_dl_snapshot(effective))
-
     probe_ctrl = ProbeController(make_probe_snapshot(effective), spawn=probe_spawn)
+
+    dynlink = DynamicLinkController(make_dl_snapshot(effective),
+                                    probe_status=probe_ctrl.status)
 
     pixelpilot = ProcessSupervisor(
         argv=render_pixelpilot_argv(effective),

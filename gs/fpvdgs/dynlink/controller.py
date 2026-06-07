@@ -51,11 +51,12 @@ class _IdrRelay(asyncio.DatagramProtocol):
 class DynamicLinkController:
     def __init__(self, snapshot, *, stats_endpoint="tcp://127.0.0.1:8103",
                  gs_listen_addr="0.0.0.0", gs_listen_port=5801,
-                 stats_client_factory=StatsClient):
+                 stats_client_factory=StatsClient, probe_status=None):
         self._snapshot = dict(snapshot)
         self._stats_endpoint = stats_endpoint
         self._gs_listen = (gs_listen_addr, gs_listen_port)
         self._make_stats = stats_client_factory
+        self._probe_status = probe_status
         self._lock = threading.RLock()
         self._lifecycle = threading.RLock()
         self._thread = None
@@ -138,7 +139,8 @@ class DynamicLinkController:
             snap = dict(self._snapshot)
         profile = resolve_profile(snap)
         drone_cfg = DroneConfigState()
-        policy = Policy(build_policy_config(snap), profile, drone_config=drone_cfg)
+        policy = Policy(build_policy_config(snap), profile, drone_config=drone_cfg,
+                        probe_status=self._probe_status)
         aggregator = build_aggregator(snap)
         return_link = ReturnLink(snap["droneAddr"], int(snap["dronePort"]))
         encoder = WireEncoder(seq=1)

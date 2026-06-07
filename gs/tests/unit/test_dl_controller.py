@@ -184,6 +184,64 @@ def test_non_video_streams_are_ignored():
         sock.close()
 
 
+class _RepeatStatsClient:
+    """Emits a video RxEvent every ~20 ms until stopped, so a policy tick
+    runs after the controller has been driven SYNCED by a HELLO."""
+    def __init__(self, endpoint, on_event):
+        self._on_event = on_event
+        self._stop = False
+
+    async def run(self):
+        import asyncio
+        while not self._stop:
+            self._on_event(_rx_event())
+            await asyncio.sleep(0.02)
+
+    def stop(self):
+        self._stop = True
+
+
+def test_controller_forwards_probe_snapshot_to_policy():
+    # The controller must pull the probe snapshot each policy tick (so the
+    # selector can promote). The policy gates on drone_config until a HELLO
+    # syncs it, so we bind the GS HELLO listener on a known port, send a
+    # wire-encoded HELLO, and assert the steady-stream stats ticks then pull
+    # the probe snapshot.
+    from fpvdgs.dynlink.wire import Hello, encode_hello
+
+    seen = {}
+
+    def fake_probe_status():
+        seen["called"] = seen.get("called", 0) + 1
+        return {"running": True, "streams": 1, "mcs": {}}
+
+    hello_sock, hello_port = _free_udp_port()
+    hello_sock.close()   # free it for the controller's HELLO listener to bind
+    drone_sock, drone_port = _free_udp_port()
+    c = DynamicLinkController(_snapshot(drone_port),
+                              stats_client_factory=_RepeatStatsClient,
+                              gs_listen_port=hello_port,
+                              probe_status=fake_probe_status)
+    c.start()
+    try:
+        # Drive the policy to SYNCED so tick() reaches the probe pull.
+        sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sender.sendto(
+                encode_hello(Hello(generation_id=0x42, mtu_bytes=1400,
+                                   fps=30, applier_build_sha=0)),
+                ("127.0.0.1", hello_port))
+        finally:
+            sender.close()
+        deadline = time.monotonic() + 1.5
+        while seen.get("called", 0) < 1 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert seen.get("called", 0) >= 1   # tick loop pulled the probe snapshot
+    finally:
+        c.stop()
+        drone_sock.close()
+
+
 def test_idr_relay_binds_inaddr_any_so_it_can_forward_off_loopback():
     # Regression: the relay reuses its listen socket to forward each token to
     # the drone. If it binds 127.0.0.1, that forward sendto() fails with EINVAL
