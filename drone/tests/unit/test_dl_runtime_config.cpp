@@ -139,3 +139,17 @@ TEST_CASE("buildDlSnapshot maps the Phase-3a bitrate-engine knobs") {
     CHECK(s.bitrate.kMin == 3);
     CHECK(s.bitrate.kMax == 40);
 }
+
+TEST_CASE("buildDlSnapshot maps link.width to linkBandwidth (radiotap value)") {
+    fpvd::Config c{};
+    c.link.width = 20;
+    auto s20 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    CHECK(s20.linkBandwidth == 20);
+    c.link.width = 40;
+    auto s40 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    CHECK(s40.linkBandwidth == 40);
+    // modulationWidth maps HT40-as-20 (width=10) to the 20 MHz radiotap value
+    c.link.width = 10;
+    auto s10 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    CHECK(s10.linkBandwidth == 20);
+}

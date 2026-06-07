@@ -460,6 +460,9 @@ void DynamicLinkController::run(int evfd) {
                             applyState = ApplyState::Idle;
                         }
 
+                        // v3 wire carries only {mcs}; bandwidth is static config.
+                        d.bandwidth = cfg.linkBandwidth;
+
                         // Phase 3a: the drone computes its own bitrate/k/n
                         // (and a constant depth/fps) from {mcs,bandwidth};
                         // the GS-sent values on the wire are ignored.

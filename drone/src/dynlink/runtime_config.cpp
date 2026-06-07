@@ -1,6 +1,7 @@
 #include "dynlink/runtime_config.hpp"
 #include "config/schema.hpp"
 #include "probe/probe_constants.hpp"
+#include "link_width.hpp"
 
 namespace fpvd::dynlink {
 
@@ -51,6 +52,7 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
     s.helloFps      = static_cast<uint16_t>(c.video.fps);
     s.stbc          = c.link.stbc;
     s.ldpc          = c.link.ldpc;
+    s.linkBandwidth = static_cast<uint8_t>(modulationWidth(c.link.width));
     s.probeCtlPort  = static_cast<uint16_t>(kProbeControlPort);
     s.probeMcsCeiling = kProbeMcsCeiling;
     s.iface         = iface;

@@ -239,6 +239,7 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.stbc                  = true;      // preserved on every setRadio (incl. safe)
     snap.ldpc                  = true;
+    snap.linkBandwidth         = 40;        // A1: bandwidth from config, not wire
     snap.iface                 = "wlan-test-nonexistent";  // iw will fail, not hang
     snap.safe = SafeDefaults{
         /*mcs=*/1, /*k=*/8, /*n=*/12, /*depth=*/0,
@@ -259,7 +260,7 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     d.sequence    = 100;
     d.timestampMs = 1;
     d.mcs         = 7;
-    d.bandwidth   = 40;
+    d.bandwidth   = 20;   // wire says 20; config (linkBandwidth=40) must win
     d.txPowerDbm  = 10;
     d.k           = 4;
     d.n           = 6;
@@ -275,7 +276,7 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
         return wfb.sawFec(29, 44);   // drone-computed k/n (NOT the wire 4/6)
     }, 1000);
     CHECK(gotFec);
-    CHECK(waitFor([&] { return wfb.sawRadio(7, 40); }, 1000));  // mcs/bw untouched
+    CHECK(waitFor([&] { return wfb.sawRadio(7, 40); }, 1000));  // bw comes from config (40), not the wire (20)
     CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=24000"); }, 1000));
     // Decision push preserved the configured radiotap flags (not hardcoded 0/false).
     CHECK(wfb.sawRadioFlags(/*stbc=*/1, /*ldpc=*/true));
