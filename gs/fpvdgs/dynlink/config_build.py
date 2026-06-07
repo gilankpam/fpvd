@@ -13,6 +13,8 @@ import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .flightlog import FlightLogConfig
+from .learned_prior import LearnedPriorConfig
 from .policy import (
     GateConfig, LeadingLoopConfig,
     PolicyConfig, ProfileSelectionConfig,
@@ -204,11 +206,38 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
     )
 
     policy_raw = raw.get("policy", {})
+
+    lp_raw = raw.get("learned_prior", {}) or {}
+    fl_raw = lp_raw.get("flightlog", {}) or {}
+    learned_prior = LearnedPriorConfig(
+        enabled=bool(lp_raw.get("enabled", True)),
+        bin_width_db=float(lp_raw.get("bin_width_db", 2.0)),
+        rssi_min=float(lp_raw.get("rssi_min", -90.0)),
+        rssi_max=float(lp_raw.get("rssi_max", -30.0)),
+        ewma_alpha=float(lp_raw.get("ewma_alpha", 0.1)),
+        viable_threshold=float(lp_raw.get("viable_threshold", 0.99)),
+        min_samples_warmstart=int(lp_raw.get("min_samples_warmstart", 20)),
+        min_samples_predictive=int(lp_raw.get("min_samples_predictive", 40)),
+        warmstart_margin=int(lp_raw.get("warmstart_margin", 0)),
+        predictive_horizon_ticks=int(lp_raw.get("predictive_horizon_ticks", 3)),
+        predictive_debounce_windows=int(lp_raw.get("predictive_debounce_windows", 3)),
+        flush_interval_observations=int(lp_raw.get("flush_interval_observations", 50)),
+        persist_dir=str(lp_raw.get("persist_dir", "/etc/fpvd/learned")),
+    )
+    flightlog = FlightLogConfig(
+        enabled=bool(fl_raw.get("enabled", True)),
+        dir=str(fl_raw.get("dir", "/etc/fpvd/flightlog")),
+        max_files=int(fl_raw.get("max_files", 8)),
+        max_mb=float(fl_raw.get("max_mb", 4.0)),
+    )
+
     return PolicyConfig(
         leading=leading,
         gate=gate,
         selection=selection,
         starvation_windows=int(policy_raw.get("starvation_windows", 5)),
+        learned_prior=learned_prior,
+        flightlog=flightlog,
     )
 
 

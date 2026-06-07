@@ -82,3 +82,23 @@ def test_retired_bitrate_fec_knobs_parse_and_warn(caplog):
     assert cfg is not None   # loads despite the retired knobs
     assert any("3a" in r.message or "drone" in r.message.lower()
                for r in caplog.records)
+
+
+def test_learned_prior_config_parsed():
+    from fpvdgs.dynlink.config_build import build_policy_config
+    cfg = build_policy_config({"tuning": {"learned_prior": {
+        "bin_width_db": 3.0, "min_samples_warmstart": 7,
+        "flightlog": {"max_files": 2, "enabled": False},
+    }}})
+    assert cfg.learned_prior.bin_width_db == 3.0
+    assert cfg.learned_prior.min_samples_warmstart == 7
+    assert cfg.flightlog.max_files == 2
+    assert cfg.flightlog.enabled is False
+
+
+def test_learned_prior_defaults_when_absent():
+    from fpvdgs.dynlink.config_build import build_policy_config
+    cfg = build_policy_config({"tuning": {}})
+    assert cfg.learned_prior.enabled is True
+    assert cfg.learned_prior.bin_width_db == 2.0
+    assert cfg.flightlog.enabled is True

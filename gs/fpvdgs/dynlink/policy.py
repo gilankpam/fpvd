@@ -15,6 +15,8 @@ import logging
 from dataclasses import dataclass, field
 
 from .decision import Decision
+from .flightlog import FlightLogConfig
+from .learned_prior import LearnedPriorConfig
 from .profile import MCSRow, RadioProfile
 from .signals import Signals
 
@@ -103,6 +105,8 @@ class PolicyConfig:
     selection: ProfileSelectionConfig = field(
         default_factory=ProfileSelectionConfig
     )
+    learned_prior: LearnedPriorConfig = field(default_factory=LearnedPriorConfig)
+    flightlog: FlightLogConfig = field(default_factory=FlightLogConfig)
     # Total-blackout failsafe: this many consecutive starved windows
     # (packet_rate_w < starvation_threshold while session active) feeds
     # the selector's link_starved emergency demote. Intentionally short —
