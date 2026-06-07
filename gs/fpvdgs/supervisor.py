@@ -123,9 +123,10 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
             pass
         prof = eff_dl.get("radioProfile", "m8812eu2")
         if not adapter_matches_profile(adapter_id, prof) and not _warned["adapter"]:
-            log.warning("drone adapter_id %r does not match radioProfile %r — "
-                        "the learned prior is keyed by radioProfile; check config",
-                        adapter_id, prof)
+            log.warning("drone adapter_id %r does not match the configured "
+                        "radioProfile %r — the learned prior is per-card, so a "
+                        "mismatch means it may learn against the wrong profile; "
+                        "check config", adapter_id, prof)
             _warned["adapter"] = True
         st["drone"] = {"reachable": reachable,
                        "dynamicLinkActive": drone_active}
