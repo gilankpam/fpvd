@@ -95,8 +95,41 @@ class LearnedPrior:
                 best = rung
         return best
 
+    def _ladder(self) -> list[tuple[int, int]]:
+        """Isotonic (monotone-increasing-in-RSSI) ladder over confident bins.
+        Returns [(bin_index, ceiling), ...] ascending by bin; ceilings are
+        made non-decreasing in RSSI (pool-adjacent-violators, simple form)."""
+        pts = [(b, self.bin_ceiling(b)) for b in range(self._nbins)]
+        pts = [(b, c) for b, c in pts if c is not None]
+        if not pts:
+            return []
+        # Enforce non-decreasing ceiling as bin index (RSSI) rises: walk
+        # ascending, clamp each ceiling up to the running max-so-far.
+        out: list[tuple[int, int]] = []
+        run = -1
+        for b, c in pts:
+            run = max(run, c)
+            out.append((b, run))
+        return out
+
     def ceiling(self, rssi) -> int | None:
-        return None  # filled in Task 4
+        b = self.rssi_bin(rssi)
+        if b is None:
+            return None
+        ladder = self._ladder()
+        if not ladder:
+            return None
+        # Look up this bin in the ladder (which enforces monotonicity across
+        # all confident bins). If the bin is a confident anchor it is already
+        # in the ladder; for unflown bins extrapolate from the nearest lower
+        # anchor, or from the lowest anchor when below all confident bins.
+        best = None
+        for lb, c in ladder:
+            if lb <= b:
+                best = c
+            else:
+                break
+        return best if best is not None else ladder[0][1]
 
     def warmstart_seed(self, rssi) -> int | None:
         return None  # filled in Task 5

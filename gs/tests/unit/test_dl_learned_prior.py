@@ -84,3 +84,44 @@ def test_bin_ceiling_unknown_until_min_samples(tmp_path):
         p.ingest(rssi=-50.0, probed_rung=3, probe_clean=True,
                  operating_mcs=3, operating_clean=True)
     assert p.bin_ceiling(b) is None
+
+
+def _fill_bin(p, rssi, ceiling, samples=5):
+    """Make bin(rssi) report `ceiling`: rungs 0..ceiling clean, ceiling+1 cliff."""
+    for _ in range(samples):
+        for rung in range(ceiling + 1):
+            p.ingest(rssi=rssi, probed_rung=rung, probe_clean=True,
+                     operating_mcs=rung, operating_clean=True)
+        if ceiling + 1 <= 7:
+            p.ingest(rssi=rssi, probed_rung=ceiling + 1, probe_clean=False,
+                     operating_mcs=ceiling, operating_clean=True)
+
+
+def test_ceiling_uses_confident_bin_directly(tmp_path):
+    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3)
+    _fill_bin(p, -50.0, ceiling=5)
+    assert p.ceiling(-50.0) == 5
+
+
+def test_ceiling_ladder_extrapolates_unflown_bin_monotonically(tmp_path):
+    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3)
+    _fill_bin(p, -70.0, ceiling=2)   # weak RSSI bin
+    _fill_bin(p, -50.0, ceiling=5)   # strong RSSI bin
+    # -60 was never flown; the isotonic ladder must give a value between
+    # the two anchors and never below the weaker / above the stronger.
+    mid = p.ceiling(-60.0)
+    assert mid is not None and 2 <= mid <= 5
+
+
+def test_ceiling_isotonic_denoises_inversion(tmp_path):
+    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3)
+    _fill_bin(p, -70.0, ceiling=5)   # noisy: weak RSSI shows a high ceiling
+    _fill_bin(p, -50.0, ceiling=3)   # strong RSSI shows a lower one
+    # Monotonicity (more RSSI ⇒ >= ceiling) must hold after the isotonic fit.
+    assert p.ceiling(-50.0) >= p.ceiling(-70.0)
+
+
+def test_ceiling_unknown_with_no_confident_bins(tmp_path):
+    p = _prior(tmp_path, min_samples_warmstart=100)
+    _fill_bin(p, -50.0, ceiling=5, samples=3)   # below threshold
+    assert p.ceiling(-50.0) is None
