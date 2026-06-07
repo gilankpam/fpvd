@@ -248,7 +248,11 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     c.start(snap, /*generationId=*/0x1234);
     CHECK(c.status().running == true);
 
-    // 1) Inject one decision. mcs=7, bw=40, k=4, n=6, bitrate=6000, fps=60.
+    // 1) Inject one decision. mcs=7, bw=40. The GS-sent k/n/bitrate are now
+    //    IGNORED (Phase 3a): the drone recomputes them from {mcs,bandwidth} via
+    //    applyLocalCompute. For mcs=7/bw=40 the drone engine yields k=29, n=44,
+    //    bitrate=24000 (clamped at maxBitrateKbps). The wire values below are
+    //    deliberately set to different numbers to prove they are overridden.
     Decision d{};
     d.magic       = kWireMagic;
     d.version     = kWireVersion;
@@ -268,11 +272,11 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     // so the dedup drops all but the first accepted copy.
     bool gotFec = waitFor([&] {
         sendDecision(ep.listenPort, d);
-        return wfb.sawFec(4, 6);
+        return wfb.sawFec(29, 44);   // drone-computed k/n (NOT the wire 4/6)
     }, 1000);
     CHECK(gotFec);
-    CHECK(waitFor([&] { return wfb.sawRadio(7, 40); }, 1000));
-    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=6000"); }, 1000));
+    CHECK(waitFor([&] { return wfb.sawRadio(7, 40); }, 1000));  // mcs/bw untouched
+    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=24000"); }, 1000));
     // Decision push preserved the configured radiotap flags (not hardcoded 0/false).
     CHECK(wfb.sawRadioFlags(/*stbc=*/1, /*ldpc=*/true));
 
@@ -335,19 +339,24 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
         return d;
     };
 
-    // 1) First decision (seq 1) — first => Equal => single shot. bitrate 4000.
+    // The wire bitrate carried by each decision is now IGNORED (Phase 3a): the
+    // drone recomputes it from {mcs,bandwidth}. mcs=3/bw=20 -> 8739 kbps;
+    // mcs=5/bw=20 -> 18501 kbps. 18501 > 8739, so seq-2 is still an UP step and
+    // the staggered gap path is exercised exactly as before.
+
+    // 1) First decision (seq 1) — first => Equal => single shot. drone bitrate 8739.
     Decision d1 = mkDecision(1, /*mcs=*/3, /*br=*/4000);
     bool got1 = waitFor([&] { sendDecision(ep.listenPort, d1); return wfb.sawRadio(3, 20); }, 1000);
     CHECK(got1);
-    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=4000"); }, 1000));
+    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=8739"); }, 1000));
 
-    // 2) Second decision (seq 2) — higher bitrate => UP. tx+radio apply now;
+    // 2) Second decision (seq 2) — higher drone bitrate => UP. radio applies now;
     //    encoder bitrate expands only after the ~120 ms gap timer.
     Decision d2 = mkDecision(2, /*mcs=*/5, /*br=*/6000);
     bool gotRadio = waitFor([&] { sendDecision(ep.listenPort, d2); return wfb.sawRadio(5, 20); }, 1000);
     CHECK(gotRadio);
-    // Encoder bitrate=6000 must eventually arrive (phase 2 over the gap timer).
-    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=6000"); }, 1000));
+    // Drone bitrate=18501 must eventually arrive (phase 2 over the gap timer).
+    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=18501"); }, 1000));
 
     c.stop();
     CHECK(c.status().running == false);
@@ -599,9 +608,10 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
         d.mcs = 3; d.bandwidth = 20; d.txPowerDbm = 10;
         d.k = 4; d.n = 6; d.depth = 0;
         d.bitrateKbps = 4000; d.fps = 60;
+        // Wire k/n ignored (Phase 3a): mcs=3/bw=20 -> drone k=6, n=9.
         bool gotFec = waitFor([&] {
             sendDecision(ep.listenPort, d);
-            return wfb.sawFec(4, 6);
+            return wfb.sawFec(6, 9);
         }, 1000);
         CHECK(gotFec);  // decision was accepted; watchdog.everSeen_ = true
     }

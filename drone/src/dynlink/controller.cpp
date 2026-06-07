@@ -1,6 +1,7 @@
 #include "dynlink/controller.hpp"
 
 #include "dynlink/apply_direction.hpp"
+#include "dynlink/local_compute.hpp"
 
 #include <cassert>
 #include <cstring>
@@ -141,7 +142,7 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap, uint32_t generati
 
     // Reset diff baselines to "first/invalid" so the first decision re-emits all.
     lastTx_ = Decision{};
-    lastRadio_ = Decision{};
+    lastRadio_ = Decision{};   // vestigial — radio_/lastRadio_ removed in Phase 3b
     lastEnc_ = Decision{};
     lastApplied_ = Decision{};
     lastProbeMcs_ = -1;            // force the probe to re-tune on the first decision
@@ -459,12 +460,15 @@ void DynamicLinkController::run(int evfd) {
                             applyState = ApplyState::Idle;
                         }
 
+                        // Phase 3a: the drone computes its own bitrate/k/n
+                        // (and a constant depth/fps) from {mcs,bandwidth};
+                        // the GS-sent values on the wire are ignored.
+                        applyLocalCompute(cfg, d);
+
                         uint64_t now = nowMonotonicMs();
                         bool first = (lastEnc_.magic != kWireMagic);
                         ApplyDir dir = applyDirection(lastEnc_.bitrateKbps,
                                                       d.bitrateKbps, first);
-                        useconds_t subPaceUs =
-                            static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
 
                         // canStagger: staggered dispatch requires both a non-zero
                         // gap interval AND a live gap timerfd. If the fd failed to
@@ -475,16 +479,12 @@ void DynamicLinkController::run(int evfd) {
                         if (!canStagger || dir == ApplyDir::Equal) {
                             // Single shot: all backends fire now.
                             dispatchTxApply(cfg, d);
-                            radio_->apply(d.txPowerDbm);
                             enc_->apply(d.bitrateKbps, d.fps);
-                            lastRadio_ = d;
                             lastEnc_ = d;
                         } else if (dir == ApplyDir::Up) {
-                            // Power up BEFORE MCS up. radio -> (sub-pace) -> tx;
-                            // encoder bitrate expands after the outer gap.
-                            radio_->apply(d.txPowerDbm);
-                            lastRadio_ = d;
-                            if (subPaceUs > 0) usleep(subPaceUs);
+                            // Raise capacity (mcs) now; the encoder bitrate
+                            // expands after the outer gap. tx power is constant
+                            // (set at radio bring-up), so there is no power step.
                             dispatchTxApply(cfg, d);
                             applyPending = d;
                             applyState = ApplyState::UpGap;
@@ -525,7 +525,6 @@ void DynamicLinkController::run(int evfd) {
                     applyState = ApplyState::Idle;
                 }
                 dispatchTxSafe(cfg);
-                radio_->applySafe(cfg.safe.txPowerDbm);
                 enc_->applySafe(cfg.safe.bitrateKbps);
                 osd_->eventWatchdog();
                 // Invalidate last-states so the next fresh decision emits
@@ -566,12 +565,12 @@ void DynamicLinkController::run(int evfd) {
                 enc_->apply(applyPending.bitrateKbps, applyPending.fps);
                 lastEnc_ = applyPending;
             } else if (applyState == ApplyState::DownGap) {
+                // Phase 2 of a Down: narrow tx capacity (mcs/fec)
+                // now that the encoder already throttled in phase 1.
+                // No lastEnc_ update here — it was set in phase 1
+                // (the decision branch). tx power is constant, so
+                // there is no deferred radio step either.
                 dispatchTxApply(cfg, applyPending);
-                if (cfg.applySubPaceMs > 0) {
-                    usleep(static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u);
-                }
-                radio_->apply(applyPending.txPowerDbm);
-                lastRadio_ = applyPending;
             }
             // Idle here means a stale expiration the kernel queued before
             // disarm landed — drained, ignore.
