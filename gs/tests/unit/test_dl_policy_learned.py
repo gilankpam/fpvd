@@ -74,3 +74,56 @@ def test_predictive_demote_on_confident_fade(tmp_path):
     dec = p.tick(_sig(-56.0, ts=1.2))
     assert dec.mcs <= 2
     p.close()
+
+
+def _cfg_fl(tmp_path, flight_gap_s=15.0):
+    from fpvdgs.dynlink.flightlog import FlightLogConfig
+    from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
+    return PolicyConfig(
+        learned_prior=LearnedPriorConfig(persist_dir=str(tmp_path / "lp")),
+        flightlog=FlightLogConfig(dir=str(tmp_path / "fl"), flight_gap_s=flight_gap_s),
+    )
+
+
+def _sig_starved(starved, ts=1.0, rssi=-55.0):
+    return Signals(rssi=rssi, residual_loss_w=0.0, fec_work=0.0,
+                   link_starved_w=starved, timestamp=ts)
+
+
+def test_flight_rolls_on_link_gap_recovery(tmp_path, monkeypatch):
+    from fpvdgs.dynlink import policy as policy_mod, flightlog as fl_mod
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(policy_mod.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(fl_mod.time, "monotonic", lambda: clock["t"])
+    p = Policy(_cfg_fl(tmp_path, flight_gap_s=15.0), _profile())
+    p.tick(_sig_starved(False, ts=1.0)); clock["t"] += 0.1     # baseline (no roll on 1st)
+    p.tick(_sig_starved(False, ts=1.1))
+    clock["t"] += 20.0                                          # link gone 20 s
+    p.tick(_sig_starved(True, ts=2.0))                         # starved: baseline frozen
+    p.tick(_sig_starved(False, ts=3.0))                        # healthy: 20 > 15 -> ROLL
+    p.close()
+    assert len(list((tmp_path / "fl").glob("*.jsonl"))) == 2
+
+
+def test_brief_gap_does_not_roll(tmp_path, monkeypatch):
+    from fpvdgs.dynlink import policy as policy_mod, flightlog as fl_mod
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(policy_mod.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(fl_mod.time, "monotonic", lambda: clock["t"])
+    p = Policy(_cfg_fl(tmp_path, flight_gap_s=15.0), _profile())
+    p.tick(_sig_starved(False, ts=1.0)); clock["t"] += 5.0     # only 5 s gap
+    p.tick(_sig_starved(True, ts=2.0))
+    p.tick(_sig_starved(False, ts=3.0))                        # 5 < 15 -> no roll
+    p.close()
+    assert len(list((tmp_path / "fl").glob("*.jsonl"))) == 1
+
+
+def test_first_healthy_tick_does_not_roll(tmp_path, monkeypatch):
+    from fpvdgs.dynlink import policy as policy_mod, flightlog as fl_mod
+    clock = {"t": 9999.0}     # large: would exceed any gap if baseline weren't None
+    monkeypatch.setattr(policy_mod.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(fl_mod.time, "monotonic", lambda: clock["t"])
+    p = Policy(_cfg_fl(tmp_path, flight_gap_s=15.0), _profile())
+    p.tick(_sig_starved(False, ts=1.0))                        # 1st healthy: None baseline -> no roll
+    p.close()
+    assert len(list((tmp_path / "fl").glob("*.jsonl"))) == 1

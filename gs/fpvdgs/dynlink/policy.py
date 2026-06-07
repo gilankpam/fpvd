@@ -395,6 +395,7 @@ class Policy:
         )
         self._prev_rssi: float | None = None
         self._predict_demote_count = 0
+        self._last_healthy_mono = None   # monotonic ts of last non-starved tick (flight-gap roll)
         start_ms = int(time.monotonic() * 1000)
         self.flightlog = FlightLog(cfg.flightlog, start_ms=start_ms)
 
@@ -485,6 +486,16 @@ class Policy:
         reason = "; ".join(
             r for r in ([predict_reason] + self.leading.reasons) if r
         )
+        # Flight-boundary roll: a new flight = the link returning healthy after
+        # being gone (starved) longer than flight_gap_s. Monotonic time so the
+        # unreliable GS wall-clock can't break it; raw link_starved_w as health.
+        if not signals.link_starved_w:
+            _now_mono = time.monotonic()
+            if (self._last_healthy_mono is not None
+                    and (_now_mono - self._last_healthy_mono)
+                    > self.cfg.flightlog.flight_gap_s):
+                self.flightlog.roll()
+            self._last_healthy_mono = _now_mono
         self.flightlog.write({
             "ts": signals.timestamp,
             "rssi": signals.rssi,
