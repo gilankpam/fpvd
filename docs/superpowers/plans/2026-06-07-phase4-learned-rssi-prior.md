@@ -461,14 +461,16 @@ Expected: FAIL — `ceiling` returns `None` (stub).
         b = self.rssi_bin(rssi)
         if b is None:
             return None
-        direct = self.bin_ceiling(b)
-        if direct is not None:
-            return direct
+        # Always resolve through the isotonic ladder (NO short-circuit on the
+        # direct bin): a confident bin's value must be monotonicity-corrected
+        # against higher-RSSI bins (a noisy low-RSSI bin claiming a high
+        # ceiling). For a confident bin with no inversion the ladder value
+        # equals its own bin_ceiling, so the "confident bin → its ceiling"
+        # semantic still holds in the common case.
         ladder = self._ladder()
         if not ladder:
             return None
-        # Extrapolate: highest confident bin <= b, else the lowest bin's
-        # ceiling (don't claim more than the weakest anchor below range).
+        # Extrapolate: highest confident bin <= b, else the lowest anchor.
         best = None
         for lb, c in ladder:
             if lb <= b:
@@ -477,6 +479,8 @@ Expected: FAIL — `ceiling` returns `None` (stub).
                 break
         return best if best is not None else ladder[0][1]
 ```
+
+(Note: do NOT short-circuit on `bin_ceiling(b)` before the ladder — that returns the raw, un-monotonicized value and fails `test_ceiling_isotonic_denoises_inversion`. Always resolve through `_ladder()`.)
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -558,10 +562,9 @@ Expected: FAIL — `warmstart_seed` returns `None` (stub) / no `predictive_ceili
                     best = rung
             return best
 
-        direct = bin_ceiling_at(b)
-        if direct is not None:
-            return direct
-        # isotonic ladder at the stricter threshold
+        # Always resolve through the isotonic ladder (same fix as ceiling():
+        # NO short-circuit on the direct bin — the value must be
+        # monotonicity-corrected at the stricter threshold).
         pts = [(bi, bin_ceiling_at(bi)) for bi in range(self._nbins)]
         pts = [(bi, c) for bi, c in pts if c is not None]
         if not pts:
