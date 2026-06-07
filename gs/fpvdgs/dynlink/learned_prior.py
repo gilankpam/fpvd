@@ -84,7 +84,16 @@ class LearnedPrior:
         pass  # persistence lands in Task 6
 
     def bin_ceiling(self, b: int) -> int | None:
-        return None  # filled in Task 3
+        if b < 0 or b >= self._nbins:
+            return None
+        best = None
+        for rung in range(MAX_MCS + 1):
+            ewma, n = self._cells[b][rung]
+            if (ewma is not None
+                    and ewma >= self.cfg.viable_threshold
+                    and n >= self.cfg.min_samples_warmstart):
+                best = rung
+        return best
 
     def ceiling(self, rssi) -> int | None:
         return None  # filled in Task 4

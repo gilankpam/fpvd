@@ -60,3 +60,27 @@ def test_ingest_skips_out_of_range_rssi(tmp_path):
              operating_mcs=2, operating_clean=True)
     # nothing recorded
     assert all(cell[1] == 0 for row in p._cells for cell in row)
+
+
+def test_bin_ceiling_picks_highest_confident_clean_rung(tmp_path):
+    p = _prior(tmp_path, ewma_alpha=1.0, viable_threshold=0.99,
+               min_samples_warmstart=3)
+    b = p.rssi_bin(-50.0)
+    # rungs 0..4 clean, rung 5 cliffed — all with enough samples.
+    for _ in range(3):
+        for rung in (0, 1, 2, 3, 4):
+            p.ingest(rssi=-50.0, probed_rung=rung, probe_clean=True,
+                     operating_mcs=rung, operating_clean=True)
+        p.ingest(rssi=-50.0, probed_rung=5, probe_clean=False,
+                 operating_mcs=4, operating_clean=True)
+    assert p.bin_ceiling(b) == 4
+
+
+def test_bin_ceiling_unknown_until_min_samples(tmp_path):
+    p = _prior(tmp_path, ewma_alpha=1.0, viable_threshold=0.99,
+               min_samples_warmstart=5)
+    b = p.rssi_bin(-50.0)
+    for _ in range(2):  # only 2 < 5 samples
+        p.ingest(rssi=-50.0, probed_rung=3, probe_clean=True,
+                 operating_mcs=3, operating_clean=True)
+    assert p.bin_ceiling(b) is None
