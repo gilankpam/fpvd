@@ -156,3 +156,45 @@ def test_predictive_ceiling_needs_strict_min_samples(tmp_path):
                min_samples_predictive=100, predictive_horizon_ticks=2)
     _fill_bin(p, -56.0, ceiling=2, samples=5)   # confident for warmstart, not predictive
     assert p.predictive_ceiling(-50.0, -3.0) is None
+
+
+def test_persistence_round_trip(tmp_path):
+    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3)
+    _fill_bin(p, -50.0, ceiling=5)
+    p.flush()
+    # a fresh prior with the same key loads the persisted curve
+    p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(
+        persist_dir=str(tmp_path), ewma_alpha=1.0, min_samples_warmstart=3))
+    assert p2.ceiling(-50.0) == 5
+
+
+def test_persistence_bin_config_mismatch_discarded(tmp_path):
+    p = _prior(tmp_path, bin_width_db=2.0, min_samples_warmstart=3,
+               ewma_alpha=1.0)
+    _fill_bin(p, -50.0, ceiling=5)
+    p.flush()
+    # different bin width → stale file ignored, starts empty
+    p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(
+        persist_dir=str(tmp_path), bin_width_db=4.0, min_samples_warmstart=3))
+    assert p2.ceiling(-50.0) is None
+
+
+def test_corrupt_file_is_ignored(tmp_path):
+    (tmp_path / "m8812eu2.json").write_text("{not json")
+    p = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path)))
+    assert p.ceiling(-50.0) is None      # no crash, empty
+
+
+def test_key_sanitized_in_filename(tmp_path):
+    p = LearnedPrior("bl-m8812eu2/weird", LearnedPriorConfig(persist_dir=str(tmp_path)))
+    p.flush()
+    files = list(tmp_path.iterdir())
+    assert len(files) == 1 and "/" not in files[0].name
+
+
+def test_to_status_shape(tmp_path):
+    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3)
+    _fill_bin(p, -50.0, ceiling=5)
+    st = p.to_status()
+    assert st["key"] == "m8812eu2"
+    assert any(entry["ceiling"] == 5 for entry in st["bins"])
