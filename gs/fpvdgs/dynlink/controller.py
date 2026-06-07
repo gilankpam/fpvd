@@ -2,10 +2,10 @@
 """In-process GS dynamic-link controller.
 
 Owns one daemon thread running an asyncio event loop: stats client →
-SignalAggregator → Policy → wire encode → ReturnLink, plus the P4a HELLO
-listener. Thread-safe surface for the (thread-based) supervisor:
-start/stop/set_config/status. A config change while running rebuilds the
-loop from the new snapshot; the wfb runner is never touched."""
+SignalAggregator → Policy → wire encode → ReturnLink. Thread-safe
+surface for the (thread-based) supervisor: start/stop/set_config/status.
+A config change while running rebuilds the loop from the new snapshot;
+the wfb runner is never touched."""
 from __future__ import annotations
 
 import asyncio
@@ -14,12 +14,10 @@ import threading
 import time
 
 from .config_build import build_aggregator, build_policy_config, resolve_profile
-from .drone_config import DroneConfigState
 from .policy import Policy
 from .return_link import ReturnLink
 from .stats_client import RxEvent, SessionEvent, StatsClient
-from .tunnel_listener import TunnelListener
-from .wire import Encoder as WireEncoder, encode_hello_ack
+from .wire import Encoder as WireEncoder
 
 log = logging.getLogger("fpvdgs.dynlink")
 
@@ -50,11 +48,9 @@ class _IdrRelay(asyncio.DatagramProtocol):
 
 class DynamicLinkController:
     def __init__(self, snapshot, *, stats_endpoint="tcp://127.0.0.1:8103",
-                 gs_listen_addr="0.0.0.0", gs_listen_port=5801,
                  stats_client_factory=StatsClient, probe_status=None):
         self._snapshot = dict(snapshot)
         self._stats_endpoint = stats_endpoint
-        self._gs_listen = (gs_listen_addr, gs_listen_port)
         self._make_stats = stats_client_factory
         self._probe_status = probe_status
         self._lock = threading.RLock()
@@ -65,7 +61,7 @@ class DynamicLinkController:
         self._started = threading.Event()
         self._status = {"running": False, "statsConnected": False,
                         "decision": None, "lastEmitMs": None, "emitSeq": 0,
-                        "reason": "", "hello": "none", "idrListen": None}
+                        "reason": "", "idrListen": None}
 
     # ---- thread-safe public API -----------------------------------------
     def start(self):
@@ -138,27 +134,11 @@ class DynamicLinkController:
         with self._lock:
             snap = dict(self._snapshot)
         profile = resolve_profile(snap)
-        drone_cfg = DroneConfigState()
-        policy = Policy(build_policy_config(snap), profile, drone_config=drone_cfg,
+        policy = Policy(build_policy_config(snap), profile,
                         probe_status=self._probe_status)
         aggregator = build_aggregator(snap)
         return_link = ReturnLink(snap["droneAddr"], int(snap["dronePort"]))
         encoder = WireEncoder(seq=1)
-
-        def _on_hello(h):
-            drone_cfg.on_hello(h)
-            ack = drone_cfg.build_ack()
-            if ack is not None:
-                return_link.send_hello_ack(encode_hello_ack(ack))
-                self._set(hello="acked")
-
-        listener = TunnelListener(self._gs_listen[0], self._gs_listen[1],
-                                  on_pong=None, on_hello=_on_hello)
-        try:
-            await listener.start()
-        except OSError as e:
-            log.warning("dl: HELLO listener bind %s failed: %s", self._gs_listen, e)
-            listener = None
 
         # IDR-token relay: 0.0.0.0:idrPort -> droneAddr:idrPort. Non-fatal if
         # the local port is taken (e.g. a leftover socat); the controller runs on.
@@ -205,10 +185,7 @@ class DynamicLinkController:
                 decision = policy.tick(signals)
                 return_link.send(encoder.encode(decision))
                 self._set(
-                    decision={"mcs": decision.mcs, "k": decision.k,
-                              "n": decision.n, "depth": decision.depth,
-                              "txpowerDbm": decision.tx_power_dBm,
-                              "bitrateKbps": decision.bitrate_kbps},
+                    decision={"mcs": decision.mcs},
                     reason=decision.reason,
                     lastEmitMs=int(time.monotonic() * 1000),
                     emitSeq=self._status["emitSeq"] + 1,
@@ -221,8 +198,6 @@ class DynamicLinkController:
         try:
             await self._stats_loop(on_event)
         finally:
-            if listener is not None:
-                listener.stop()
             if idr_transport is not None:
                 idr_transport.close()
             return_link.close()

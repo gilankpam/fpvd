@@ -69,3 +69,16 @@ def test_gate_parses_probe_knobs():
     assert g.video_demote_per == 0.04
     # emergency + bounds kept
     assert g.emergency_loss_rate == 0.05 and g.max_mcs == 5  # _block() sets maxMcs=5
+
+
+def test_retired_bitrate_fec_knobs_parse_and_warn(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING):
+        cfg = build_policy_config(_block(tuning={
+            "policy": {"bitrate": {"utilization_factor": 0.7, "min_bitrate_kbps": 1000}},
+            "fec": {"base_redundancy_ratio": 0.4, "max_n_escalation": 6},
+            "video": {"per_packet_airtime_us": 80, "max_latency_ms": 100},
+        }))
+    assert cfg is not None   # loads despite the retired knobs
+    assert any("3a" in r.message or "drone" in r.message.lower()
+               for r in caplog.records)

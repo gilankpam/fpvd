@@ -14,12 +14,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .policy import (
-    CooldownConfig, FECBounds, GateConfig, LeadingLoopConfig,
+    GateConfig, LeadingLoopConfig,
     PolicyConfig, ProfileSelectionConfig, SafeDefaults,
 )
-from .bitrate import BitrateConfig
-from .dynamic_fec import DynamicFecConfig
-from .predictor import PredictorConfig
 from .profile import RadioProfile, load_profile
 from .signals import SignalAggregator
 
@@ -89,15 +86,35 @@ _DEPRECATED_GATE_KEYS = {
     "hysteresis_up_db", "hysteresis_down_db",
 }
 
+_DEPRECATED_PHASE3A_KEYS = {
+    # bitrate/FEC/predictor knobs moved to the drone in Phase 3a.
+    "utilization_factor", "min_bitrate_kbps", "max_bitrate_kbps",
+    "base_redundancy_ratio", "max_redundancy_ratio", "blocks_per_frame",
+    "depth_max", "n_loss_threshold", "n_loss_windows", "n_loss_step",
+    "n_recover_windows", "n_recover_step", "max_n_escalation",
+    "per_packet_airtime_us", "max_latency_ms",
+}
+
 
 def _build_policy_config(raw: dict) -> PolicyConfig:
     leading_raw = raw.get("leading_loop", {})
     gate_raw = raw.get("gate", {})
     selection_raw = raw.get("profile_selection", {})
-    cooldown_raw = raw.get("cooldown", {})
-    fec_raw = raw.get("fec", {})
     safe_raw = raw.get("safe_defaults", {})
+
+    bitrate_raw = raw.get("policy", {}).get("bitrate", {})
+    fec_raw = raw.get("fec", {})
     video_raw = raw.get("video", {})
+    retired_present = sorted(
+        {k for raw_sub in (bitrate_raw, fec_raw, video_raw)
+         for k in _DEPRECATED_PHASE3A_KEYS
+         if k in (raw_sub or {})}
+    )
+    if retired_present:
+        log.warning(
+            "bitrate/FEC/predictor knobs are now drone-local (Phase 3a) and "
+            "ignored on the GS: %s", ", ".join(retired_present)
+        )
 
     deprecated_present = sorted(
         k for k in _DEPRECATED_LEADING_KEYS if k in leading_raw
@@ -186,115 +203,17 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
             selection_raw.get("upward_confidence_loops", 4)
         ),
     )
-    cooldown = CooldownConfig(
-        min_change_interval_ms_fec=float(
-            cooldown_raw.get("min_change_interval_ms_fec", 200.0)
-        ),
-        min_change_interval_ms_depth=float(
-            cooldown_raw.get("min_change_interval_ms_depth", 200.0)
-        ),
-        min_change_interval_ms_radio=float(
-            cooldown_raw.get("min_change_interval_ms_radio", 500.0)
-        ),
-        min_change_interval_ms_cross=float(
-            cooldown_raw.get("min_change_interval_ms_cross", 50.0)
-        ),
-    )
-    fec = FECBounds(
-        depth_max=int(fec_raw.get("depth_max", 3)),
-    )
 
-    fec_kbounds_raw = fec_raw.get("k_bounds", {})
-    max_red = float(fec_raw.get("max_redundancy_ratio", 1.0))
-    hard_bpf = 1.0 + max_red
-    bpf = float(fec_raw.get("blocks_per_frame", hard_bpf))
-    if bpf < hard_bpf:
-        log.warning(
-            "config: fec.blocks_per_frame=%.2f is below "
-            "1 + max_redundancy_ratio (%.2f) — block_fill will exceed "
-            "one frame period under sustained loss. Set blocks_per_frame "
-            ">= %.2f for the hard latency bound.",
-            bpf, hard_bpf, hard_bpf,
-        )
-    dynamic_fec = DynamicFecConfig(
-        k_min=int(fec_kbounds_raw.get("min", 4)),
-        k_max=int(fec_kbounds_raw.get("max", 16)),
-        base_redundancy_ratio=float(fec_raw.get("base_redundancy_ratio", 0.5)),
-        max_redundancy_ratio=max_red,
-        blocks_per_frame=bpf,
-        n_loss_threshold=float(fec_raw.get("n_loss_threshold", 0.02)),
-        n_loss_windows=int(fec_raw.get("n_loss_windows", 3)),
-        n_loss_step=int(fec_raw.get("n_loss_step", 1)),
-        n_recover_windows=int(fec_raw.get("n_recover_windows", 10)),
-        n_recover_step=int(fec_raw.get("n_recover_step", 1)),
-        max_n_escalation=int(fec_raw.get("max_n_escalation", 4)),
-    )
-
-    # Legacy fec.* keys: present in old gs.yaml configs but no longer
-    # wired. Log a warning so the operator cleans them up.
-    _legacy_fec_keys = (
-        "mtu_bytes",                    # now drone-reported via DLHE (P4a)
-        "fec_block_fill_ms_target",     # removed during the static-table era
-        "n_min", "n_preempt_step",      # removed during the static-table era
-    )
-    _legacy_fec_reasons = {
-        "mtu_bytes": "MTU is now reported by the drone at runtime",
-        "fec_block_fill_ms_target": "block-fill is now bounded by k_bounds.max",
-        "n_min": "absorbed into k_bounds.min",
-        "n_preempt_step": "preemptive escalation removed",
-    }
-    for k in _legacy_fec_keys:
-        if k in fec_raw:
-            log.warning(
-                "config: ignoring legacy fec.%s — %s", k,
-                _legacy_fec_reasons.get(k, "deprecated"),
-            )
-
-    # Legacy encoder keys: encoder.fps moved drone-side.
-    encoder_raw = raw.get("encoder", {})
-    if "fps" in encoder_raw:
-        log.warning(
-            "config: ignoring legacy encoder.fps — FPS is now reported "
-            "by the drone via DLHE (P4a)"
-        )
     safe_video = safe_raw.get("video", {})
     safe = SafeDefaults(
-        k=int(safe_video.get("k", 8)),
-        n=int(safe_video.get("n", 12)),
-        depth=int(safe_raw.get("depth", 1)),
-        mcs=int(safe_raw.get("mcs", 1)),
-    )
-    predictor = PredictorConfig(
-        per_packet_airtime_us=float(video_raw.get("per_packet_airtime_us", 80.0)),
+        mcs=int(safe_raw.get("mcs", safe_video.get("mcs", 1))),
     )
     policy_raw = raw.get("policy", {})
-    bitrate_raw = policy_raw.get("bitrate", {})
-    if "base_redundancy_ratio" in bitrate_raw:
-        log.warning(
-            "policy.bitrate.base_redundancy_ratio is deprecated and "
-            "ignored; fec.base_redundancy_ratio is now authoritative "
-            "(bitrate is derived from live (k, n) per the bitrate-aware "
-            "FEC design)."
-        )
-    try:
-        bitrate = BitrateConfig(
-            utilization_factor=float(bitrate_raw.get("utilization_factor", 0.8)),
-            min_bitrate_kbps=int(bitrate_raw.get("min_bitrate_kbps", 1000)),
-            max_bitrate_kbps=int(bitrate_raw.get("max_bitrate_kbps", 24000)),
-        )
-    except ValueError as e:
-        raise ValueError(f"policy.bitrate.{e}") from e
     return PolicyConfig(
         leading=leading,
         gate=gate,
         selection=selection,
-        cooldown=cooldown,
-        fec=fec,
         safe=safe,
-        bitrate=bitrate,
-        dynamic_fec=dynamic_fec,
-        predictor=predictor,
-        max_latency_ms=float(video_raw.get("max_latency_ms", 50.0)),
         starvation_windows=int(policy_raw.get("starvation_windows", 5)),
     )
 

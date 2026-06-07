@@ -294,51 +294,6 @@ def test_tx_power_jumps_atomically_on_emergency_drop():
     assert int(round(s.state.tx_power_dBm)) == 20
 
 
-# ── Policy-level: drone_config safe-defaults gate (P4a Task 10) ────────────
-
-def test_policy_emits_safe_defaults_until_drone_synced():
-    """Until the drone has sent a HELLO, the policy must emit a
-    safe-defaults decision regardless of the incoming signals."""
-    from fpvdgs.dynlink.drone_config import DroneConfigState
-    from fpvdgs.dynlink.signals import Signals
-    from fpvdgs.dynlink.stats_client import SessionInfo
-    from fpvdgs.dynlink.wire import Hello
-
-    profile = load_profile("m8812eu2", [PACKAGED_DIR])
-    cfg = PolicyConfig(
-        leading=LeadingLoopConfig(tx_power_min_dBm=5.0, tx_power_max_dBm=30.0),
-        safe=SafeDefaults(k=8, n=12, depth=1, mcs=1),
-    )
-    drone_cfg = DroneConfigState()
-    policy = Policy(cfg, profile, drone_config=drone_cfg)
-
-    # Healthy signals that would otherwise drive normal MCS selection.
-    signals = Signals(
-        rssi=-55.0, rssi_min_w=-55.0, rssi_max_w=-55.0,
-        residual_loss_w=0.0, fec_work=0.0,
-        timestamp=0.0,
-        link_starved_w=False,
-        session=SessionInfo(
-            fec_type="VDM_RS", fec_k=8, fec_n=12, epoch=1,
-            interleave_depth=1, contract_version=2,
-        ),
-    )
-
-    decision_before = policy.tick(signals)
-    assert decision_before.mcs == cfg.safe.mcs
-    assert decision_before.k == cfg.safe.k
-    assert decision_before.n == cfg.safe.n
-    assert decision_before.depth == cfg.safe.depth
-    assert decision_before.reason == "awaiting_drone_config"
-
-    # Synthesize a HELLO; policy should now emit "real" decisions.
-    drone_cfg.on_hello(Hello(generation_id=1, mtu_bytes=1400, fps=60))
-    assert drone_cfg.is_synced()
-    decision_after = policy.tick(signals)
-    # The real path runs; reason is no longer the gate sentinel.
-    assert decision_after.reason != "awaiting_drone_config"
-
-
 # ── Cold-start: seed MCS from link RSSI before any probe data exists ────────
 
 
@@ -356,41 +311,30 @@ def test_cold_start_seeds_mcs_from_rssi():
     assert coarse_mcs_for_rssi(-50) == 5   # stronger than top floor
 
 
-def test_cold_start_seed_raises_mcs_on_first_synced_tick():
-    """On the first post-sync tick with a strong RSSI, the cold-start seed
-    should raise the operating MCS above the safe floor (probe has no data
-    yet, so select() cannot promote on its own).
-    (a) First synced tick with strong RSSI (-50) raises current_mcs >= 3.
-    (b) Seed is one-shot and only-raises: a subsequent weak-RSSI tick
-        with zero loss does not lower current_mcs via the seed."""
-    from fpvdgs.dynlink.drone_config import DroneConfigState
+def test_cold_start_seed_raises_mcs_without_a_sync_gate():
+    """On the first tick with a strong RSSI, the cold-start seed should raise
+    the operating MCS above the safe floor (probe has no data yet, so
+    select() cannot promote on its own). Phase 3b: Policy is built WITHOUT a
+    sync gate — the {mcs}-only Decision is emitted from the very first tick.
+    (a) First tick with strong RSSI (-50) raises mcs >= 3.
+    (b) Seed is one-shot and only-raises: a subsequent weak-RSSI tick with
+        zero loss does not lower current_mcs via the seed."""
     from fpvdgs.dynlink.signals import Signals
-    from fpvdgs.dynlink.stats_client import SessionInfo
-    from fpvdgs.dynlink.wire import Hello
 
     profile = load_profile("m8812eu2", [PACKAGED_DIR])
     cfg = PolicyConfig(
         leading=LeadingLoopConfig(tx_power_min_dBm=5.0, tx_power_max_dBm=30.0),
-        safe=SafeDefaults(k=8, n=12, depth=1, mcs=1),
+        safe=SafeDefaults(mcs=1),
     )
-    drone_cfg = DroneConfigState()
     # No probe_status → selector can never promote; any MCS > 1 must come
     # from the cold-start seed.
-    policy = Policy(cfg, profile, drone_config=drone_cfg)
+    policy = Policy(cfg, profile)
 
-    drone_cfg.on_hello(Hello(generation_id=1, mtu_bytes=1400, fps=60))
-    assert drone_cfg.is_synced()
-
-    session = SessionInfo(
-        fec_type="VDM_RS", fec_k=8, fec_n=12, epoch=1,
-        interleave_depth=1, contract_version=2,
-    )
-
-    # (a) First post-sync tick: strong RSSI (-50) → seed must raise MCS.
+    # (a) First tick: strong RSSI (-50) → seed must raise MCS.
     strong_signals = Signals(
         rssi=-50.0, rssi_min_w=-50.0, rssi_max_w=-50.0,
         residual_loss_w=0.0, fec_work=0.0,
-        timestamp=1.0, link_starved_w=False, session=session,
+        timestamp=1.0, link_starved_w=False,
     )
     decision_strong = policy.tick(strong_signals)
     assert decision_strong.mcs >= 3, (
@@ -404,9 +348,9 @@ def test_cold_start_seed_raises_mcs_on_first_synced_tick():
     weak_signals = Signals(
         rssi=-90.0, rssi_min_w=-90.0, rssi_max_w=-90.0,
         residual_loss_w=0.0, fec_work=0.0,
-        timestamp=2.0, link_starved_w=False, session=session,
+        timestamp=2.0, link_starved_w=False,
     )
-    decision_weak = policy.tick(weak_signals)
+    policy.tick(weak_signals)
     assert policy.leading.state.current_mcs >= mcs_after_seed, (
         f"seed must be one-shot and only-raises: mcs dropped from "
         f"{mcs_after_seed} to {policy.leading.state.current_mcs}"
