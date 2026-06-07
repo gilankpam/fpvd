@@ -133,6 +133,23 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkRoiQp,
                                                thresholdKbps, lowAnchorKbps,
                                                floor, step)
 
+struct DynamicLinkBitrate {
+    int minBitrateKbps{1000};
+    int maxBitrateKbps{24000};
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkBitrate,
+                                               minBitrateKbps, maxBitrateKbps)
+
+struct DynamicLinkFec {
+    double baseRedundancyRatio{0.5};   // n/k = 1 + ratio = 1.5 (= 8/12 data fraction)
+    double blocksPerFrame{2.0};
+    int    kMin{2};
+    int    kMax{50};
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkFec,
+                                               baseRedundancyRatio,
+                                               blocksPerFrame, kMin, kMax)
+
 struct DynamicLink {
     bool enabled{false};
     int healthTimeoutMs{10000};
@@ -143,13 +160,15 @@ struct DynamicLink {
     DynamicLinkOsd osd{};
     DynamicLinkRoiQp roiQp{};
     DynamicLinkSafe safe{};
+    DynamicLinkBitrate bitrate{};
+    DynamicLinkFec     fec{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled,
                                                healthTimeoutMs,
                                                interleavingSupported,
                                                minIdrIntervalMs, applyStaggerMs,
                                                applySubPaceMs,
-                                               osd, roiQp, safe)
+                                               osd, roiQp, safe, bitrate, fec)
 
 struct Service {
     bool enabled{true};

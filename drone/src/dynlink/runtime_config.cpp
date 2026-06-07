@@ -36,6 +36,17 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
         static_cast<uint16_t>(dl.safe.bitrateKbps),
     };
 
+    s.bitrate = BitrateEngineConfig{
+        dl.fec.baseRedundancyRatio,    // baseRedundancyRatio
+        dl.fec.blocksPerFrame,         // blocksPerFrame
+        dl.fec.kMin,                   // kMin
+        dl.fec.kMax,                   // kMax
+        dl.bitrate.minBitrateKbps,     // minBitrateKbps
+        dl.bitrate.maxBitrateKbps,     // maxBitrateKbps
+        c.link.mtu,                    // mtuBytes (from link.mtu)
+        c.video.fps,                   // fps (from video.fps)
+    };
+
     s.helloMtuBytes = static_cast<uint16_t>(c.link.mtu);
     s.helloFps      = static_cast<uint16_t>(c.video.fps);
     s.stbc          = c.link.stbc;

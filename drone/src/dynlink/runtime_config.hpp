@@ -17,6 +17,17 @@ struct SafeDefaults {
     uint16_t bitrateKbps;
 };
 
+struct BitrateEngineConfig {
+    double baseRedundancyRatio{0.5};
+    double blocksPerFrame{2.0};
+    int    kMin{2};
+    int    kMax{50};
+    int    minBitrateKbps{1000};
+    int    maxBitrateKbps{24000};
+    int    mtuBytes{1500};   // from link.mtu
+    int    fps{60};          // from video.fps
+};
+
 struct DlRuntimeConfig {
     uint32_t healthTimeoutMs;
     uint32_t minIdrIntervalMs;
@@ -28,6 +39,7 @@ struct DlRuntimeConfig {
     bool     debug;
     RoiCurve     roiQp;
     SafeDefaults safe;
+    BitrateEngineConfig bitrate;
     uint16_t helloMtuBytes;
     uint16_t helloFps;
     // Static link radiotap flags the controller PRESERVES (never decides). The

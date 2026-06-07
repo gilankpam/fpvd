@@ -26,7 +26,9 @@ TEST_CASE("schema: round-trip a minimal config through json") {
             "roiQp":{"thresholdKbps":6000,"lowAnchorKbps":2000,
                      "floor":-24,"step":3},
             "safe":{"mcs":1,"k":8,"n":12,"depth":1,
-                    "bandwidth":20,"txPowerDbm":20,"bitrateKbps":2000}
+                    "bandwidth":20,"txPowerDbm":20,"bitrateKbps":2000},
+            "bitrate":{"minBitrateKbps":1000,"maxBitrateKbps":24000},
+            "fec":{"baseRedundancyRatio":0.5,"blocksPerFrame":2.0,"kMin":2,"kMax":50}
         },
         "services":{}
     })");

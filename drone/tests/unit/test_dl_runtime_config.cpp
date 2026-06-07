@@ -116,3 +116,26 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
     CHECK(s.safe.txPowerDbm  == 20);
     CHECK(s.safe.bitrateKbps == 2000u);
 }
+
+TEST_CASE("buildDlSnapshot maps the Phase-3a bitrate-engine knobs") {
+    fpvd::Config c{};
+    c.link.mtu  = 1400;
+    c.video.fps = 90;
+    c.dynamicLink.bitrate.minBitrateKbps = 1500;
+    c.dynamicLink.bitrate.maxBitrateKbps = 20000;
+    c.dynamicLink.fec.baseRedundancyRatio = 0.5;
+    c.dynamicLink.fec.blocksPerFrame      = 2.0;
+    c.dynamicLink.fec.kMin = 3;
+    c.dynamicLink.fec.kMax = 40;
+
+    auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+
+    CHECK(s.bitrate.mtuBytes == 1400);
+    CHECK(s.bitrate.fps == 90);
+    CHECK(s.bitrate.minBitrateKbps == 1500);
+    CHECK(s.bitrate.maxBitrateKbps == 20000);
+    CHECK(s.bitrate.baseRedundancyRatio == doctest::Approx(0.5));
+    CHECK(s.bitrate.blocksPerFrame == doctest::Approx(2.0));
+    CHECK(s.bitrate.kMin == 3);
+    CHECK(s.bitrate.kMax == 40);
+}
