@@ -56,6 +56,33 @@ class LearnedPrior:
             return None
         return int((rssi - self.cfg.rssi_min) // self.cfg.bin_width_db)
 
+    def _update(self, b: int, rung: int, clean: bool) -> None:
+        if rung < 0 or rung > MAX_MCS:
+            return
+        cell = self._cells[b][rung]
+        v = 1.0 if clean else 0.0
+        cell[0] = v if cell[0] is None else (
+            self.cfg.ewma_alpha * v + (1.0 - self.cfg.ewma_alpha) * cell[0]
+        )
+        cell[1] += 1.0
+
+    def ingest(self, *, rssi, probed_rung, probe_clean,
+               operating_mcs, operating_clean) -> None:
+        b = self.rssi_bin(rssi)
+        if b is None:
+            return
+        if probed_rung is not None:
+            self._update(b, int(probed_rung), bool(probe_clean))
+        if operating_mcs is not None:
+            self._update(b, int(operating_mcs), bool(operating_clean))
+        self._since_flush += 1
+        if self._since_flush >= self.cfg.flush_interval_observations:
+            self.flush()
+            self._since_flush = 0
+
+    def flush(self) -> None:
+        pass  # persistence lands in Task 6
+
     def bin_ceiling(self, b: int) -> int | None:
         return None  # filled in Task 3
 
