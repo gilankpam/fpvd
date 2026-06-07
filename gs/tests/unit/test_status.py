@@ -83,3 +83,12 @@ def test_build_status_omits_probe_when_none():
     j = build_status("vX", {"running": True}, {},
                      {"reachable": False, "linkId": 1, "inSync": None})
     assert "probe" not in j
+
+
+def test_adapter_id_mismatch_warns_once(caplog):
+    import logging
+    from fpvdgs.supervisor import adapter_matches_profile
+    # bl-m8812eu2 matches radioProfile m8812eu2; m8731 does not.
+    assert adapter_matches_profile("bl-m8812eu2", "m8812eu2") is True
+    assert adapter_matches_profile("bl-m8731bu4", "m8812eu2") is False
+    assert adapter_matches_profile(None, "m8812eu2") is True   # unknown → no warn

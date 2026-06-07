@@ -1,9 +1,21 @@
 """fpvd supervisor: owns config + HTTP API + runner supervision. Pure stdlib."""
 
 import argparse
+import logging
 import signal
 import sys
 import time
+
+log = logging.getLogger(__name__)
+
+
+def adapter_matches_profile(adapter_id, radio_profile) -> bool:
+    """Loose match: the drone's radio-up.sh adapter_id (e.g. 'bl-m8812eu2')
+    should contain the configured radioProfile (e.g. 'm8812eu2'). Unknown
+    adapter_id (None / "") → treated as a match (no warning)."""
+    if not adapter_id:
+        return True
+    return str(radio_profile) in str(adapter_id)
 
 from . import __version__, radio, render as render_mod, schema, status as status_mod
 from .api import Api, make_http_server
@@ -95,14 +107,26 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     started = time.monotonic()
 
+    _warned = {"adapter": False}
+
     def _dynamic_link_status(reachable):
         eff_dl = store.effective().get("dynamicLink", {})
         st = dynlink.status()
         st["enabled"] = bool(eff_dl.get("enabled"))
+        drone_active = None
+        adapter_id = None
         try:
-            drone_active = drone.get_status().get("link", {}).get("dynamicLinkActive")
+            ds = drone.get_status()
+            drone_active = ds.get("link", {}).get("dynamicLinkActive")
+            adapter_id = ds.get("radio", {}).get("adapterId")
         except Exception:
-            drone_active = None
+            pass
+        prof = eff_dl.get("radioProfile", "m8812eu2")
+        if not adapter_matches_profile(adapter_id, prof) and not _warned["adapter"]:
+            log.warning("drone adapter_id %r does not match radioProfile %r — "
+                        "the learned prior is keyed by radioProfile; check config",
+                        adapter_id, prof)
+            _warned["adapter"] = True
         st["drone"] = {"reachable": reachable,
                        "dynamicLinkActive": drone_active}
         return st
