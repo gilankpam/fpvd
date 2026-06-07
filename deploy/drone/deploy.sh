@@ -71,7 +71,7 @@ remote 'mkdir -p /etc/fpvd /usr/libexec/fpvd'
 copy "$STRIPPED"                   /usr/bin/fpvd.new
 copy "$CPP/scripts/radio-up.sh"   /usr/libexec/fpvd/radio-up.sh
 copy "$CPP/scripts/radio-tune.sh" /usr/libexec/fpvd/radio-tune.sh
-copy "$PROBE_FEEDER"              /usr/libexec/fpvd/probe-feeder
+copy "$PROBE_FEEDER"              /usr/libexec/fpvd/probe-feeder.new   # staged: live feeders hold the old inode (ETXTBSY); mv on switchover
 copy "$CPP/etc/defaults.json"     /etc/fpvd/defaults.json   # baseline; overlay /etc/fpvd/config.json (user edits) is untouched
 
 # init script: manual-deploy variant — /rom is read-only on a live system, so
@@ -103,7 +103,7 @@ case "$1" in
 esac
 EOF
 copy "$INIT" /etc/init.d/S99fpvd
-remote 'chmod +x /usr/bin/fpvd.new /usr/libexec/fpvd/radio-up.sh /usr/libexec/fpvd/radio-tune.sh /usr/libexec/fpvd/probe-feeder /etc/init.d/S99fpvd'
+remote 'chmod +x /usr/bin/fpvd.new /usr/libexec/fpvd/radio-up.sh /usr/libexec/fpvd/radio-tune.sh /usr/libexec/fpvd/probe-feeder.new /etc/init.d/S99fpvd'
 
 # ---- 4. switch over / restart -------------------------------------------
 if [ "$MODE" = install ]; then
@@ -122,6 +122,7 @@ if [ "$MODE" = install ]; then
         sleep 2
         rm -f /etc/init.d/S95waybeam /etc/init.d/S98wifibroadcast /etc/init.d/S99dynamic-link-applier
         mv -f /usr/bin/fpvd.new /usr/bin/fpvd
+        mv -f /usr/libexec/fpvd/probe-feeder.new /usr/libexec/fpvd/probe-feeder
         : > /tmp/fpvd.log
         /etc/init.d/S99fpvd start
     '
@@ -129,8 +130,13 @@ else
     echo "[update] restarting fpvd with the new binary…"
     remote '
         /etc/init.d/S99fpvd stop >/dev/null 2>&1 || true
-        sleep 1
+        sleep 2
         mv -f /usr/bin/fpvd.new /usr/bin/fpvd
+        mv -f /usr/libexec/fpvd/probe-feeder.new /usr/libexec/fpvd/probe-feeder
+        # start-stop-daemon -K signals but does not remove the pidfile; a stale
+        # /var/run/fpvd.pid makes the subsequent -S fail ("Starting fpvd: FAIL").
+        # Clear it after the stop+settle so the start is clean (the documented race).
+        rm -f /var/run/fpvd.pid
         : > /tmp/fpvd.log
         /etc/init.d/S99fpvd start
     '
