@@ -9,6 +9,7 @@ MODULES = [
     "decision", "stats_client",
     "signals", "return_link", "wire",
     "policy", "controller", "config_build",
+    "learned_prior", "flightlog",
 ]
 
 
