@@ -69,26 +69,6 @@ static int openTickTimer(uint32_t intervalMs) {
     return fd;
 }
 
-// Open an unconnected UDP socket for drone→GS tunnel traffic.
-// Resolves gsTunnelAddr:gsTunnelPort into *outDst. Returns -1 on failure
-// (non-fatal; HELLO is silently dropped when fd == -1).
-// Why no connect(): connect() on UDP triggers an immediate route lookup.
-// The applier may start before wfb-ng's TUN interface is up; sendto() per
-// packet lets the route self-heal once the tunnel comes up.
-static int openGsTunnelSocket(const std::string& addr, uint16_t port,
-                               struct sockaddr_in* outDst) {
-    int fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    if (fd < 0) return -1;
-    std::memset(outDst, 0, sizeof(*outDst));
-    outDst->sin_family = AF_INET;
-    outDst->sin_port   = htons(port);
-    if (inet_pton(AF_INET, addr.c_str(), &outDst->sin_addr) != 1) {
-        close(fd);
-        return -1;
-    }
-    return fd;
-}
-
 static int armGap(int gapFd, uint32_t ms) {
     struct itimerspec ts{};
     ts.it_value.tv_sec = ms / 1000;
@@ -111,12 +91,11 @@ DynamicLinkController::~DynamicLinkController() {
     stop();
 }
 
-void DynamicLinkController::start(const DlRuntimeConfig& snap, uint32_t generationId) {
+void DynamicLinkController::start(const DlRuntimeConfig& snap) {
     std::lock_guard<std::mutex> lk(lifetimeMu_);
     if (running_.load()) stopLocked();  // NOT stop() — avoid re-locking lifetimeMu_
 
     { std::lock_guard<std::mutex> cg(cfgMu_); cfg_ = std::make_shared<const DlRuntimeConfig>(snap); }
-    generationId_.store(generationId);
     stopFlag_.store(false);
 
     // Construct backend clients fresh from the snapshot + endpoints. They are
@@ -132,8 +111,6 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap, uint32_t generati
     radio_.emplace(snap.iface);
     osd_.emplace(ep_.osdMsgPath, snap.osdEnabled, ep_.osdUpdateIntervalMs, snap.osdDebugLatency);
     watchdog_.emplace(snap.healthTimeoutMs);
-    hello_.emplace(generationId, snap.helloMtuBytes, snap.helloFps, HelloCadence{});
-    hello_->setVanilla(!snap.interleavingSupported);
     // IdrListener: port==0 self-disables (fd()==-1); (re)constructed on every start()
     // so it is reset before emplace to ensure proper close/reopen across start/stop/start.
     idr_.reset();
@@ -285,55 +262,18 @@ void DynamicLinkController::run(int evfd) {
     // Gap timer (single-shot, armed on demand for staggered apply).
     int gapFd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
 
-    // Hello timer: fires ASAP (1 ms) to emit the first DLHE, then re-armed
-    // via nextDelayMs() after each fire. Owned + closed by run().
-    int helloTimerFd = -1;
-    if (hello_ && hello_->state() != HelloState::Disabled) {
-        helloTimerFd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-        if (helloTimerFd >= 0) {
-            struct itimerspec t{};
-            t.it_value.tv_nsec = 1 * 1000 * 1000;  // 1 ms — fire ASAP
-            timerfd_settime(helloTimerFd, 0, &t, nullptr);
-        }
-    }
-
-    // GS-tunnel socket: unconnected UDP, sendto per packet so the route
-    // self-heals once wfb-ng's tunnel comes up. -1 = non-fatal, HELLO dropped.
-    int gsTunnelFd = -1;
-    struct sockaddr_in gsTunnelDst{};
-    if (ep_.gsTunnelPort != 0) {
-        gsTunnelFd = openGsTunnelSocket(ep_.gsTunnelAddr, ep_.gsTunnelPort,
-                                         &gsTunnelDst);
-    }
-
-    // Build pollfd array: [listenFd?, tickFd?, gapFd?, helloTimerFd?, idrFd?, evfd?].
+    // Build pollfd array: [listenFd?, tickFd?, gapFd?, idrFd?, evfd?].
     // idr_ fd is owned by the IdrListener object — do NOT ::close it in run()'s cleanup.
-    struct pollfd pfds[6];
+    struct pollfd pfds[5];
     int nfds = 0;
-    int listenIdx = -1, tickIdx = -1, gapIdx = -1, helloIdx = -1, idrIdx = -1, eventIdx = -1;
+    int listenIdx = -1, tickIdx = -1, gapIdx = -1, idrIdx = -1, eventIdx = -1;
 
     if (listenFd    >= 0) { pfds[nfds].fd = listenFd;    pfds[nfds].events = POLLIN; listenIdx = nfds++; }
     if (tickFd      >= 0) { pfds[nfds].fd = tickFd;      pfds[nfds].events = POLLIN; tickIdx   = nfds++; }
     if (gapFd       >= 0) { pfds[nfds].fd = gapFd;       pfds[nfds].events = POLLIN; gapIdx    = nfds++; }
-    if (helloTimerFd >= 0){ pfds[nfds].fd = helloTimerFd;pfds[nfds].events = POLLIN; helloIdx  = nfds++; }
     // IDR listener: add to poll set only when enabled (fd >= 0). Port 0 disables.
     if (idr_ && idr_->fd() >= 0) { pfds[nfds].fd = idr_->fd(); pfds[nfds].events = POLLIN; idrIdx = nfds++; }
     if (evfd        >= 0) { pfds[nfds].fd = evfd;        pfds[nfds].events = POLLIN; eventIdx  = nfds++; }
-
-    // Helper: map HelloSm state -> HelloPub for status publication.
-    auto helloStateToPub = [](HelloState s) -> HelloPub {
-        switch (s) {
-            case HelloState::Announcing: return HelloPub::Announcing;
-            case HelloState::Keepalive:  return HelloPub::Keepalive;
-            default:                     return HelloPub::Disabled;
-        }
-    };
-
-    // Publish initial hello status from the state already set in start().
-    if (hello_) {
-        std::lock_guard<std::mutex> sg(statusMu_);
-        status_.hello = helloStateToPub(hello_->state());
-    }
 
     ApplyState applyState = ApplyState::Idle;
     Decision   applyPending{};
@@ -393,12 +333,6 @@ void DynamicLinkController::run(int evfd) {
                 // OSD: update enabled flag.
                 if (osd_) osd_->setEnabled(newCfg.osdEnabled);
 
-                // HelloSm: update mtu/fps (silent) and vanilla bit (re-announces if changed).
-                if (hello_) {
-                    hello_->setMtuFps(newCfg.helloMtuBytes, newCfg.helloFps);
-                    hello_->setVanilla(!newCfg.interleavingSupported);
-                }
-
                 // stbc/ldpc are preserved, not decided — but a hot change to
                 // them still has to reach the radio. dispatchTxApply only
                 // re-emits CMD_SET_RADIO on an mcs/bandwidth change, so when
@@ -437,15 +371,7 @@ void DynamicLinkController::run(int evfd) {
                 // EAGAIN/EINTR: nothing to do.
             } else {
                 PacketKind kind = peekKind(buf, static_cast<size_t>(got));
-                if (kind == PacketKind::HelloAck && hello_) {
-                    // HELLO ACK: decode and hand to the state machine.
-                    HelloAck ack{};
-                    if (decodeHelloAck(buf, static_cast<size_t>(got), ack) == DecodeResult::Ok) {
-                        hello_->onAck(ack);
-                        std::lock_guard<std::mutex> sg(statusMu_);
-                        status_.hello = helloStateToPub(hello_->state());
-                    }
-                } else if (kind == PacketKind::Decision) {
+                if (kind == PacketKind::Decision) {
                     Decision d{};
                     DecodeResult dr = decodeDecision(buf, static_cast<size_t>(got), d);
                     if (dr != DecodeResult::Ok) {
@@ -581,7 +507,7 @@ void DynamicLinkController::run(int evfd) {
         }
 
         // ---- IDR token listener: drain -> osd bump + encoder IDR request ----
-        // Port of dl_applier.c pfds[4] branch. IdrListener owns its fd;
+        // Port of dl_applier.c IDR-listen branch. IdrListener owns its fd;
         // do NOT ::close it here.
         if (idrIdx >= 0 && (pfds[idrIdx].revents & POLLIN)) {
             size_t got = idr_->drain();
@@ -591,57 +517,11 @@ void DynamicLinkController::run(int evfd) {
                 enc_->requestIdr(nowMs);
             }
         }
-
-        // ---- hello timer: build + send DLHE, re-arm -------------------------
-        if (helloIdx >= 0 && (pfds[helloIdx].revents & POLLIN)) {
-            uint64_t expirations;
-            ssize_t r = read(helloTimerFd, &expirations, sizeof(expirations));
-            (void)r;  // drain; count ignored
-
-            if (hello_) {
-                // If in KEEPALIVE, tick the miss counter (may drop to ANNOUNCING).
-                if (hello_->state() == HelloState::Keepalive) {
-                    hello_->onKeepaliveTick();
-                }
-
-                // Send a HELLO announcement if not DISABLED and gs-tunnel is up.
-                if (hello_->state() != HelloState::Disabled && gsTunnelFd >= 0) {
-                    uint8_t out[kHelloOnWire];
-                    size_t nOut = hello_->buildAnnounce(out, sizeof(out));
-                    if (nOut > 0) {
-                        ssize_t s = sendto(gsTunnelFd, out, nOut, 0,
-                                           reinterpret_cast<struct sockaddr*>(&gsTunnelDst),
-                                           sizeof(gsTunnelDst));
-                        (void)s;  // non-fatal; route may not be ready yet
-                    }
-                }
-
-                // Re-arm. timerfd_settime with all-zero it_value disarms the
-                // timer, so coerce a 0-ms delay to 1 ms when we still want to
-                // fire. DISABLED -> leave it_value zero -> timer stays parked.
-                uint32_t delayMs = hello_->nextDelayMs();
-                struct itimerspec t{};
-                t.it_value.tv_sec  = delayMs / 1000;
-                t.it_value.tv_nsec = static_cast<long>(delayMs % 1000) * 1000000L;
-                if (delayMs == 0 && hello_->state() != HelloState::Disabled) {
-                    t.it_value.tv_nsec = 1 * 1000 * 1000;  // 1 ms
-                }
-                timerfd_settime(helloTimerFd, 0, &t, nullptr);
-
-                // Publish updated hello state (may have changed on keepalive tick).
-                {
-                    std::lock_guard<std::mutex> sg(statusMu_);
-                    status_.hello = helloStateToPub(hello_->state());
-                }
-            }
-        }
     }
 
     if (listenFd    >= 0) ::close(listenFd);
     if (tickFd      >= 0) ::close(tickFd);
     if (gapFd       >= 0) ::close(gapFd);
-    if (helloTimerFd >= 0) ::close(helloTimerFd);
-    if (gsTunnelFd  >= 0) ::close(gsTunnelFd);
     // do NOT close evfd/eventFd_ here — stop() owns the close after join()
 }
 

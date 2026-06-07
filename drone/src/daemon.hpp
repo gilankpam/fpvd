@@ -125,7 +125,6 @@ private:
     Orchestrator orch_;
     BeamformingController bf_;
     dynlink::DynamicLinkController dl_;
-    uint32_t dlGenerationId_;
     std::chrono::steady_clock::time_point startedAt_;
     std::mutex mu_;
     std::thread osdThread_;

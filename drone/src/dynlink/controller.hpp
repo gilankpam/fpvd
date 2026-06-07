@@ -1,7 +1,6 @@
 #pragma once
 #include "dynlink/dedup.hpp"
 #include "dynlink/encoder_client.hpp"
-#include "dynlink/hello.hpp"
 #include "dynlink/idr_listen.hpp"
 #include "dynlink/osd.hpp"
 #include "dynlink/radio_txpower.hpp"
@@ -24,7 +23,7 @@ public:
     DynamicLinkController(const DynamicLinkController&) = delete;
     DynamicLinkController& operator=(const DynamicLinkController&) = delete;
 
-    void start(const DlRuntimeConfig& snap, uint32_t generationId);
+    void start(const DlRuntimeConfig& snap);
     void stop();                                  // idempotent; joins the thread
     bool running() const { return running_.load(); }
     void setConfig(const DlRuntimeConfig& snap);  // hot reload (stub for now; Task 17 fills it)
@@ -52,7 +51,6 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> stopFlag_{false};
     std::atomic<int> eventFd_{-1};                 // reload/stop wake
-    std::atomic<uint32_t> generationId_{0};
     std::mutex lifetimeMu_;                          // serializes start/stop/setConfig lifecycle transitions
     mutable std::mutex cfgMu_;
     std::shared_ptr<const DlRuntimeConfig> cfg_;   // guarded by cfgMu_
@@ -70,7 +68,6 @@ private:
     std::optional<RadioTxpower>       radio_;
     std::optional<OsdWriter>          osd_;
     std::optional<Watchdog>           watchdog_;
-    std::optional<HelloSm>            hello_;      // constructed in start(); used only from run()
     std::optional<IdrListener>        idr_;        // constructed in start(); fd owned by IdrListener
     Dedup                             dedup_;
 

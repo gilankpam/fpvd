@@ -15,7 +15,6 @@
 #include <ctime>
 #include <fstream>
 #include <filesystem>
-#include <random>
 #include <thread>
 
 namespace fpvd {
@@ -31,7 +30,6 @@ Daemon::Daemon(DaemonPaths paths)
     : paths_(std::move(paths)),
       waybeam_(paths_.dlEndpoints.encHost, paths_.dlEndpoints.encPort),
       dl_(paths_.dlEndpoints),
-      dlGenerationId_(std::random_device{}()),
       startedAt_(std::chrono::steady_clock::now()) {
 }
 
@@ -234,7 +232,7 @@ void Daemon::rewriteWaybeamJson() {
 void Daemon::startController() {
     // Builds a fresh snapshot from the current effective_ config + detected iface,
     // and starts the in-process control loop.
-    dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface), dlGenerationId_);
+    dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface));
 }
 
 void Daemon::addProbeStream() {

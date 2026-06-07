@@ -31,12 +31,12 @@ TEST_CASE("controller starts and stops cleanly") {
     DlRuntimeConfig snap{};                 // zero-ish; fields not exercised here
     snap.healthTimeoutMs = 10000; snap.iface = "wlan0";
     DynamicLinkController c(ephemeral());
-    c.start(snap, /*generationId=*/0x1234);
+    c.start(snap);
     CHECK(c.status().running == true);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     c.stop();
     CHECK(c.status().running == false);
-    c.start(snap, 0x1234);                  // restartable
+    c.start(snap);                           // restartable
     CHECK(c.status().running == true);
     c.stop();
 }
@@ -246,7 +246,7 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
         /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
-    c.start(snap, /*generationId=*/0x1234);
+    c.start(snap);
     CHECK(c.status().running == true);
 
     // 1) Inject one decision. mcs=7, bw=40. The GS-sent k/n/bitrate are now
@@ -328,7 +328,7 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
     snap.safe = SafeDefaults{1, 8, 12, 0, 20, 5, 2000};
 
     DynamicLinkController c(ep);
-    c.start(snap, 0x2222);
+    c.start(snap);
 
     auto mkDecision = [](uint32_t seq, uint8_t mcs, uint16_t br) {
         Decision d{};
@@ -419,7 +419,7 @@ TEST_CASE("controller IDR: datagram -> requestIdr; second immediate datagram is 
     snap.safe = SafeDefaults{1, 8, 12, 0, 20, 5, 2000};
 
     DynamicLinkController c(ep);
-    c.start(snap, /*generationId=*/0x5555);
+    c.start(snap);
     CHECK(c.status().running == true);
 
     // 1) Send an IDR token; assert the controller forwards it to the encoder.
@@ -448,116 +448,6 @@ TEST_CASE("controller IDR: datagram -> requestIdr; second immediate datagram is 
 
     c.stop();
     CHECK(c.status().running == false);
-}
-
-// ---------------------------------------------------------------------------
-// HELLO announce/keepalive + GS-tunnel socket
-// ---------------------------------------------------------------------------
-
-TEST_CASE("controller HELLO: sends DLHE to gs-tunnel sink and transitions to Keepalive on ACK") {
-    FakeWfbTx wfb;
-    FakeEnc enc;
-
-    // GS-tunnel sink: bind an ephemeral UDP socket on loopback to receive DLHE
-    // datagrams that the controller sends via the gs-tunnel socket.
-    int sinkFd = ::socket(AF_INET, SOCK_DGRAM, 0);
-    REQUIRE(sinkFd >= 0);
-    sockaddr_in sinkAddr{};
-    sinkAddr.sin_family = AF_INET;
-    sinkAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    sinkAddr.sin_port = 0;  // let the kernel assign
-    REQUIRE(::bind(sinkFd, reinterpret_cast<sockaddr*>(&sinkAddr), sizeof(sinkAddr)) == 0);
-    socklen_t sinkLen = sizeof(sinkAddr);
-    REQUIRE(::getsockname(sinkFd, reinterpret_cast<sockaddr*>(&sinkAddr), &sinkLen) == 0);
-    uint16_t sinkPort = ntohs(sinkAddr.sin_port);
-    // 500 ms recv timeout so the sink thread can poll.
-    timeval tv{0, 500'000};
-    ::setsockopt(sinkFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    // Collect received DLHE packets in a thread.
-    std::atomic<int> helloCount{0};
-    std::atomic<bool> sinkStop{false};
-    std::thread sinkThread([&] {
-        while (!sinkStop.load()) {
-            uint8_t buf[64];
-            ssize_t n = ::recv(sinkFd, buf, sizeof(buf), 0);
-            if (n <= 0) continue;
-            if (peekKind(buf, static_cast<size_t>(n)) == PacketKind::Hello) {
-                helloCount.fetch_add(1);
-            }
-        }
-    });
-
-    Endpoints ep;
-    ep.listenAddr       = "127.0.0.1";
-    ep.listenPort       = 45803;
-    ep.wfbCtlAddr       = "127.0.0.1";
-    ep.wfbCtlPort       = wfb.port;
-    ep.encHost          = "127.0.0.1";
-    ep.encPort          = static_cast<uint16_t>(enc.port);
-    ep.idrPort          = 0;
-    ep.gsTunnelAddr     = "127.0.0.1";
-    ep.gsTunnelPort     = sinkPort;
-    ep.osdMsgPath       = "/tmp/fpvd_test_osd3.msg";
-    ep.osdUpdateIntervalMs = 1000;
-
-    const uint32_t genId = 0xDEADBEEF;
-
-    DlRuntimeConfig snap{};
-    snap.healthTimeoutMs       = 10000;   // won't trip during test
-    snap.minIdrIntervalMs      = 500;
-    snap.applyStaggerMs        = 0;
-    snap.applySubPaceMs        = 0;
-    snap.interleavingSupported = false;
-    snap.osdEnabled            = false;
-    snap.osdDebugLatency       = false;
-    snap.debug                 = false;
-    snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
-    snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{1, 8, 12, 0, 20, 5, 2000};
-    snap.helloMtuBytes         = 1400;    // non-zero -> HelloSm enters ANNOUNCING
-    snap.helloFps              = 60;
-
-    DynamicLinkController c(ep);
-    c.start(snap, genId);
-    CHECK(c.status().running == true);
-
-    // 1) Assert at least one DLHE arrives at the sink within 2 s.
-    bool gotHello = waitFor([&] { return helloCount.load() >= 1; }, 2000);
-    CHECK(gotHello);
-
-    // 2) Send a matching HelloAck back into the controller's listen port.
-    HelloAck ack{};
-    ack.magic             = kHelloAckMagic;
-    ack.version           = kWireVersion;
-    ack.generationIdEcho  = genId;
-    uint8_t ackBuf[64];
-    size_t ackLen = encodeHelloAck(ack, ackBuf, sizeof(ackBuf));
-    REQUIRE(ackLen > 0);
-
-    int s2 = ::socket(AF_INET, SOCK_DGRAM, 0);
-    REQUIRE(s2 >= 0);
-    sockaddr_in dst{};
-    dst.sin_family = AF_INET;
-    dst.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    dst.sin_port = htons(ep.listenPort);
-    ssize_t w = ::sendto(s2, ackBuf, ackLen, 0,
-                         reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
-    CHECK(w == static_cast<ssize_t>(ackLen));
-    ::close(s2);
-
-    // 3) Assert status().hello becomes Keepalive.
-    bool gotKeepalive = waitFor([&] {
-        return c.status().hello == HelloPub::Keepalive;
-    }, 2000);
-    CHECK(gotKeepalive);
-
-    c.stop();
-    CHECK(c.status().running == false);
-
-    sinkStop.store(true);
-    sinkThread.join();
-    ::close(sinkFd);
 }
 
 // ---------------------------------------------------------------------------
@@ -597,7 +487,7 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
         /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
-    c.start(snap, /*generationId=*/0x6666);
+    c.start(snap);
     CHECK(c.status().running == true);
 
     // Inject one decision so the watchdog's everSeen_ becomes true. We must
