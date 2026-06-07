@@ -78,3 +78,16 @@ def test_retune_followed_via_rx_ant_key():
         assert snap["3"]["per"] == 0.0 and snap["4"]["per"] == 0.0
     finally:
         c.stop()
+
+def test_status_exposes_age_ms_freshness():
+    def spawn(cmd):
+        return _FakeProc(["1\tRX_ANT\t5805:5:20\t0\t1:-60:-60:-60:20:20:20",
+                          "1\tPKT\t10:0:0:0:10:10:0:0:0:10:0:0:0:0"])
+    c = ProbeController(_snap(), spawn=spawn)
+    c.start()
+    try:
+        assert _wait_until(lambda: "5" in c.status()["mcs"])
+        age = c.status()["mcs"]["5"]["ageMs"]
+        assert age is not None and age >= 0.0 and age < 2000.0
+    finally:
+        c.stop()

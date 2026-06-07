@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 
 from .parser import McsAggregator, parse_line
 
@@ -31,6 +32,7 @@ class ProbeController:
         self._stop_event = None                 # asyncio.Event, created in-loop
         self._started = threading.Event()
         self._agg = McsAggregator(alpha=ewma_alpha)
+        self._last_update = {}   # mcs(int) -> monotonic seconds of last sample
         self._status = {"running": False, "streams": 0}
 
     # ---- thread-safe public API -----------------------------------------
@@ -69,6 +71,7 @@ class ProbeController:
             with self._lock:
                 self._snap = dict(snapshot)
                 self._agg = McsAggregator(alpha=self._alpha)
+                self._last_update = {}
             # Restart unconditionally if it was running (mirrors the sibling
             # DynamicLinkController). A disabled snapshot just re-runs _run,
             # spawns nothing, reports running=False and parks — restarting on a
@@ -78,9 +81,18 @@ class ProbeController:
                 self.start()
 
     def status(self):
+        now = time.monotonic()
         with self._lock:
             st = dict(self._status)
-            st["mcs"] = {str(m): v for m, v in self._agg.snapshot().items()}
+            snap = self._agg.snapshot()
+            last = dict(self._last_update)
+        mcs = {}
+        for m, v in snap.items():
+            entry = dict(v)
+            t = last.get(m)
+            entry["ageMs"] = None if t is None else (now - t) * 1000.0
+            mcs[m] = entry
+        st["mcs"] = {str(m): v for m, v in mcs.items()}
         return st
 
     # ---- internals ------------------------------------------------------
@@ -127,9 +139,11 @@ class ProbeController:
                 cur_mcs = d["mcs"]
                 with self._lock:
                     self._agg.on_rx_ant(d["mcs"], d["rssi"], d["snr"])
+                    self._last_update[d["mcs"]] = time.monotonic()
             elif kind == "PKT" and cur_mcs is not None:
                 with self._lock:
                     self._agg.on_pkt(cur_mcs, d["data"], d["lost"])
+                    self._last_update[cur_mcs] = time.monotonic()
 
     async def _run(self):
         self._stop_event = asyncio.Event()
