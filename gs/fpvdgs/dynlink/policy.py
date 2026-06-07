@@ -531,6 +531,22 @@ class TrailingLoop:
 # Top-level policy: composes leading + trailing + predictor.
 # ------------------------------------------------------------------
 
+# Coarse RSSI -> initial MCS, ONLY for cold-start before probe data exists.
+# Intentionally conservative; the probe takes over and refines from here.
+# (Phase 4 replaces this with the learned per-card prior.)
+# Floors must stay in descending order: coarse_mcs_for_rssi returns the first match.
+_COLD_START_RSSI_DBM = [(-55, 5), (-65, 3), (-75, 1), (-200, 0)]
+
+
+def coarse_mcs_for_rssi(rssi):
+    if rssi is None:
+        return 0
+    for floor, mcs in _COLD_START_RSSI_DBM:
+        if rssi >= floor:
+            return mcs
+    return 0
+
+
 @dataclass
 class PolicyState:
     mcs: int
@@ -566,6 +582,12 @@ class Policy:
         # left None (e.g. tests / no probe) the selector can never
         # promote — it only reacts to emergencies.
         self._probe_status = probe_status
+        # Cold-start one-shot: seed the operating MCS from the single
+        # link-RSSI via a coarse table on the first post-sync tick where
+        # RSSI is present, so the first real decision isn't stuck at the
+        # safe floor while the probe warms up. Flipped True after the
+        # single seed; the probe-driven select() owns MCS thereafter.
+        self._cold_started = False
         self.leading = LeadingSelector(
             cfg.leading, cfg.gate, cfg.selection, profile
         )
@@ -659,6 +681,19 @@ class Policy:
         sustained_starved = (
             self._starvation_count >= self.cfg.starvation_windows
         )
+
+        # Cold-start seed (one-shot): before any probe data exists the
+        # selector would sit at the safe floor while the probe warms up.
+        # Seed the operating MCS once from the single link-RSSI via a
+        # coarse table. Conservative, only raises (never lowers) the MCS,
+        # and runs before select() so the first real decision reflects it.
+        if not self._cold_started and signals.rssi is not None:
+            seed = coarse_mcs_for_rssi(signals.rssi)
+            if seed > self.leading.state.current_mcs:
+                self.leading.state.current_mcs = min(seed, self.leading._cap_mcs)
+                self.leading.state.tx_power_dBm = self.leading._compute_tx_power(
+                    self.leading.state.current_mcs)
+            self._cold_started = True
 
         # Dual-gate selector picks MCS + computes inverse-coupled TX
         # power. Channel B (emergency) is owned by the selector; we
