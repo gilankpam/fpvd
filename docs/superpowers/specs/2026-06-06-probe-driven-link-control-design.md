@@ -142,9 +142,17 @@ The bitrate jumps as a feed-forward on MCS change. **Open-loop by design** — t
 
 Operator-set constant (default toward max for range). The inverse-MCS coupling (`_compute_tx_power`) and its range/cooldown knobs are removed.
 
-### 4.8 Hardware-derived profile (Phase 4)
+### 4.8 Hardware-derived profile + learned RSSI/SNR prior (Phase 4)
 
 The drone reports its `radio-up.sh`-detected `adapter_id` via `/air/*`; the GS selects the matching profile (`rssi_floor_dBm` prior + caps) instead of a static `radioProfile`, default `"auto"`.
+
+**Learned RSSI/SNR→ceiling prior (passive, multi-flight, per-card).** Rather than a hand-authored `rssi_floor` ladder, *learn* it. Every flight, passively log `(link-RSSI, SNR, per-MCS probe-PER)`; the probe (FEC-off, raw PER) labels where each rung crosses its cliff and the co-measured link conditions label that crossing. Fit `link-conditions → viable-ceiling-MCS`, persist it **keyed by `adapter_id`** (a card/antenna swap invalidates it), and refine online across flights. **Bootstrap:** the first flight is probe-driven + step-down-on-loss (no prior); later flights inherit the persisted learned model. RSSI is a **single link value** — empirically MCS-independent (same card ⇒ same received power regardless of MCS; validated on hardware 2026-06-07, simultaneous 4-rung probe read identical RSSI), so the model maps the *one* link-RSSI (read off the main video stream) to a ceiling, **not** a per-MCS RSSI matrix.
+
+**The learned prior is an accelerant, NOT the authority** — it stays subordinate to the live probe, because:
+- **Interference is invisible to RSSI/SNR but shows in PER.** Co-channel interference degrades FEC/loss while RSSI/SNR look fine, so an RSSI/SNR model is blind to interference-driven cliffs that the probe (raw PER) catches. This is *the* reason the SNR-floor selector was abandoned (§2.2).
+- **SNR is survivor-biased exactly at the cliff** (§2.2) — the boundary you most want to learn is where the SNR reading turns to garbage.
+
+So the learned model warm-starts cold MCS, lets the controller lower probe pps / narrow the probe window when it is confident, and supplies a coarse predictive hint — but the probe remains the gate that confirms a promote and the sentinel for predictive demote, and the model never overrides a live probe failure.
 
 ## 5. Phased roadmap
 
@@ -190,7 +198,7 @@ Each phase is independently shippable and gets its own implementation plan.
 
 ## 10. Open questions
 
-1. **`rssi_floor_dBm[mcs]` calibration (Phase 4).** Derive from a higher-pps probe pass (the 20 pps RSSI/SNR was single-sample-noisy); per-card vs one shared ladder.
+1. **Learned RSSI/SNR→ceiling prior (Phase 4, see §4.8).** Passive multi-flight learning engine keyed by `adapter_id`, bootstrapped by a probe-driven first flight. Open: a higher-pps pass to de-noise vs pure passive accumulation (the 20 pps RSSI/SNR was single-sample-noisy); the fit form (threshold ladder vs regression); how aggressively to lower probe pps when the prior is confident *without going blind to interference*; per-card vs one shared ladder. RSSI is a single MCS-independent link value (validated 2026-06-07), so it is a 1-D map, not a per-MCS matrix.
 2. **Probe reach & cadence.** Confirm `current+1`/`+2` adaptive reach vs a fixed concurrent set under fast range change; pick pps for PER resolution vs airtime.
 3. **Promotion debounce.** How many fresh clean probe windows before committing a promote, to avoid chasing a transient clean blip at the cliff.
 4. **Probe-stream liveness.** Fallback when the probe goes stale/dies (→ RSSI prior + hold); detection latency.
