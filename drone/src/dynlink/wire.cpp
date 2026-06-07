@@ -3,24 +3,14 @@
  * Byte layout is IDENTICAL to the C implementation so that GS-produced
  * frames can be decoded here without modification.
  *
- * Decision layout (big-endian, 31 bytes = 27 payload + 4 CRC):
+ * Decision layout (big-endian, 15 bytes = 11 payload + 4 CRC):
  *   off  size  field
  *    0    4    magic       = kWireMagic (0x444C4B31)
- *    4    1    version     = kWireVersion (2)
+ *    4    1    version     = kWireVersion (3)
  *    5    1    flags
- *    6    2    _pad (0)
- *    8    4    sequence
- *   12    4    timestampMs
- *   16    1    mcs
- *   17    1    bandwidth
- *   18    1    txPowerDbm  (signed)
- *   19    1    k
- *   20    1    n
- *   21    1    depth
- *   22    2    bitrateKbps
- *   24    1    fps
- *   25    2    _pad2 (0)
- *   27    4    crc32(bytes[0..26])
+ *    6    4    sequence
+ *   10    1    mcs
+ *   11    4    crc32(bytes[0..10])
  *
  * Ping layout (big-endian, 24 bytes = 20 payload + 4 CRC):
  *    0  4  magic = kPingMagic
@@ -155,56 +145,33 @@ PacketKind peekKind(const uint8_t* buf, size_t len) {
 
 size_t encodeDecision(const Decision& d, uint8_t* buf, size_t buflen) {
     if (buflen < kWireOnWire) return 0;
-
     std::memset(buf, 0, kWireOnWire);
-    put_u32(&buf[0],  kWireMagic);
-    buf[4] = kWireVersion;
-    buf[5] = d.flags;
-    /* buf[6..7] = _pad */
-    put_u32(&buf[8],  d.sequence);
-    put_u32(&buf[12], d.timestampMs);
-    buf[16] = d.mcs;
-    buf[17] = d.bandwidth;
-    buf[18] = static_cast<uint8_t>(d.txPowerDbm);  // signed→unsigned via cast
-    buf[19] = d.k;
-    buf[20] = d.n;
-    buf[21] = d.depth;
-    put_u16(&buf[22], d.bitrateKbps);
-    buf[24] = d.fps;
-    /* buf[25..26] = _pad2 */
+    put_u32(&buf[0], kWireMagic);        // [0..3]  magic
+    buf[4] = kWireVersion;               // [4]     version = 3
+    buf[5] = d.flags;                    // [5]     flags
+    put_u32(&buf[6], d.sequence);        // [6..9]  sequence
+    buf[10] = d.mcs;                     // [10]    mcs
     uint32_t c = crc32(buf, kWirePayloadSize);
-    put_u32(&buf[kWirePayloadSize], c);
+    put_u32(&buf[kWirePayloadSize], c);  // [11..14] crc32
     return kWireOnWire;
 }
 
 DecodeResult decodeDecision(const uint8_t* buf, size_t len, Decision& d) {
     if (len < kWireOnWire) return DecodeResult::Short;
-
     uint32_t magic = get_u32(&buf[0]);
     if (magic != kWireMagic) return DecodeResult::BadMagic;
-
     uint8_t version = buf[4];
     if (version != kWireVersion) return DecodeResult::BadVersion;
-
     uint32_t crc_wire = get_u32(&buf[kWirePayloadSize]);
     uint32_t crc_calc = crc32(buf, kWirePayloadSize);
     if (crc_wire != crc_calc) return DecodeResult::BadCrc;
-
     d = {};
-    d.magic       = magic;
-    d.version     = version;
-    d.flags       = buf[5];
-    d.sequence    = get_u32(&buf[8]);
-    d.timestampMs = get_u32(&buf[12]);
-    d.mcs         = buf[16];
-    d.bandwidth   = buf[17];
-    d.txPowerDbm  = static_cast<int8_t>(buf[18]);
-    d.k           = buf[19];
-    d.n           = buf[20];
-    d.depth       = buf[21];
-    d.bitrateKbps = get_u16(&buf[22]);
-    d.fps         = buf[24];
-    return DecodeResult::Ok;
+    d.magic    = magic;
+    d.version  = version;
+    d.flags    = buf[5];
+    d.sequence = get_u32(&buf[6]);
+    d.mcs      = buf[10];
+    return DecodeResult::Ok;   // bandwidth/k/n/depth/bitrate/fps left default; filled by config + applyLocalCompute
 }
 
 // ---------------------------------------------------------------------------

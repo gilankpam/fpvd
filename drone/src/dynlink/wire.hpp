@@ -5,9 +5,9 @@
 namespace fpvd::dynlink {
 
 inline constexpr uint32_t kWireMagic        = 0x444C4B31u;  // "DLK1"
-inline constexpr uint8_t  kWireVersion      = 2;
-inline constexpr size_t   kWirePayloadSize  = 27;
-inline constexpr size_t   kWireOnWire       = 31;           // 27 payload + 4 CRC
+inline constexpr uint8_t  kWireVersion      = 3;
+inline constexpr size_t   kWirePayloadSize  = 11;           // magic+ver+flags+seq+mcs
+inline constexpr size_t   kWireOnWire       = 15;           // 11 payload + 4 CRC
 
 inline constexpr uint32_t kPingMagic        = 0x444C5047u;  // "DLPG"
 inline constexpr size_t   kPingPayloadSize  = 20;

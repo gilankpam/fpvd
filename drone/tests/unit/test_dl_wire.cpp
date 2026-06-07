@@ -8,66 +8,67 @@
 using namespace fpvd::dynlink;
 
 // ---------------------------------------------------------------------------
-// Decision encode/decode
+// Decision encode/decode (v3: {mcs}-only, 15 bytes)
 // ---------------------------------------------------------------------------
 
-TEST_CASE("wire: decision round trip") {
-    // Mirrors test_wire_round_trip
+TEST_CASE("v3 Decision encodes to 15 bytes and round-trips mcs/sequence/flags") {
     Decision d{};
-    d.flags        = 0;
-    d.sequence     = 0xDEADBEEFu;
-    d.timestampMs  = 12345;
-    d.mcs          = 5;
-    d.bandwidth    = 20;
-    d.txPowerDbm   = -10;
-    d.k            = 8;
-    d.n            = 14;
-    d.depth        = 2;
-    d.bitrateKbps  = 12000;
-    d.fps          = 60;
-
-    uint8_t buf[kWireOnWire];
-    CHECK(encodeDecision(d, buf, sizeof(buf)) == kWireOnWire);
-
-    Decision r{};
-    CHECK(decodeDecision(buf, sizeof(buf), r) == DecodeResult::Ok);
-    CHECK(r.sequence    == d.sequence);
-    CHECK(r.timestampMs == d.timestampMs);
-    CHECK(r.mcs         == d.mcs);
-    CHECK(r.bandwidth   == d.bandwidth);
-    CHECK(r.txPowerDbm  == d.txPowerDbm);
-    CHECK(r.k           == d.k);
-    CHECK(r.n           == d.n);
-    CHECK(r.depth       == d.depth);
-    CHECK(r.bitrateKbps == d.bitrateKbps);
-    CHECK(r.fps         == d.fps);
-    CHECK(r.flags       == 0);
+    d.flags    = 0x01;
+    d.sequence = 0xAABBCCDD;
+    d.mcs      = 5;
+    uint8_t buf[64];
+    size_t n = encodeDecision(d, buf, sizeof(buf));
+    CHECK(n == 15);
+    CHECK(buf[4] == 3);            // version
+    Decision out{};
+    CHECK(decodeDecision(buf, n, out) == DecodeResult::Ok);
+    CHECK(out.version == 3);
+    CHECK(out.sequence == 0xAABBCCDD);
+    CHECK(out.mcs == 5);
+    CHECK(out.flags == 0x01);
 }
 
-TEST_CASE("wire: decision big-endian byte order") {
-    // Mirrors test_wire_endianness_big
+TEST_CASE("v3 decode rejects a v2-sized/old-version buffer") {
+    // 31-byte buffer carrying valid DLK1 magic and version=2.
+    // version 2 carries valid DLK1 magic → must be rejected at the version check,
+    // before CRC is evaluated. The ordering is the wire contract.
+    uint8_t buf[31] = {0};
+    // write the DLK1 magic big-endian
+    buf[0] = 0x44; buf[1] = 0x4C; buf[2] = 0x4B; buf[3] = 0x31;
+    buf[4] = 2;  // version 2
+    Decision out{};
+    DecodeResult r = decodeDecision(buf, sizeof(buf), out);
+    CHECK(r == DecodeResult::BadVersion);
+}
+
+TEST_CASE("wire: v3 protocol constants") {
+    CHECK(kWireVersion     == 3);
+    CHECK(kWirePayloadSize == 11u);
+    CHECK(kWireOnWire      == 15u);
+}
+
+TEST_CASE("wire: v3 decision big-endian byte order") {
     Decision d{};
-    d.sequence    = 0x01020304u;
-    d.timestampMs = 0x05060708u;
+    d.sequence = 0x01020304u;
+    d.mcs      = 0xAB;
 
     uint8_t buf[kWireOnWire];
     encodeDecision(d, buf, sizeof(buf));
 
     // Magic 0x444C4B31 at [0..3] big-endian
-    CHECK(buf[0]  == 0x44);
-    CHECK(buf[1]  == 0x4C);
-    CHECK(buf[2]  == 0x4B);
-    CHECK(buf[3]  == 0x31);
-    // sequence at [8..11] big-endian
-    CHECK(buf[8]  == 0x01);
-    CHECK(buf[9]  == 0x02);
-    CHECK(buf[10] == 0x03);
-    CHECK(buf[11] == 0x04);
-    // timestamp_ms at [12..15]
-    CHECK(buf[12] == 0x05);
-    CHECK(buf[13] == 0x06);
-    CHECK(buf[14] == 0x07);
-    CHECK(buf[15] == 0x08);
+    CHECK(buf[0] == 0x44);
+    CHECK(buf[1] == 0x4C);
+    CHECK(buf[2] == 0x4B);
+    CHECK(buf[3] == 0x31);
+    // version = 3 at [4]
+    CHECK(buf[4] == 3);
+    // sequence at [6..9] big-endian
+    CHECK(buf[6] == 0x01);
+    CHECK(buf[7] == 0x02);
+    CHECK(buf[8] == 0x03);
+    CHECK(buf[9] == 0x04);
+    // mcs at [10]
+    CHECK(buf[10] == 0xAB);
 }
 
 TEST_CASE("wire: decision rejects short buffer") {
@@ -100,10 +101,10 @@ TEST_CASE("wire: decision rejects bad version") {
 TEST_CASE("wire: decision rejects bad crc") {
     // Mirrors test_wire_rejects_bad_crc
     Decision d{};
-    d.mcs = 5; d.k = 8; d.n = 12; d.depth = 1;
+    d.mcs = 5;
     uint8_t buf[kWireOnWire];
     encodeDecision(d, buf, sizeof(buf));
-    buf[20] ^= 0xFF;  // corrupt a payload byte; CRC no longer matches
+    buf[10] ^= 0xFF;  // corrupt mcs payload byte; CRC no longer matches
     Decision r{};
     CHECK(decodeDecision(buf, sizeof(buf), r) == DecodeResult::BadCrc);
 }
@@ -118,34 +119,6 @@ TEST_CASE("wire: crc32 known IEEE 802.3 vector") {
     // "123456789" -> 0xCBF43926 (standard IEEE 802.3 test vector)
     uint32_t c = crc32(reinterpret_cast<const uint8_t*>("123456789"), 9);
     CHECK(c == 0xCBF43926u);
-}
-
-TEST_CASE("wire: signed tx_power round-trips through wire") {
-    // Mirrors test_wire_signed_tx_power
-    Decision d{};
-    d.txPowerDbm = -5;
-    uint8_t buf[kWireOnWire];
-    encodeDecision(d, buf, sizeof(buf));
-    CHECK(buf[18] == 0xFB);  // -5 as int8 two's complement
-    Decision r{};
-    CHECK(decodeDecision(buf, sizeof(buf), r) == DecodeResult::Ok);
-    CHECK(r.txPowerDbm == -5);
-}
-
-TEST_CASE("wire: v2 protocol constants") {
-    // Mirrors test_wire_v2_constants
-    CHECK(kWireVersion     == 2);
-    CHECK(kWirePayloadSize == 27u);
-    CHECK(kWireOnWire      == 31u);
-}
-
-TEST_CASE("wire: fps sits at byte offset 24") {
-    // Mirrors test_wire_v2_fps_offset_24
-    Decision d{};
-    d.fps = 0xAB;
-    uint8_t buf[kWireOnWire];
-    encodeDecision(d, buf, sizeof(buf));
-    CHECK(buf[24] == 0xAB);
 }
 
 // ---------------------------------------------------------------------------
