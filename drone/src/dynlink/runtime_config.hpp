@@ -40,8 +40,6 @@ struct DlRuntimeConfig {
     RoiCurve     roiQp;
     SafeDefaults safe;
     BitrateEngineConfig bitrate;
-    uint16_t helloMtuBytes;
-    uint16_t helloFps;
     // Static link radiotap flags the controller PRESERVES (never decides). The
     // GS never sends stbc/ldpc, so every CMD_SET_RADIO the loop emits carries
     // these config values through unchanged rather than the old hardcoded 0/false.
@@ -59,7 +57,7 @@ struct DlStatus {                         // published by the loop, read by HTTP
     bool     running{false};
     bool     watchdogTripped{false};
     long     lastDecisionAgeMs{-1};       // -1 => none yet
-    HelloPub hello{HelloPub::Disabled};
+    HelloPub hello{HelloPub::Disabled};   // always Disabled post-3b; kept because status.cpp reads it for /status
 };
 
 // Pinned production endpoints; overridable in tests.

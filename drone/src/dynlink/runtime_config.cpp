@@ -48,8 +48,6 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
         c.video.fps,                   // fps (from video.fps)
     };
 
-    s.helloMtuBytes = static_cast<uint16_t>(c.link.mtu);
-    s.helloFps      = static_cast<uint16_t>(c.video.fps);
     s.stbc          = c.link.stbc;
     s.ldpc          = c.link.ldpc;
     s.linkBandwidth = static_cast<uint8_t>(modulationWidth(c.link.width));

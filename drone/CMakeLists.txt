@@ -35,7 +35,6 @@ target_sources(fpvd_core PRIVATE
     src/dynlink/local_compute.cpp
     src/dynlink/watchdog.cpp
     src/dynlink/wire.cpp
-    src/dynlink/hello.cpp
     src/dynlink/idr_listen.cpp
     src/dynlink/runtime_config.cpp
     src/dynlink/osd.cpp
@@ -108,7 +107,6 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/unit/test_probe_rung.cpp
         tests/unit/test_dl_encoder_client.cpp
         tests/unit/test_dl_radio_txpower.cpp
-        tests/unit/test_dl_hello.cpp
         tests/unit/test_dl_osd.cpp
         tests/unit/test_dl_idr_listen.cpp
         tests/unit/test_dl_runtime_config.cpp

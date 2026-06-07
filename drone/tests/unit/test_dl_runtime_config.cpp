@@ -12,8 +12,6 @@ TEST_CASE("buildDlSnapshot maps schema + derived inputs") {
     c.dynamicLink.safe.mcs = 3; c.dynamicLink.healthTimeoutMs = 8000;
     auto s = buildDlSnapshot(c, "wlan1");
     CHECK(s.iface == "wlan1");
-    CHECK(s.helloMtuBytes == 1400);
-    CHECK(s.helloFps == 90);
     CHECK(s.stbc == false);
     CHECK(s.ldpc == true);
     CHECK(s.safe.mcs == 3);
@@ -95,8 +93,6 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
     CHECK(s.debug                == false);
 
     // Link/video defaults
-    CHECK(s.helloMtuBytes == 1500u);
-    CHECK(s.helloFps      == 60u);
     CHECK(s.stbc          == true);   // link defaults now enable stbc/ldpc
     CHECK(s.ldpc          == true);
     CHECK(s.iface         == "wlan2");
