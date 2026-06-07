@@ -23,6 +23,7 @@
     "rcMode": "cbr",
     "gopSize": 1.0,
     "qpDelta": -4,
+    "sensorBin": "",
     "roi": {
       "enabled": true,
       "qp": 0,

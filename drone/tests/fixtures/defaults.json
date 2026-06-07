@@ -5,6 +5,7 @@
            "beamforming": {"enabled": false, "remoteMac": "", "ackTimeout": 255, "intervalMs": 100}},
   "video": {"codec": "h265", "resolution": "1920x1080", "fps": 60,
             "bitrate": 8192, "rcMode": "cbr", "gopSize": 1.0, "qpDelta": -4,
+            "sensorBin": "",
             "roi": {"enabled": true, "qp": 0, "center": 0.4, "steps": 2}},
   "image": {"mirror": false, "flip": false, "rotate": 0},
   "telemetry": {"router": "msposd", "serial": "ttyS2", "osdFps": 20, "baud": 115200},

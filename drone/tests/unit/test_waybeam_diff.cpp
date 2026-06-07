@@ -69,6 +69,18 @@ TEST_CASE("waybeamConfigDiff: RESTART field still emitted when DL enabled") {
     CHECK(d.restart.at("video0.size") == "1280x720");
 }
 
+TEST_CASE("waybeamConfigDiff: sensorBin is a RESTART field, not DL-owned") {
+    Config a{}, b{};
+    b.video.sensorBin = "2x2";
+    auto d = waybeamConfigDiff(a, b, /*dlEnabled=*/false);
+    CHECK(d.restart.at("isp.sensor_bin") == "2x2");
+    CHECK(d.live.empty());
+
+    // Not dynamic-link-owned: still emitted while DL is enabled.
+    auto d2 = waybeamConfigDiff(a, b, /*dlEnabled=*/true);
+    CHECK(d2.restart.at("isp.sensor_bin") == "2x2");
+}
+
 TEST_CASE("waybeamConfigDiff: fractional roi.center formats with a decimal") {
     Config a{}, b{};
     a.video.roi.center = 0.0;   // default center is 0.4, so explicitly set a to 0.0 for a genuine change

@@ -85,7 +85,7 @@ TEST_CASE("lock: body enables DL and writes locked key → rejected") {
 
 TEST_CASE("lock: multiple locked paths reported together") {
     auto body = nlohmann::json::parse(
-        R"({"link":{"mcs":5,"txpower":10},"video":{"bitrate":1000}})");
+        R"({"link":{"mcs":5,"width":40},"video":{"bitrate":1000}})");
     auto r = checkDynamicLinkLock(body, dlOn());
     CHECK_FALSE(r.ok);
     CHECK(r.lockedPaths.size() == 3);
@@ -150,6 +150,16 @@ TEST_CASE("lock: DL off + body writes link.ldpc → allowed") {
     Config off{};
     auto body = nlohmann::json::parse(R"({"link":{"ldpc":true}})");
     auto r = checkDynamicLinkLock(body, off);
+    CHECK(r.ok);
+    CHECK(r.lockedPaths.empty());
+}
+
+TEST_CASE("lock: DL on + body writes link.txpower → allowed (operator-owned, not DL-decided)") {
+    // The controller stopped deciding txpower in Phase 3a — tx power is constant,
+    // applied at radio bring-up / hot-tuned via radio-tune, never written by the
+    // decision loop. So an operator may set it while DL is enabled (like stbc/ldpc).
+    auto body = nlohmann::json::parse(R"({"link":{"txpower":20}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
     CHECK(r.ok);
     CHECK(r.lockedPaths.empty());
 }

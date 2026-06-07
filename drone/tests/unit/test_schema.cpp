@@ -13,6 +13,7 @@ TEST_CASE("schema: round-trip a minimal config through json") {
                 "beamforming":{"enabled":false,"remoteMac":"","ackTimeout":255,"intervalMs":100}},
         "video":{"codec":"h265","resolution":"1920x1080","fps":60,
                  "bitrate":8192,"rcMode":"cbr","gopSize":1.0,"qpDelta":-4,
+                 "sensorBin":"",
                  "roi":{"enabled":true,"qp":0,"center":0.4,"steps":2}},
         "image":{"mirror":false,"flip":false,"rotate":0},
         "telemetry":{"router":"msposd","serial":"ttyS2","osdFps":20,"baud":115200},
@@ -42,6 +43,25 @@ TEST_CASE("schema: round-trip a minimal config through json") {
     json out = c;
     // Idempotent round-trip.
     CHECK(out == j);
+}
+
+TEST_CASE("schema: video.sensorBin defaults empty and round-trips") {
+    // Default is empty (sensor's own default binning).
+    fpvd::Config c{};
+    CHECK(c.video.sensorBin == "");
+
+    // Serialised default config must carry the new field.
+    json def = json(c);
+    CHECK(def["video"].contains("sensorBin"));
+    CHECK(def["video"]["sensorBin"] == "");
+
+    // A value survives a parse -> serialise round-trip, both at the struct
+    // and JSON level.
+    c.video.sensorBin = "4lane";
+    json j = c;
+    CHECK(j["video"]["sensorBin"] == "4lane");
+    auto c2 = j.get<fpvd::Config>();
+    CHECK(c2.video.sensorBin == "4lane");
 }
 
 TEST_CASE("schema: service entry round-trips") {
@@ -142,6 +162,7 @@ TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") 
                  "linkId":7669206,"mtu":1500,"wlanAdapter":null},
         "video": {"codec":"h265","resolution":"1920x1080","fps":60,
                   "bitrate":8192,"rcMode":"cbr","gopSize":1.0,"qpDelta":-4,
+                  "sensorBin":"",
                   "roi":{"enabled":true,"qp":0,"center":0.4,"steps":2}},
         "image": {"mirror":false,"flip":false,"rotate":0},
         "telemetry": {"router":"msposd","serial":"ttyS2","osdFps":20,"baud":115200},

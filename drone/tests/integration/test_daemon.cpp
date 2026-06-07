@@ -74,6 +74,46 @@ TEST_CASE("daemon: PATCH then apply updates effective and overlay file") {
     fs::remove_all(tmp);
 }
 
+TEST_CASE("daemon: PATCH video.sensorBin applies end-to-end (overlay + waybeam + encoder)") {
+    auto tmp = fs::temp_directory_path() / "fpvd-test-sensorbin";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+    CHECK(d.effective().video.sensorBin == "");
+
+    REQUIRE(d.patchPending({{"video", {{"sensorBin", "2x2"}}}}).ok);
+    auto ar = d.apply(false);  // don't actually restart processes
+    REQUIRE(ar.ok);
+    CHECK(d.effective().video.sensorBin == "2x2");
+
+    // Overlay is sparse: only the changed field (proves defaults carry "").
+    std::ifstream f(paths.overlayPath);
+    nlohmann::json saved; f >> saved;
+    CHECK(saved == nlohmann::json{{"video", {{"sensorBin", "2x2"}}}});
+
+    // waybeam.json carries the value under isp.sensorBin.
+    std::ifstream wf(paths.waybeamJsonPath);
+    nlohmann::json wj; wf >> wj;
+    CHECK(wj["isp"]["sensorBin"] == "2x2");
+
+    // It is a restart-class encoder change.
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder")
+          != ar.restarted.end());
+
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("daemon: reset clears overlay") {
     auto tmp = fs::temp_directory_path() / "fpvd-test-reset";
     fs::remove_all(tmp);
@@ -309,6 +349,46 @@ TEST_CASE("daemon: txpower change takes hot path (tuneRadio, no rebuild)") {
     std::getline(f, line);
     CHECK(line.find("action=txpower") != std::string::npos);
     CHECK(line.find("txpower=5") != std::string::npos);
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("daemon: txpower is patchable while DL is enabled (radio-only, controller untouched)") {
+    auto tmp = fs::temp_directory_path() / "fpvd-dl-txpower";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // Enable DL and commit so effective.dynamicLink.enabled = true.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/false).ok);
+
+    // A txpower change is accepted under DL (lock open) ...
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"link":{"txpower":20}})")).ok);
+    auto ar = d.apply(/*reallyRestart=*/false);
+    REQUIRE(ar.ok);
+    CHECK(d.effective().link.txpower == 20);
+
+    // ... it is a radio-only change: the in-process controller and the encoder
+    // are not disturbed.
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "radio")
+          != ar.restarted.end());
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink")
+          == ar.restarted.end());
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder")
+          == ar.restarted.end());
+
     fs::remove_all(tmp);
 }
 

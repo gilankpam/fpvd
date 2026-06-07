@@ -100,6 +100,39 @@ TEST_CASE("handlers: PATCH /config stages a change") {
     fs::remove_all(tmp);
 }
 
+TEST_CASE("handlers: video.sensorBin is exposed over PATCH + GET /config") {
+    auto tmp = fs::temp_directory_path() / "fpvd-handlers-sensorbin";
+    fs::remove_all(tmp);
+    auto d = makeTestDaemon(tmp);
+    fpvd::HttpServer srv;
+    fpvd::registerHandlers(srv, *d, false);
+    srv.listenInBackground("127.0.0.1", 18099);
+    srv.waitUntilReady(std::chrono::seconds(2));
+
+    httplib::Client c("http://127.0.0.1:18099");
+
+    // GET exposes the field (default empty).
+    auto g0 = c.Get("/config");
+    REQUIRE(g0);
+    CHECK(nlohmann::json::parse(g0->body)["video"]["sensorBin"] == "");
+
+    // PATCH stages it into pending.
+    auto r = c.Patch("/config",
+        R"({"video":{"sensorBin":"2x2"}})", "application/json");
+    REQUIRE(r);
+    CHECK(r->status == 200);
+    CHECK(d->pending().video.sensorBin == "2x2");
+    CHECK(nlohmann::json::parse(r->body)["video"]["sensorBin"] == "2x2");
+
+    // GET ?pending=true reflects the staged value.
+    auto g1 = c.Get("/config?pending=true");
+    REQUIRE(g1);
+    CHECK(nlohmann::json::parse(g1->body)["video"]["sensorBin"] == "2x2");
+
+    srv.stop();
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("handlers: PATCH /config rejects malformed JSON") {
     auto tmp = fs::temp_directory_path() / "fpvd-handlers-badjson";
     fs::remove_all(tmp);

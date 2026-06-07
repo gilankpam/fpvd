@@ -77,10 +77,11 @@ struct Video {
     std::string rcMode{"cbr"};
     double gopSize{1.0};
     int qpDelta{-4};
+    std::string sensorBin{""};   // sensor binning mode (empty = sensor default)
     Roi roi{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Video, codec, resolution, fps, bitrate,
-                                   rcMode, gopSize, qpDelta, roi)
+                                   rcMode, gopSize, qpDelta, sensorBin, roi)
 
 struct Image { bool mirror{false}; bool flip{false}; int rotate{0}; };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Image, mirror, flip, rotate)

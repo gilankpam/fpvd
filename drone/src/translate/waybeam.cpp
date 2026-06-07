@@ -14,7 +14,7 @@ nlohmann::json toWaybeamJson(const Config& c) {
             {"unlockReg", 12298}, {"unlockValue", 128}, {"unlockDir", 0}
         }},
         {"isp", {
-            {"sensorBin", ""}, {"legacyAe", true}, {"aeMode", "native"},
+            {"sensorBin", c.video.sensorBin}, {"legacyAe", true}, {"aeMode", "native"},
             {"aeFps", 15}, {"gainMax", 0}, {"awbMode", "auto"},
             {"awbCt", 5500}, {"keepAspect", true}
         }},
@@ -122,6 +122,10 @@ WaybeamFieldDiff waybeamConfigDiff(const Config& a, const Config& b,
         d.restart["video0.size"]    = vb.resolution;
     if (va.rcMode != vb.rcMode)
         d.restart["video0.rc_mode"] = vb.rcMode;
+    // sensorBin reconfigures the sensor readout — needs a pipeline reinit, so it
+    // is restart-class. Not dynamic-link-owned (the controller never writes it).
+    if (va.sensorBin != vb.sensorBin)
+        d.restart["isp.sensor_bin"] = vb.sensorBin;
 
     const auto& ia = a.image; const auto& ib = b.image;
     if (ia.mirror != ib.mirror) d.restart["image.mirror"] = fmtBool(ib.mirror);
