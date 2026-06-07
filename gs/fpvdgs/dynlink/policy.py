@@ -12,11 +12,12 @@ cold-start seed and starvation hysteresis feeding the emergency demote.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 from .decision import Decision
-from .flightlog import FlightLogConfig
-from .learned_prior import LearnedPriorConfig
+from .flightlog import FlightLog, FlightLogConfig
+from .learned_prior import LearnedPrior, LearnedPriorConfig
 from .profile import MCSRow, RadioProfile
 from .signals import Signals
 
@@ -385,6 +386,17 @@ class Policy:
         # glitches). At 10 Hz, starvation_windows=5 = 0.5 s of below-
         # threshold packet rate before declaring blackout.
         self._starvation_count: int = 0
+        # Phase 4: learned per-card prior + flight log. Keyed by the radio
+        # profile name (the operator-set radioProfile). GS-local; the live
+        # probe stays authoritative.
+        self.learned_prior = (
+            LearnedPrior(profile.name, cfg.learned_prior)
+            if cfg.learned_prior.enabled else None
+        )
+        self._prev_rssi: float | None = None
+        self._predict_demote_count = 0
+        start_ms = int(time.monotonic() * 1000)
+        self.flightlog = FlightLog(cfg.flightlog, start_ms=start_ms)
 
     def tick(self, signals: Signals) -> Decision:
         ts_ms = signals.timestamp * 1000.0 if signals.timestamp else 0.0
@@ -400,34 +412,94 @@ class Policy:
             self._starvation_count >= self.cfg.starvation_windows
         )
 
-        # Cold-start seed (one-shot): before any probe data exists the
-        # selector would sit at the safe floor while the probe warms up.
-        # Seed the operating MCS once from the single link-RSSI via a
-        # coarse table. Conservative, only raises (never lowers) the MCS,
-        # and runs before select() so the first real decision reflects it.
+        # Warm-start seed (one-shot). Prefer the learned per-card curve; fall
+        # back to the coarse hand-table when it's unknown/unconfident. Only
+        # raises the boot MCS, runs before select().
         if not self._cold_started and signals.rssi is not None:
-            seed = coarse_mcs_for_rssi(signals.rssi)
-            if seed > self.leading.state.current_mcs:
+            seed = None
+            if self.learned_prior is not None:
+                seed = self.learned_prior.warmstart_seed(signals.rssi)
+            if seed is None:
+                seed = coarse_mcs_for_rssi(signals.rssi)
+            if seed is not None and seed > self.leading.state.current_mcs:
                 self.leading.state.current_mcs = min(seed, self.leading._cap_mcs)
                 self.leading.state.tx_power_dBm = self.leading._compute_tx_power(
                     self.leading.state.current_mcs)
             self._cold_started = True
 
+        # Predictive demote (down-only, confidence-gated, debounced). If the
+        # curve says the ceiling at the projected RSSI is below where we run,
+        # pre-demote ahead of the reactive path. The probe still owns promotes;
+        # the reactive Channel-B demote in select() remains the backstop.
+        predict_reason = ""
+        if (self.learned_prior is not None and signals.rssi is not None):
+            slope = (0.0 if self._prev_rssi is None
+                     else signals.rssi - self._prev_rssi)
+            pc = self.learned_prior.predictive_ceiling(signals.rssi, slope)
+            cur = self.leading.state.current_mcs
+            if pc is not None and pc < cur:
+                self._predict_demote_count += 1
+                if (self._predict_demote_count
+                        >= self.cfg.learned_prior.predictive_debounce_windows):
+                    self.leading.state.current_mcs = max(pc, 0)
+                    self.leading.state.tx_power_dBm = (
+                        self.leading._compute_tx_power(
+                            self.leading.state.current_mcs))
+                    self.leading._promote_clean = 0
+                    predict_reason = f"predict_demote mcs{cur}->{pc}"
+            else:
+                self._predict_demote_count = 0
+        self._prev_rssi = signals.rssi
+
         # Selector (Phase 2) is the only decision now: probe-promote +
         # reactive demote. The drone computes its own bitrate / FEC /
         # depth / tx_power locally, so we emit {mcs} only.
+        probe_snap = self._probe_status() if self._probe_status else None
         new_mcs, _tx, _changed = self.leading.select(
-            probe=self._probe_status() if self._probe_status else None,
+            probe=probe_snap,
             loss_rate=signals.residual_loss_w,
             fec_pressure=signals.fec_work,
             link_starved=sustained_starved,
             ts_ms=ts_ms,
         )
 
+        # Ingest one observation for the learned prior (spec §4): the probe
+        # rung verdict (current+1) and the operating-rung health.
+        if self.learned_prior is not None and signals.rssi is not None:
+            target = self.leading.state.current_mcs + 1
+            rung = probe_snap or {}
+            rung = rung.get("mcs", {}).get(str(target)) if target <= self.leading._cap_mcs else None
+            probe_clean = bool(
+                rung and rung.get("per") is not None
+                and (1.0 - rung["per"]) >= self.cfg.gate.probe_viable_threshold
+            )
+            operating_clean = signals.residual_loss_w < self.cfg.gate.video_demote_per
+            self.learned_prior.ingest(
+                rssi=signals.rssi,
+                probed_rung=(target if rung is not None else None),
+                probe_clean=probe_clean,
+                operating_mcs=new_mcs,
+                operating_clean=operating_clean,
+            )
+
+        reason = "; ".join(
+            r for r in ([predict_reason] + self.leading.reasons) if r
+        )
+        self.flightlog.write({
+            "ts": signals.timestamp,
+            "rssi": signals.rssi,
+            "mcs": new_mcs,
+            "reason": reason,
+            "residual_loss_w": signals.residual_loss_w,
+            "fec_work": signals.fec_work,
+            "link_starved": sustained_starved,
+            "ceiling": (self.learned_prior.ceiling(signals.rssi)
+                        if self.learned_prior and signals.rssi is not None else None),
+        })
         return Decision(
             timestamp=signals.timestamp,
             mcs=new_mcs,
-            reason="; ".join(self.leading.reasons) if self.leading.reasons else "",
+            reason=reason,
             signals_snapshot={
                 "rssi": signals.rssi,
                 "residual_loss_w": signals.residual_loss_w,
@@ -436,3 +508,10 @@ class Policy:
                 "mcs": new_mcs,
             },
         )
+
+    def close(self) -> None:
+        """Flush the learned prior + close the flight log. Called by the
+        controller when the dynamicLink loop tears down."""
+        if self.learned_prior is not None:
+            self.learned_prior.flush()
+        self.flightlog.close()

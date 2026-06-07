@@ -198,6 +198,7 @@ class DynamicLinkController:
         try:
             await self._stats_loop(on_event)
         finally:
+            policy.close()
             if idr_transport is not None:
                 idr_transport.close()
             return_link.close()
