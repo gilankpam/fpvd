@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 
 log = logging.getLogger("fpvdgs.dynlink")
@@ -28,14 +29,18 @@ class FlightLog:
         self._fh = None
         self._bytes = 0
         self._max_bytes = int(cfg.max_mb * 1024 * 1024)
-        if not cfg.enabled:
+        self._open(start_ms)
+
+    def _open(self, start_ms: int) -> None:
+        if not self.cfg.enabled:
             return
         try:
-            os.makedirs(cfg.dir, exist_ok=True)
-            self._path = os.path.join(cfg.dir, f"{start_ms}.jsonl")
+            os.makedirs(self.cfg.dir, exist_ok=True)
+            self._path = os.path.join(self.cfg.dir, f"{start_ms}.jsonl")
             self._fh = open(self._path, "w")
+            self._bytes = 0
         except OSError as e:
-            log.warning("flightlog: open failed in %s: %s", cfg.dir, e)
+            log.warning("flightlog: open failed in %s: %s", self.cfg.dir, e)
             self._fh = None
 
     def write(self, record: dict) -> None:
@@ -58,6 +63,21 @@ class FlightLog:
                 pass
             self._fh = None
         self._prune()
+
+    def roll(self) -> None:
+        """End the current flight file and begin a new one (a new flight).
+        No-op if disabled. Re-attempts the open even if the previous one
+        failed (e.g. the DVR mount came back)."""
+        if not self.cfg.enabled:
+            return
+        if self._fh is not None:
+            try:
+                self._fh.close()
+            except OSError:
+                pass
+            self._fh = None
+        self._prune()
+        self._open(int(time.monotonic() * 1000))
 
     def _prune(self) -> None:
         try:
