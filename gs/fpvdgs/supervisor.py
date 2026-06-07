@@ -104,8 +104,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         except Exception:
             drone_active = None
         st["drone"] = {"reachable": reachable,
-                       "dynamicLinkActive": drone_active,
-                       "hello": st.pop("hello", "none")}
+                       "dynamicLinkActive": drone_active}
         return st
 
     def _pixelpilot_status():

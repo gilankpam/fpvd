@@ -102,7 +102,7 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
         def status(self):
             return {"running": self.started, "statsConnected": False,
                     "decision": None, "lastEmitMs": None, "emitSeq": 0,
-                    "reason": "", "hello": "none"}
+                    "reason": ""}
 
     monkeypatch.setattr(supervisor, "DynamicLinkController", _StubController)
     # Avoid spawning the real runner / radio probing. make_probe_snapshot
@@ -147,7 +147,7 @@ def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
         def start(self): self.started = True
         def stop(self): self.started = False
         def set_config(self, snap): pass
-        def status(self): return {"running": self.started, "hello": "none"}
+        def status(self): return {"running": self.started}
     monkeypatch.setattr(supervisor, "DynamicLinkController", _StubDl)
 
     spawned = []

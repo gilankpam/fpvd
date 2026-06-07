@@ -37,12 +37,12 @@ def test_build_status_includes_dynamic_link_section():
           "decision": {"mcs": 4, "k": 8, "n": 12, "depth": 1,
                        "txpowerDbm": 22, "bitrateKbps": 9000},
           "lastEmitMs": 1234, "emitSeq": 5, "reason": "snr_margin",
-          "drone": {"reachable": True, "dynamicLinkActive": True, "hello": "acked"}}
+          "drone": {"reachable": True, "dynamicLinkActive": True}}
     out = status.build_status("0.1.0", {"running": True}, {}, {"reachable": True},
                               dynamic_link=dl)
     assert out["dynamicLink"]["running"] is True
     assert out["dynamicLink"]["decision"]["mcs"] == 4
-    assert out["dynamicLink"]["drone"]["hello"] == "acked"
+    assert out["dynamicLink"]["drone"]["dynamicLinkActive"] is True
 
 
 def test_build_status_omits_dynamic_link_when_absent():

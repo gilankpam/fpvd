@@ -97,18 +97,12 @@ class ProfileSelectionConfig:
 
 
 @dataclass
-class SafeDefaults:
-    mcs: int = 1
-
-
-@dataclass
 class PolicyConfig:
     leading: LeadingLoopConfig = field(default_factory=LeadingLoopConfig)
     gate: GateConfig = field(default_factory=GateConfig)
     selection: ProfileSelectionConfig = field(
         default_factory=ProfileSelectionConfig
     )
-    safe: SafeDefaults = field(default_factory=SafeDefaults)
     # Total-blackout failsafe: this many consecutive starved windows
     # (packet_rate_w < starvation_threshold while session active) feeds
     # the selector's link_starved emergency demote. Intentionally short —
@@ -351,11 +345,6 @@ def coarse_mcs_for_rssi(rssi):
     return 0
 
 
-@dataclass
-class PolicyState:
-    mcs: int
-
-
 class Policy:
     """Runs the probe-driven dual-gate selector and emits the
     `{mcs}`-only Decision."""
@@ -392,9 +381,6 @@ class Policy:
         # glitches). At 10 Hz, starvation_windows=5 = 0.5 s of below-
         # threshold packet rate before declaring blackout.
         self._starvation_count: int = 0
-        # Boot at the leading selector's chosen row.
-        row = self.leading.current_row
-        self.state = PolicyState(mcs=row.mcs)
 
     def tick(self, signals: Signals) -> Decision:
         ts_ms = signals.timestamp * 1000.0 if signals.timestamp else 0.0
@@ -433,7 +419,6 @@ class Policy:
             link_starved=sustained_starved,
             ts_ms=ts_ms,
         )
-        self.state.mcs = new_mcs
 
         return Decision(
             timestamp=signals.timestamp,

@@ -16,7 +16,6 @@ from fpvdgs.dynlink.policy import (
     Policy,
     PolicyConfig,
     ProfileSelectionConfig,
-    SafeDefaults,
 )
 from fpvdgs.dynlink.profile import load_profile
 
@@ -324,7 +323,6 @@ def test_cold_start_seed_raises_mcs_without_a_sync_gate():
     profile = load_profile("m8812eu2", [PACKAGED_DIR])
     cfg = PolicyConfig(
         leading=LeadingLoopConfig(tx_power_min_dBm=5.0, tx_power_max_dBm=30.0),
-        safe=SafeDefaults(mcs=1),
     )
     # No probe_status → selector can never promote; any MCS > 1 must come
     # from the cold-start seed.

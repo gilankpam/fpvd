@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 
 from .policy import (
     GateConfig, LeadingLoopConfig,
-    PolicyConfig, ProfileSelectionConfig, SafeDefaults,
+    PolicyConfig, ProfileSelectionConfig,
 )
 from .profile import RadioProfile, load_profile
 from .signals import SignalAggregator
@@ -100,7 +100,6 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
     leading_raw = raw.get("leading_loop", {})
     gate_raw = raw.get("gate", {})
     selection_raw = raw.get("profile_selection", {})
-    safe_raw = raw.get("safe_defaults", {})
 
     bitrate_raw = raw.get("policy", {}).get("bitrate", {})
     fec_raw = raw.get("fec", {})
@@ -204,16 +203,11 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
         ),
     )
 
-    safe_video = safe_raw.get("video", {})
-    safe = SafeDefaults(
-        mcs=int(safe_raw.get("mcs", safe_video.get("mcs", 1))),
-    )
     policy_raw = raw.get("policy", {})
     return PolicyConfig(
         leading=leading,
         gate=gate,
         selection=selection,
-        safe=safe,
         starvation_windows=int(policy_raw.get("starvation_windows", 5)),
     )
 
