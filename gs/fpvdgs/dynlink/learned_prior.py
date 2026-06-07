@@ -131,5 +131,51 @@ class LearnedPrior:
                 break
         return best if best is not None else ladder[0][1]
 
+    def _confident_ceiling(self, rssi, min_samples) -> int | None:
+        """ceiling(rssi) but gated on `min_samples` rather than the
+        warmstart default. Resolves through the isotonic ladder at the
+        stricter threshold (no direct-bin short-circuit)."""
+        b = self.rssi_bin(rssi)
+        if b is None:
+            return None
+
+        def bin_ceiling_at(bi: int) -> int | None:
+            best = None
+            for rung in range(MAX_MCS + 1):
+                ewma, n = self._cells[bi][rung]
+                if (ewma is not None and ewma >= self.cfg.viable_threshold
+                        and n >= min_samples):
+                    best = rung
+            return best
+
+        # Always resolve through the isotonic ladder (same fix as ceiling():
+        # NO short-circuit on the direct bin — the value must be
+        # monotonicity-corrected at the stricter threshold).
+        pts = [(bi, bin_ceiling_at(bi)) for bi in range(self._nbins)]
+        pts = [(bi, c) for bi, c in pts if c is not None]
+        if not pts:
+            return None
+        run = -1
+        ladder = []
+        for bi, c in pts:
+            run = max(run, c)
+            ladder.append((bi, run))
+        best = None
+        for lb, c in ladder:
+            if lb <= b:
+                best = c
+            else:
+                break
+        return best if best is not None else ladder[0][1]
+
     def warmstart_seed(self, rssi) -> int | None:
-        return None  # filled in Task 5
+        c = self._confident_ceiling(rssi, self.cfg.min_samples_warmstart)
+        if c is None:
+            return None
+        return max(0, min(MAX_MCS, c - self.cfg.warmstart_margin))
+
+    def predictive_ceiling(self, rssi, slope_dbm_per_tick) -> int | None:
+        if rssi is None:
+            return None
+        projected = rssi + slope_dbm_per_tick * self.cfg.predictive_horizon_ticks
+        return self._confident_ceiling(projected, self.cfg.min_samples_predictive)

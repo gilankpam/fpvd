@@ -125,3 +125,34 @@ def test_ceiling_unknown_with_no_confident_bins(tmp_path):
     p = _prior(tmp_path, min_samples_warmstart=100)
     _fill_bin(p, -50.0, ceiling=5, samples=3)   # below threshold
     assert p.ceiling(-50.0) is None
+
+
+def test_warmstart_seed_applies_margin_and_clamp(tmp_path):
+    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3,
+               warmstart_margin=1)
+    _fill_bin(p, -50.0, ceiling=5)
+    assert p.warmstart_seed(-50.0) == 4          # 5 - margin(1)
+    assert p.warmstart_seed(-91.0) is None        # out of range
+
+
+def test_warmstart_seed_none_when_unconfident(tmp_path):
+    p = _prior(tmp_path, min_samples_warmstart=100)
+    _fill_bin(p, -50.0, ceiling=5, samples=3)
+    assert p.warmstart_seed(-50.0) is None
+
+
+def test_predictive_ceiling_projects_and_gates_on_strict_confidence(tmp_path):
+    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3,
+               min_samples_predictive=3, predictive_horizon_ticks=2,
+               bin_width_db=2.0)
+    _fill_bin(p, -50.0, ceiling=5)   # where we are now
+    _fill_bin(p, -56.0, ceiling=2)   # where a -3 dB/tick fade lands in 2 ticks
+    # slope -3 dB/tick, horizon 2 -> projected ≈ -50 + (-3*2) = -56 -> ceiling 2
+    assert p.predictive_ceiling(-50.0, -3.0) == 2
+
+
+def test_predictive_ceiling_needs_strict_min_samples(tmp_path):
+    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3,
+               min_samples_predictive=100, predictive_horizon_ticks=2)
+    _fill_bin(p, -56.0, ceiling=2, samples=5)   # confident for warmstart, not predictive
+    assert p.predictive_ceiling(-50.0, -3.0) is None
