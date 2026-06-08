@@ -154,12 +154,12 @@ TEST_CASE("lock: DL off + body writes link.ldpc → allowed") {
     CHECK(r.lockedPaths.empty());
 }
 
-TEST_CASE("lock: DL on + body writes link.txpower → allowed (operator-owned, not DL-decided)") {
-    // The controller stopped deciding txpower in Phase 3a — tx power is constant,
-    // applied at radio bring-up / hot-tuned via radio-tune, never written by the
-    // decision loop. So an operator may set it while DL is enabled (like stbc/ldpc).
+TEST_CASE("lock: DL on + body writes link.txpower → rejected (curve owns power)") {
+    // Since the per-MCS power curve, the controller drives tx power per decision.
+    // A manual value would be silently overridden, so it is locked like link.mcs.
     auto body = nlohmann::json::parse(R"({"link":{"txpower":20}})");
     auto r = checkDynamicLinkLock(body, dlOn());
-    CHECK(r.ok);
-    CHECK(r.lockedPaths.empty());
+    CHECK_FALSE(r.ok);
+    REQUIRE(r.lockedPaths.size() == 1);
+    CHECK(r.lockedPaths[0] == "link.txpower");
 }

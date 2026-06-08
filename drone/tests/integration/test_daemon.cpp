@@ -352,7 +352,7 @@ TEST_CASE("daemon: txpower change takes hot path (tuneRadio, no rebuild)") {
     fs::remove_all(tmp);
 }
 
-TEST_CASE("daemon: txpower is patchable while DL is enabled (radio-only, controller untouched)") {
+TEST_CASE("daemon: txpower is rejected while DL is enabled (curve owns power)") {
     auto tmp = fs::temp_directory_path() / "fpvd-dl-txpower";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "rom" / "etc" / "fpvd");
@@ -373,21 +373,11 @@ TEST_CASE("daemon: txpower is patchable while DL is enabled (radio-only, control
         R"({"dynamicLink":{"enabled":true}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/false).ok);
 
-    // A txpower change is accepted under DL (lock open) ...
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"link":{"txpower":20}})")).ok);
-    auto ar = d.apply(/*reallyRestart=*/false);
-    REQUIRE(ar.ok);
-    CHECK(d.effective().link.txpower == 20);
-
-    // ... it is a radio-only change: the in-process controller and the encoder
-    // are not disturbed.
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "radio")
-          != ar.restarted.end());
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink")
-          == ar.restarted.end());
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder")
-          == ar.restarted.end());
+    // A txpower change is rejected under DL — the per-MCS power curve owns
+    // tx power and would silently override a manual value.
+    auto pr = d.patchPending(nlohmann::json::parse(
+        R"({"link":{"txpower":20}})"));
+    CHECK_FALSE(pr.ok);
 
     fs::remove_all(tmp);
 }
