@@ -334,22 +334,6 @@ class LeadingSelector:
 # Top-level policy: runs the selector, emits a {mcs}-only Decision.
 # ------------------------------------------------------------------
 
-# Coarse RSSI -> initial MCS, ONLY for cold-start before probe data exists.
-# Intentionally conservative; the probe takes over and refines from here.
-# (Phase 4 replaces this with the learned per-card prior.)
-# Floors must stay in descending order: coarse_mcs_for_rssi returns the first match.
-_COLD_START_RSSI_DBM = [(-55, 5), (-65, 3), (-75, 1), (-200, 0)]
-
-
-def coarse_mcs_for_rssi(rssi):
-    if rssi is None:
-        return 0
-    for floor, mcs in _COLD_START_RSSI_DBM:
-        if rssi >= floor:
-            return mcs
-    return 0
-
-
 class Policy:
     """Runs the probe-driven dual-gate selector and emits the
     `{mcs}`-only Decision."""
@@ -412,15 +396,14 @@ class Policy:
             self._starvation_count >= self.cfg.starvation_windows
         )
 
-        # Warm-start seed (one-shot). Prefer the learned per-card curve; fall
-        # back to the coarse hand-table when it's unknown/unconfident. Only
-        # raises the boot MCS, runs before select().
+        # Warm-start seed (one-shot). Uses the learned per-card curve ONLY —
+        # there is no RSSI hand-table fallback. Under per-MCS dynamic TX power
+        # RSSI is not a reliable absolute MCS predictor, so when the prior is
+        # cold the probe climbs safely from the boot MCS. Only raises the boot
+        # MCS, runs before select().
         if not self._cold_started and signals.rssi is not None:
-            seed = None
-            if self.learned_prior is not None:
-                seed = self.learned_prior.warmstart_seed(signals.rssi)
-            if seed is None:
-                seed = coarse_mcs_for_rssi(signals.rssi)
+            seed = (self.learned_prior.warmstart_seed(signals.rssi)
+                    if self.learned_prior is not None else None)
             if seed is not None and seed > self.leading.state.current_mcs:
                 self.leading.state.current_mcs = min(seed, self.leading._cap_mcs)
                 self.leading.state.tx_power_dBm = self.leading._compute_tx_power(

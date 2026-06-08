@@ -44,11 +44,13 @@ def test_warm_start_seeds_from_persisted_curve(tmp_path):
     p2.close()
 
 
-def test_unknown_curve_falls_back_to_cold_start(tmp_path):
-    # Empty store → warm-start unknown → today's coarse_mcs_for_rssi seed.
+def test_unknown_curve_no_seed_stays_at_boot(tmp_path):
+    # Empty store → warm-start unknown → NO RSSI cold-start seed (dropped).
+    # With no probe data the MCS stays at the boot default (1); in production
+    # the probe climbs from there.
     p = Policy(_cfg(tmp_path, min_samples_warmstart=100), _profile())
-    dec = p.tick(_sig(-50.0))   # coarse table: rssi>=-55 → mcs 5
-    assert dec.mcs == 5
+    dec = p.tick(_sig(-50.0))
+    assert dec.mcs == 1
     p.close()
 
 

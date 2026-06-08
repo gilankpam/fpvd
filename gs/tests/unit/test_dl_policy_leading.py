@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
 from fpvdgs.dynlink.policy import (
     GateConfig,
     LeadingLoopConfig,
@@ -293,63 +294,30 @@ def test_tx_power_jumps_atomically_on_emergency_drop():
     assert int(round(s.state.tx_power_dBm)) == 20
 
 
-# ── Cold-start: seed MCS from link RSSI before any probe data exists ────────
-
-
-def test_cold_start_seeds_mcs_from_rssi():
-    from fpvdgs.dynlink.policy import coarse_mcs_for_rssi
-    assert coarse_mcs_for_rssi(-50) >= coarse_mcs_for_rssi(-80)
-    assert coarse_mcs_for_rssi(None) == 0   # unknown -> floor
-    assert 0 <= coarse_mcs_for_rssi(-65) <= 7
-    # exact boundaries (inclusive floors)
-    assert coarse_mcs_for_rssi(-55) == 5
-    assert coarse_mcs_for_rssi(-56) == 3
-    assert coarse_mcs_for_rssi(-65) == 3
-    assert coarse_mcs_for_rssi(-75) == 1
-    assert coarse_mcs_for_rssi(-80) == 0
-    assert coarse_mcs_for_rssi(-50) == 5   # stronger than top floor
-
-
-def test_cold_start_seed_raises_mcs_without_a_sync_gate():
-    """On the first tick with a strong RSSI, the cold-start seed should raise
-    the operating MCS above the safe floor (probe has no data yet, so
-    select() cannot promote on its own). Phase 3b: Policy is built WITHOUT a
-    sync gate — the {mcs}-only Decision is emitted from the very first tick.
-    (a) First tick with strong RSSI (-50) raises mcs >= 3.
-    (b) Seed is one-shot and only-raises: a subsequent weak-RSSI tick with
-        zero loss does not lower current_mcs via the seed."""
+def test_strong_rssi_does_not_raise_mcs_without_probe_or_prior():
+    """The RSSI cold-start seed was removed: a strong RSSI alone must NOT
+    raise the operating MCS. With no probe data (select() cannot promote on
+    its own) and the learned prior disabled (no warm-start), the first tick
+    stays at the boot MCS (1); in production the probe climbs from there."""
     from fpvdgs.dynlink.signals import Signals
 
     profile = load_profile("m8812eu2", [PACKAGED_DIR])
     cfg = PolicyConfig(
         leading=LeadingLoopConfig(tx_power_min_dBm=5.0, tx_power_max_dBm=30.0),
+        learned_prior=LearnedPriorConfig(enabled=False),
     )
-    # No probe_status → selector can never promote; any MCS > 1 must come
-    # from the cold-start seed.
+    # No probe_status → selector can never promote; learned prior off → no
+    # warm-start seed. Any MCS > boot would have to come from the removed
+    # RSSI cold-start.
     policy = Policy(cfg, profile)
 
-    # (a) First tick: strong RSSI (-50) → seed must raise MCS.
     strong_signals = Signals(
         rssi=-50.0, rssi_min_w=-50.0, rssi_max_w=-50.0,
         residual_loss_w=0.0, fec_work=0.0,
         timestamp=1.0, link_starved_w=False,
     )
-    decision_strong = policy.tick(strong_signals)
-    assert decision_strong.mcs >= 3, (
-        f"cold-start seed with rssi=-50 should yield mcs>=3, got {decision_strong.mcs}"
-    )
-    mcs_after_seed = policy.leading.state.current_mcs
-
-    # (b) One-shot: second tick with weak RSSI (-90) and zero loss must not
-    # lower current_mcs via the seed (seed flag already flipped; emergency
-    # demote is not triggered either since loss=0).
-    weak_signals = Signals(
-        rssi=-90.0, rssi_min_w=-90.0, rssi_max_w=-90.0,
-        residual_loss_w=0.0, fec_work=0.0,
-        timestamp=2.0, link_starved_w=False,
-    )
-    policy.tick(weak_signals)
-    assert policy.leading.state.current_mcs >= mcs_after_seed, (
-        f"seed must be one-shot and only-raises: mcs dropped from "
-        f"{mcs_after_seed} to {policy.leading.state.current_mcs}"
+    decision = policy.tick(strong_signals)
+    assert decision.mcs == 1, (
+        f"strong RSSI must not raise MCS without probe/prior data, "
+        f"got {decision.mcs}"
     )
