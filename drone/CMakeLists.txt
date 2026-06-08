@@ -29,6 +29,7 @@ target_sources(fpvd_core PRIVATE
     src/dynlink/dedup.cpp
     src/dynlink/encoder_client.cpp
     src/dynlink/radio_txpower.cpp
+    src/dynlink/txpower_curve.cpp
     src/dynlink/roi_qp.cpp
     src/dynlink/bitrate.cpp
     src/dynlink/fec.cpp
@@ -94,6 +95,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/unit/test_dl_bitrate.cpp
         tests/unit/test_dl_fec.cpp
         tests/unit/test_dl_local_compute.cpp
+        tests/unit/test_dl_txpower_curve.cpp
         tests/integration/test_process.cpp
         tests/integration/test_supervisor.cpp
         tests/integration/test_orchestrator.cpp
