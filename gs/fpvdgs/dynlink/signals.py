@@ -14,6 +14,29 @@ from .stats_client import RxEvent, SessionInfo
 WINDOW_S = 0.1  # design cadence: log_interval = 100 ms (§3)
 
 
+@dataclass(frozen=True)
+class RssiNormConfig:
+    """EIRP-normalization of the video-link RSSI by the drone's per-MCS TX
+    power. `tx_power_dbm_by_mcs` MIRRORS the drone's kTxPowerDbmByMcs curve
+    (drone/src/dynlink/txpower_curve.hpp) — both are static calibration
+    constants and MUST stay in sync. When `enabled` is False, normalization
+    is identity (raw RSSI), for rollback / back-compat."""
+    enabled: bool = True
+    p_ref_dbm: int = 29
+    tx_power_dbm_by_mcs: tuple[int, ...] = (29, 28, 25, 23, 19, 19, 19, 19)
+
+
+def normalize_rssi(rssi_raw, mcs, cfg: RssiNormConfig):
+    """EIRP-normalize one RSSI reading: rssi_raw + (P_ref − curve[mcs]).
+    Clamps mcs into the curve's index range. None-safe (returns rssi_raw
+    when disabled, or when rssi_raw / mcs is None)."""
+    if not cfg.enabled or rssi_raw is None or mcs is None:
+        return rssi_raw
+    n = len(cfg.tx_power_dbm_by_mcs)
+    m = max(0, min(n - 1, int(mcs)))
+    return rssi_raw + (cfg.p_ref_dbm - cfg.tx_power_dbm_by_mcs[m])
+
+
 @dataclass
 class Signals:
     """One tick's view of the controller inputs.
