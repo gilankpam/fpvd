@@ -6,8 +6,8 @@ Decision on every tick.
 
 Phase 3b: the drone computes its own bitrate / FEC / depth / tx_power
 locally, so the GS no longer composes any of that. The selector (Phase 2)
-is the only decision: probe-promote + reactive demote, with an RSSI
-cold-start seed and starvation hysteresis feeding the emergency demote.
+is the only decision: probe-promote + reactive demote, with a learned-prior
+warm-start seed and starvation hysteresis feeding the emergency demote.
 """
 from __future__ import annotations
 
@@ -353,11 +353,13 @@ class Policy:
         # left None (e.g. tests / no probe) the selector can never
         # promote — it only reacts to emergencies.
         self._probe_status = probe_status
-        # Cold-start one-shot: seed the operating MCS from the single
-        # link-RSSI via a coarse table on the first tick where RSSI is
-        # present, so the first real decision isn't stuck at the safe
-        # floor while the probe warms up. Flipped True after the single
-        # seed; the probe-driven select() owns MCS thereafter.
+        # Warm-start one-shot: seed the operating MCS from the learned
+        # per-card prior on the first tick where RSSI is present, so the
+        # first real decision isn't stuck at the boot MCS while the probe
+        # warms up. Flipped True after the single seed; the probe-driven
+        # select() owns MCS thereafter. (No raw-RSSI fallback — that
+        # cold-start table was removed; a cold prior just lets the probe
+        # climb from boot.)
         self._cold_started = False
         self.leading = LeadingSelector(
             cfg.leading, cfg.gate, cfg.selection, profile
