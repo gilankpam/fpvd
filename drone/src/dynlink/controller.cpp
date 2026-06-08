@@ -505,8 +505,8 @@ void DynamicLinkController::run(int evfd) {
                 // Phase 2 of a Down: narrow tx capacity (mcs/fec)
                 // now that the encoder already throttled in phase 1.
                 // No lastEnc_ update here — it was set in phase 1
-                // (the decision branch). tx power is constant, so
-                // there is no deferred radio step either.
+                // (the decision branch). dispatchTxApply also steps
+                // tx power with the mcs (per-MCS curve).
                 dispatchTxApply(cfg, applyPending);
             }
             // Idle here means a stale expiration the kernel queued before
