@@ -668,7 +668,9 @@ Perform after the branch merges and is ready to deploy. These are operational st
    ```bash
    ssh root@10.18.0.1 'rm -f /etc/fpvd/learned/*.json'
    ```
-3. **Widen the learned-prior bin range** so the normalized (P_ref=29) scale, which shifts values up by up to +10 dB, stays in range. In the live `/etc/fpvd/config.json`, under `dynamicLink.tuning.learned_prior`, set `rssi_max` to `-20` (default is `-30`). This is additive — **do NOT clobber the existing tuned probe knobs** (`rxL=800`, `gate.probe_viable_threshold=0.85`, etc.). A changed bin signature also forces the clean rebuild we want.
+3. **Widen the learned-prior bin range — MANDATORY GATE, do not skip.** So the normalized (P_ref=29) scale, which shifts values up by up to +10 dB, stays in range. In the live `/etc/fpvd/config.json`, under `dynamicLink.tuning.learned_prior`, set `rssi_max` to `-20` (default is `-30`). This is additive — **do NOT clobber the existing tuned probe knobs** (`rxL=800`, `gate.probe_viable_threshold=0.85`, etc.). A changed bin signature also forces the clean rebuild we want.
+   - **Why it's a hard gate (silent failure if skipped):** `LearnedPrior.rssi_bin` returns `None` for `rssi >= rssi_max`, and `ingest`/`ceiling`/`warmstart_seed` then silently no-op for that window. Post-normalization a close link (e.g. raw −35 @ MCS5 → normalized −25) exceeds the default −30 ceiling, so the prior would **stop populating its top bins at close range** — exactly where you want it — with no error. There is no code-level safety net (the default is kept at −30 to preserve the `enabled=false` identity path), so this config edit is the only thing standing between you and a quietly half-learning prior.
+   - **Verify after deploy:** confirm `/status` learned-prior bins fill at the high (close-range) RSSI values, not just the low ones.
 4. **Hardware verify:**
    - Predictive-demote no longer fires on a promote (watch the flight log `reason` field for `predict_demote` immediately following a promote — should be gone).
    - Learned-prior bins fill on the normalized scale (check `/status` learned-prior bins populate at the shifted RSSI values).
