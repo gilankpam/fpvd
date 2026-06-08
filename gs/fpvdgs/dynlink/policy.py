@@ -483,6 +483,7 @@ class Policy:
         self.flightlog.write({
             "ts": signals.timestamp,
             "rssi": signals.rssi,
+            "rssi_raw": signals.rssi_raw,
             "mcs": new_mcs,
             "reason": reason,
             "residual_loss_w": signals.residual_loss_w,
@@ -497,6 +498,7 @@ class Policy:
             reason=reason,
             signals_snapshot={
                 "rssi": signals.rssi,
+                "rssi_raw": signals.rssi_raw,
                 "residual_loss_w": signals.residual_loss_w,
                 "fec_work": signals.fec_work,
                 "link_starved": sustained_starved,
