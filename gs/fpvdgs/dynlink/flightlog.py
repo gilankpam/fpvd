@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from dataclasses import dataclass
 
 log = logging.getLogger("fpvdgs.dynlink")
@@ -24,19 +23,38 @@ class FlightLogConfig:
 
 
 class FlightLog:
-    def __init__(self, cfg: FlightLogConfig, *, start_ms: int) -> None:
+    def __init__(self, cfg: FlightLogConfig) -> None:
         self.cfg = cfg
         self._fh = None
         self._bytes = 0
         self._max_bytes = int(cfg.max_mb * 1024 * 1024)
-        self._open(start_ms)
+        self._open()
 
-    def _open(self, start_ms: int) -> None:
+    def _next_seq(self) -> int:
+        """Next flight number = (highest numeric .jsonl stem on disk) + 1.
+
+        Derived from the directory, not a clock, so it stays incremental
+        across a GS restart (which would reset the monotonic clock). Resets
+        to 1 only when the directory holds no flight files."""
+        hi = 0
+        try:
+            for f in os.listdir(self.cfg.dir):
+                if not f.endswith(".jsonl"):
+                    continue
+                try:
+                    hi = max(hi, int(f[:-len(".jsonl")]))
+                except ValueError:
+                    continue
+        except OSError:
+            pass
+        return hi + 1
+
+    def _open(self) -> None:
         if not self.cfg.enabled:
             return
         try:
             os.makedirs(self.cfg.dir, exist_ok=True)
-            self._path = os.path.join(self.cfg.dir, f"{start_ms}.jsonl")
+            self._path = os.path.join(self.cfg.dir, f"{self._next_seq():06d}.jsonl")
             self._fh = open(self._path, "w")
             self._bytes = 0
         except OSError as e:
@@ -77,7 +95,7 @@ class FlightLog:
                 pass
             self._fh = None
         self._prune()
-        self._open(int(time.monotonic() * 1000))
+        self._open()
 
     def _prune(self) -> None:
         try:

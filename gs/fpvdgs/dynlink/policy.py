@@ -396,8 +396,7 @@ class Policy:
         self._prev_rssi: float | None = None
         self._predict_demote_count = 0
         self._last_healthy_mono = None   # monotonic ts of last non-starved tick (flight-gap roll)
-        start_ms = int(time.monotonic() * 1000)
-        self.flightlog = FlightLog(cfg.flightlog, start_ms=start_ms)
+        self.flightlog = FlightLog(cfg.flightlog)
 
     def tick(self, signals: Signals) -> Decision:
         ts_ms = signals.timestamp * 1000.0 if signals.timestamp else 0.0

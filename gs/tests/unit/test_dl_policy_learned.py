@@ -91,10 +91,9 @@ def _sig_starved(starved, ts=1.0, rssi=-55.0):
 
 
 def test_flight_rolls_on_link_gap_recovery(tmp_path, monkeypatch):
-    from fpvdgs.dynlink import policy as policy_mod, flightlog as fl_mod
+    from fpvdgs.dynlink import policy as policy_mod
     clock = {"t": 1000.0}
     monkeypatch.setattr(policy_mod.time, "monotonic", lambda: clock["t"])
-    monkeypatch.setattr(fl_mod.time, "monotonic", lambda: clock["t"])
     p = Policy(_cfg_fl(tmp_path, flight_gap_s=15.0), _profile())
     p.tick(_sig_starved(False, ts=1.0)); clock["t"] += 0.1     # baseline (no roll on 1st)
     p.tick(_sig_starved(False, ts=1.1))
@@ -106,10 +105,9 @@ def test_flight_rolls_on_link_gap_recovery(tmp_path, monkeypatch):
 
 
 def test_brief_gap_does_not_roll(tmp_path, monkeypatch):
-    from fpvdgs.dynlink import policy as policy_mod, flightlog as fl_mod
+    from fpvdgs.dynlink import policy as policy_mod
     clock = {"t": 1000.0}
     monkeypatch.setattr(policy_mod.time, "monotonic", lambda: clock["t"])
-    monkeypatch.setattr(fl_mod.time, "monotonic", lambda: clock["t"])
     p = Policy(_cfg_fl(tmp_path, flight_gap_s=15.0), _profile())
     p.tick(_sig_starved(False, ts=1.0)); clock["t"] += 5.0     # only 5 s gap
     p.tick(_sig_starved(True, ts=2.0))
@@ -119,10 +117,9 @@ def test_brief_gap_does_not_roll(tmp_path, monkeypatch):
 
 
 def test_first_healthy_tick_does_not_roll(tmp_path, monkeypatch):
-    from fpvdgs.dynlink import policy as policy_mod, flightlog as fl_mod
+    from fpvdgs.dynlink import policy as policy_mod
     clock = {"t": 9999.0}     # large: would exceed any gap if baseline weren't None
     monkeypatch.setattr(policy_mod.time, "monotonic", lambda: clock["t"])
-    monkeypatch.setattr(fl_mod.time, "monotonic", lambda: clock["t"])
     p = Policy(_cfg_fl(tmp_path, flight_gap_s=15.0), _profile())
     p.tick(_sig_starved(False, ts=1.0))                        # 1st healthy: None baseline -> no roll
     p.close()

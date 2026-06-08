@@ -3,7 +3,7 @@ from fpvdgs.dynlink.flightlog import FlightLog, FlightLogConfig
 
 
 def test_writes_jsonl_records(tmp_path):
-    fl = FlightLog(FlightLogConfig(dir=str(tmp_path)), start_ms=1000)
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
     fl.write({"ts": 1.0, "mcs": 5})
     fl.write({"ts": 1.1, "mcs": 4})
     fl.close()
@@ -15,7 +15,7 @@ def test_writes_jsonl_records(tmp_path):
 
 
 def test_disabled_is_noop(tmp_path):
-    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), enabled=False), start_ms=1)
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), enabled=False))
     fl.write({"ts": 1.0})
     fl.close()
     assert list(tmp_path.iterdir()) == []
@@ -24,8 +24,7 @@ def test_disabled_is_noop(tmp_path):
 def test_rotation_keeps_max_files(tmp_path):
     # create 5 sessions with max_files=3 → oldest pruned on close
     for i in range(5):
-        fl = FlightLog(FlightLogConfig(dir=str(tmp_path), max_files=3),
-                       start_ms=1000 + i)
+        fl = FlightLog(FlightLogConfig(dir=str(tmp_path), max_files=3))
         fl.write({"ts": float(i)})
         fl.close()
     files = sorted(tmp_path.glob("*.jsonl"))
@@ -33,7 +32,7 @@ def test_rotation_keeps_max_files(tmp_path):
 
 
 def test_write_after_close_is_safe(tmp_path):
-    fl = FlightLog(FlightLogConfig(dir=str(tmp_path)), start_ms=1)
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
     fl.close()
     fl.write({"ts": 1.0})        # no crash
 
@@ -46,7 +45,7 @@ def test_config_defaults_dvr_dir_and_gap():
 
 
 def test_roll_starts_new_file_and_both_persist(tmp_path):
-    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), max_files=8), start_ms=1000)
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), max_files=8))
     fl.write({"ts": 1.0, "mcs": 5})
     fl.roll()
     fl.write({"ts": 9.0, "mcs": 2})
@@ -58,7 +57,7 @@ def test_roll_starts_new_file_and_both_persist(tmp_path):
 
 
 def test_roll_prunes_to_max_files(tmp_path):
-    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), max_files=2), start_ms=1000)
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), max_files=2))
     fl.write({"ts": 1.0})
     fl.roll(); fl.write({"ts": 2.0})
     fl.roll(); fl.write({"ts": 3.0})            # 3 flights, cap 2
@@ -67,8 +66,42 @@ def test_roll_prunes_to_max_files(tmp_path):
 
 
 def test_roll_is_noop_when_disabled(tmp_path):
-    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), enabled=False), start_ms=1)
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), enabled=False))
     fl.roll()
     fl.write({"ts": 1.0})
     fl.close()
     assert list(tmp_path.iterdir()) == []
+
+
+def test_filename_increments_across_restart(tmp_path):
+    # First flight, then a "GS restart": a fresh instance must continue the
+    # sequence from disk (the monotonic clock has reset to ~0) and must NOT
+    # overwrite the earlier flight.
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), max_files=8))
+    fl.write({"ts": 1.0, "mcs": 5})
+    fl.close()
+    fl2 = FlightLog(FlightLogConfig(dir=str(tmp_path), max_files=8))
+    fl2.write({"ts": 2.0, "mcs": 2})
+    fl2.close()
+    files = sorted(tmp_path.glob("*.jsonl"))
+    assert len(files) == 2                      # the restart did not clobber flight 1
+    seqs = sorted(int(p.stem) for p in files)
+    assert seqs[1] == seqs[0] + 1               # strictly incremental by name
+
+
+def test_roll_increments_by_name(tmp_path):
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), max_files=8))
+    fl.write({"ts": 1.0})
+    fl.roll()
+    fl.write({"ts": 2.0})
+    fl.close()
+    seqs = sorted(int(p.stem) for p in tmp_path.glob("*.jsonl"))
+    assert seqs == [seqs[0], seqs[0] + 1]
+
+
+def test_first_flight_starts_at_one(tmp_path):
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
+    fl.write({"ts": 1.0})
+    fl.close()
+    files = list(tmp_path.glob("*.jsonl"))
+    assert int(files[0].stem) == 1
