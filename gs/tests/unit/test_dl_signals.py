@@ -15,6 +15,7 @@ def _rx(
     bursts_rec: int = 0,
     holdoff: int = 0,
     late_deadline: int = 0,
+    mcs: int = 0,
     ants: list[tuple[int, int, int, int]] | None = None,
 ) -> RxEvent:
     """Build a minimal RxEvent for tests. ants = [(rssi_min, rssi_avg, snr_min, snr_avg), ...]"""
@@ -22,7 +23,7 @@ def _rx(
         ants = [(-60, -58, 20, 22)]
     ant_stats = [
         RxAnt(
-            ant=i, freq=5765, mcs=7, bw=20, pkt_recv=100,
+            ant=i, freq=5765, mcs=mcs, bw=20, pkt_recv=100,
             rssi_min=a[0], rssi_avg=a[1], rssi_max=a[1] + 2,
             snr_min=a[2], snr_avg=a[3], snr_max=a[3] + 2,
         )
@@ -163,3 +164,48 @@ def test_signals_has_no_snr_fields():
     s = Signals()
     assert not hasattr(s, "snr") and not hasattr(s, "snr_slope")
     assert not hasattr(s, "snr_max_w")
+
+
+def test_rssi_normalized_by_received_mcs():
+    """A window at MCS5 (curve 19, P_ref 29) raises signals.rssi by +10
+    vs the raw value; rssi_raw keeps the measured value."""
+    agg = SignalAggregator(ewma_alpha_rssi=1.0)  # no smoothing → see one window
+    s = agg.consume(_rx(0.1, mcs=5, ants=[(-70, -70, 10, 10)]))
+    assert s.rssi == -60.0       # -70 + (29 - 19)
+    assert s.rssi_raw == -70.0   # measured, un-normalized
+    assert s.rssi_max_w == -70.0
+
+
+def test_rssi_norm_disabled_is_identity():
+    from fpvdgs.dynlink.signals import RssiNormConfig
+    agg = SignalAggregator(
+        ewma_alpha_rssi=1.0, rssi_norm=RssiNormConfig(enabled=False)
+    )
+    s = agg.consume(_rx(0.1, mcs=5, ants=[(-70, -70, 10, 10)]))
+    assert s.rssi == -70.0       # raw, unchanged
+    assert s.rssi_raw == -70.0
+
+
+def test_rssi_ewma_removes_power_step_across_mcs_climb():
+    """Fixed distance, promote MCS0→MCS5: drone power drops 29→19 so the
+    measured RSSI drops ~10 dB. Normalized signals.rssi stays flat (the
+    power step is removed before the EWMA); rssi_raw shows the step down."""
+    agg = SignalAggregator(ewma_alpha_rssi=0.2)
+    # Window 1: MCS0 @ raw -60  → normalized -60.
+    s = agg.consume(_rx(0.1, mcs=0, ants=[(-60, -60, 20, 20)]))
+    assert s.rssi == -60.0
+    assert s.rssi_raw == -60.0
+    # Window 2: MCS5 @ raw -70 (power dropped 10) → normalized -60.
+    s = agg.consume(_rx(0.2, mcs=5, ants=[(-70, -70, 12, 12)]))
+    assert s.rssi == -60.0            # flat — power step removed
+    assert s.rssi_raw < -60.0         # raw EWMA steps down toward -70
+
+
+def test_rssi_norm_uses_best_antenna_mcs():
+    """The window's MCS comes from the best (max rssi_avg) antenna."""
+    agg = SignalAggregator(ewma_alpha_rssi=1.0)
+    # Best antenna (rssi_avg -55) carries MCS5 → offset +10 on -55.
+    s = agg.consume(_rx(0.1, mcs=5, ants=[(-55, -55, 20, 20),
+                                          (-72, -70, 15, 17)]))
+    assert s.rssi == -45.0   # -55 + 10
+    assert s.rssi_max_w == -55.0

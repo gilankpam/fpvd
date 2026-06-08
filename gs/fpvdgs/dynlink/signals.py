@@ -50,6 +50,7 @@ class Signals:
     rssi_min_w: float | None = None       # min across antennas of rssi_min
     rssi_avg_w: float | None = None       # diversity-combined estimate
     rssi_max_w: float | None = None       # max(rssi_avg) — best-antenna operating point
+    mcs_w: int | None = None              # received MCS of the best antenna this window
     residual_loss_w: float = 0.0          # used raw — no smoothing (§3)
     fec_work_rate_w: float = 0.0
     packet_rate_w: float = 0.0            # fragments / sec
@@ -63,6 +64,7 @@ class Signals:
 
     # EWMA-smoothed controller inputs
     rssi: float | None = None
+    rssi_raw: float | None = None         # EWMA of the un-normalized RSSI (observability)
     fec_work: float = 0.0
     burst_rate: float = 0.0
     holdoff_rate: float = 0.0
@@ -97,6 +99,8 @@ class SignalAggregator:
     # is well below an FPV video stream's nominal ~700-1500 pps but well
     # above background noise from a stalled stream.
     starvation_threshold_pps: float = 50.0
+
+    rssi_norm: RssiNormConfig = field(default_factory=RssiNormConfig)
 
     signals: Signals = field(default_factory=Signals)
 
@@ -139,7 +143,9 @@ class SignalAggregator:
             rssi_avgs = [a.rssi_avg for a in ev.rx_ant_stats]
             s.rssi_min_w = float(min(rssi_mins))
             s.rssi_avg_w = float(sum(rssi_avgs) / len(rssi_avgs))
-            s.rssi_max_w = float(max(rssi_avgs))
+            best_ant = max(ev.rx_ant_stats, key=lambda a: a.rssi_avg)
+            s.rssi_max_w = float(best_ant.rssi_avg)
+            s.mcs_w = int(best_ant.mcs)
             s.ant_count = len(ev.rx_ant_stats)
         # If no antenna lines this window, keep prior values — don't
         # reset; the RSSI operating point doesn't vanish just because
@@ -161,7 +167,11 @@ class SignalAggregator:
         # min(rssi_min) tracks the weakest antenna and misses
         # best-antenna degradation entirely.
         if s.rssi_max_w is not None:
-            s.rssi = _ewma(s.rssi, s.rssi_max_w, self.ewma_alpha_rssi)
+            # Normalize per-window by the received MCS BEFORE smoothing, so a
+            # promote's power drop never enters the EWMA as a fake fade.
+            rssi_norm_w = normalize_rssi(s.rssi_max_w, s.mcs_w, self.rssi_norm)
+            s.rssi = _ewma(s.rssi, rssi_norm_w, self.ewma_alpha_rssi)
+            s.rssi_raw = _ewma(s.rssi_raw, s.rssi_max_w, self.ewma_alpha_rssi)
 
         s.fec_work = _ewma(s.fec_work, s.fec_work_rate_w, self.ewma_alpha_fec)
         s.burst_rate = _ewma(s.burst_rate, s.burst_rate_w, self.ewma_alpha_burst)
