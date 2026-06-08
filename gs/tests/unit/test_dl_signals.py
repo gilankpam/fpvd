@@ -202,10 +202,21 @@ def test_rssi_ewma_removes_power_step_across_mcs_climb():
 
 
 def test_rssi_norm_uses_best_antenna_mcs():
-    """The window's MCS comes from the best (max rssi_avg) antenna."""
+    """The window's MCS comes from the best (max rssi_avg) antenna, not any
+    other. Best antenna: rssi_avg -55 @ MCS5 (offset +10); worst: rssi_avg
+    -70 @ MCS0 (offset 0). Normalized rssi must use the best antenna's MCS5
+    → -45, NOT the worst antenna's MCS0 → -55."""
     agg = SignalAggregator(ewma_alpha_rssi=1.0)
-    # Best antenna (rssi_avg -55) carries MCS5 → offset +10 on -55.
-    s = agg.consume(_rx(0.1, mcs=5, ants=[(-55, -55, 20, 20),
-                                          (-72, -70, 15, 17)]))
-    assert s.rssi == -45.0   # -55 + 10
-    assert s.rssi_max_w == -55.0
+    ev = _rx(0.1)
+    ev.rx_ant_stats = [
+        RxAnt(ant=0, freq=5765, mcs=5, bw=20, pkt_recv=100,
+              rssi_min=-57, rssi_avg=-55, rssi_max=-53,
+              snr_min=20, snr_avg=22, snr_max=24),
+        RxAnt(ant=1, freq=5765, mcs=0, bw=20, pkt_recv=100,
+              rssi_min=-72, rssi_avg=-70, rssi_max=-68,
+              snr_min=10, snr_avg=12, snr_max=14),
+    ]
+    s = agg.consume(ev)
+    assert s.rssi_max_w == -55.0   # best antenna's rssi_avg
+    assert s.mcs_w == 5            # best antenna's MCS, not the worst's 0
+    assert s.rssi == -45.0         # -55 + (29 - curve[5]=19), best-antenna MCS5
