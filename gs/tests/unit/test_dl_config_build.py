@@ -117,3 +117,21 @@ def test_flightlog_flight_gap_s_parsed():
         "flight_gap_s": 8.0, "dir": "/tmp/fl"}}}})
     assert cfg.flightlog.flight_gap_s == 8.0
     assert cfg.flightlog.dir == "/tmp/fl"
+
+
+def test_rssi_norm_defaults_enabled_full_curve():
+    agg = build_aggregator({})
+    assert agg.rssi_norm.enabled is True
+    assert agg.rssi_norm.p_ref_dbm == 29
+    assert agg.rssi_norm.tx_power_dbm_by_mcs == (29, 28, 25, 23, 19, 19, 19, 19)
+
+
+def test_rssi_norm_parsed_from_tuning_block():
+    block = {"tuning": {"rssi_norm": {
+        "enabled": False, "p_ref_dbm": 30,
+        "tx_power_dbm_by_mcs": [30, 29, 26, 24, 20, 20, 20, 20],
+    }}}
+    agg = build_aggregator(block)
+    assert agg.rssi_norm.enabled is False
+    assert agg.rssi_norm.p_ref_dbm == 30
+    assert agg.rssi_norm.tx_power_dbm_by_mcs == (30, 29, 26, 24, 20, 20, 20, 20)

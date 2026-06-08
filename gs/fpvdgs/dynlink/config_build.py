@@ -20,7 +20,7 @@ from .policy import (
     PolicyConfig, ProfileSelectionConfig,
 )
 from .profile import RadioProfile, load_profile
-from .signals import SignalAggregator
+from .signals import RssiNormConfig, SignalAggregator
 
 log = logging.getLogger("fpvdgs.dynlink")
 
@@ -245,9 +245,19 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
 def _build_aggregator(raw: dict) -> SignalAggregator:
     s = raw.get("smoothing", {})
     starv = s.get("starvation_threshold_pps", 50.0)
+    rn = raw.get("rssi_norm", {}) or {}
+    rssi_norm = RssiNormConfig(
+        enabled=bool(rn.get("enabled", True)),
+        p_ref_dbm=int(rn.get("p_ref_dbm", 29)),
+        tx_power_dbm_by_mcs=tuple(
+            int(x) for x in rn.get(
+                "tx_power_dbm_by_mcs", (29, 28, 25, 23, 19, 19, 19, 19))
+        ),
+    )
     return SignalAggregator(
         ewma_alpha_rssi=float(s.get("ewma_alpha_rssi", 0.2)),
         ewma_alpha_fec=float(s.get("ewma_alpha_fec", 0.2)),
         ewma_alpha_burst=float(s.get("ewma_alpha_burst", 0.1)),
         starvation_threshold_pps=float(starv),
+        rssi_norm=rssi_norm,
     )
