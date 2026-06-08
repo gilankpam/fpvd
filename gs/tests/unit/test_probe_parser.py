@@ -27,10 +27,46 @@ def test_aggregator_ewma_and_per():
     assert abs(snap[5]["per"] - 0.06) < 1e-9
     assert snap[5]["windows"] == 2
 
-def test_aggregator_blackout_window_is_full_loss():
-    agg = parser.McsAggregator(alpha=1.0)
-    agg.on_pkt(mcs=7, data=0, lost=0)     # nothing decoded this window
+def test_isolated_empty_window_does_not_corrupt_per():
+    # A lone no-decode window (sparse feeder: ~1 pkt/window) carries no PER
+    # info — it must be ignored, not scored as 100% loss.
+    agg = parser.McsAggregator(alpha=0.5)
+    agg.on_rx_ant(mcs=5, rssi=-60, snr=20)
+    agg.on_pkt(mcs=5, data=90, lost=10)   # window PER = 0.10
+    agg.on_pkt(mcs=5, data=0, lost=0)     # empty: skipped, not 1.0
+    agg.on_pkt(mcs=5, data=98, lost=2)    # window PER = 0.02; EWMA 0.10 -> 0.06
+    snap = agg.snapshot()
+    assert abs(snap[5]["per"] - 0.06) < 1e-9
+    assert snap[5]["windows"] == 2        # only the two real windows count
+
+
+def test_single_empty_window_is_not_full_loss():
+    agg = parser.McsAggregator(blackout_windows=3)
+    agg.on_pkt(mcs=7, data=0, lost=0)     # one empty window
+    assert agg.snapshot()[7]["per"] is None   # no info yet, not a blackout
+
+
+def test_sustained_blackout_marks_full_loss():
+    # A run of consecutive no-decode windows IS a real blackout → per=1.0,
+    # preserving the promote-blocking contract.
+    agg = parser.McsAggregator(blackout_windows=3)
+    agg.on_rx_ant(mcs=7, rssi=-80, snr=8)
+    agg.on_pkt(mcs=7, data=10, lost=0)    # healthy: per 0.0
+    agg.on_pkt(mcs=7, data=0, lost=0)     # empty 1
+    agg.on_pkt(mcs=7, data=0, lost=0)     # empty 2
+    assert agg.snapshot()[7]["per"] == 0.0    # not yet — under threshold
+    agg.on_pkt(mcs=7, data=0, lost=0)     # empty 3 → blackout
     assert agg.snapshot()[7]["per"] == 1.0
+
+
+def test_real_window_resets_blackout_run():
+    agg = parser.McsAggregator(blackout_windows=3)
+    agg.on_pkt(mcs=7, data=5, lost=0)     # real
+    agg.on_pkt(mcs=7, data=0, lost=0)     # empty 1
+    agg.on_pkt(mcs=7, data=0, lost=0)     # empty 2
+    agg.on_pkt(mcs=7, data=5, lost=0)     # real → resets the run
+    agg.on_pkt(mcs=7, data=0, lost=0)     # empty 1 again
+    assert agg.snapshot()[7]["per"] == 0.0    # never reached 3-in-a-row
 
 def test_aggregator_per_none_before_first_pkt():
     agg = parser.McsAggregator()

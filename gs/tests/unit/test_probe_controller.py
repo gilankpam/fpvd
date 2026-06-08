@@ -79,6 +79,40 @@ def test_retune_followed_via_rx_ant_key():
     finally:
         c.stop()
 
+def test_snapshot_reads_tuning_from_config():
+    from fpvdgs.probe.config_build import make_probe_snapshot
+    eff = {"link": {"linkId": 7, "wlans": ["wlanA"]},
+           "probe": {"rxL": 800, "blackoutWindows": 2, "ewmaAlpha": 0.1}}
+    snap = make_probe_snapshot(eff)
+    assert snap["rxL"] == 800
+    assert snap["blackoutWindows"] == 2
+    assert snap["ewmaAlpha"] == 0.1
+
+
+def test_snapshot_tuning_defaults():
+    from fpvdgs.probe.config_build import make_probe_snapshot
+    eff = {"link": {"linkId": 7, "wlans": ["wlanA"]}}
+    snap = make_probe_snapshot(eff)
+    assert snap["rxL"] == 50
+    assert snap["blackoutWindows"] == 10
+    assert snap["ewmaAlpha"] == 0.25
+
+
+def test_controller_honors_blackout_windows_from_snapshot():
+    # blackoutWindows=2 → a run of 2 empty windows pins per=1.0
+    def spawn(cmd):
+        return _FakeProc(["1\tRX_ANT\t5805:5:20\t0\t5:-60:-60:-60:20:20:20",
+                          "1\tPKT\t5:0:0:0:5:5:0:0:0:5:0:0:0:0",   # real: per 0
+                          "2\tPKT\t0:0:0:0:0:0:0:0:0:0:0:0:0:0",   # empty 1
+                          "2\tPKT\t0:0:0:0:0:0:0:0:0:0:0:0:0:0"])  # empty 2 -> blackout
+    c = ProbeController(_snap(blackoutWindows=2), spawn=spawn)
+    c.start()
+    try:
+        assert _wait_until(lambda: c.status()["mcs"].get("5", {}).get("per") == 1.0)
+    finally:
+        c.stop()
+
+
 def test_status_exposes_age_ms_freshness():
     def spawn(cmd):
         return _FakeProc(["1\tRX_ANT\t5805:5:20\t0\t1:-60:-60:-60:20:20:20",

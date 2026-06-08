@@ -24,14 +24,17 @@ class ProbeController:
     def __init__(self, snapshot, *, spawn=None, ewma_alpha: float = 0.25):
         self._snap = dict(snapshot)
         self._spawn = spawn or _default_spawn   # cmd(list[str]) -> proc (await or sync in tests)
-        self._alpha = ewma_alpha
+        # Measurement tuning rides in the snapshot (config-driven); the kwarg is
+        # the fallback default for callers that don't supply it.
+        self._alpha = float(snapshot.get("ewmaAlpha", ewma_alpha))
+        self._blackout = int(snapshot.get("blackoutWindows", 10))
         self._lock = threading.RLock()
         self._lifecycle = threading.RLock()
         self._thread = None
         self._loop = None
         self._stop_event = None                 # asyncio.Event, created in-loop
         self._started = threading.Event()
-        self._agg = McsAggregator(alpha=ewma_alpha)
+        self._agg = McsAggregator(alpha=self._alpha, blackout_windows=self._blackout)
         self._last_update = {}   # mcs(int) -> monotonic seconds of last sample
         self._status = {"running": False, "streams": 0}
 
@@ -70,7 +73,10 @@ class ProbeController:
                 self.stop()
             with self._lock:
                 self._snap = dict(snapshot)
-                self._agg = McsAggregator(alpha=self._alpha)
+                self._alpha = float(snapshot.get("ewmaAlpha", self._alpha))
+                self._blackout = int(snapshot.get("blackoutWindows", self._blackout))
+                self._agg = McsAggregator(alpha=self._alpha,
+                                          blackout_windows=self._blackout)
                 self._last_update = {}
             # Restart unconditionally if it was running (mirrors the sibling
             # DynamicLinkController). A disabled snapshot just re-runs _run,
