@@ -164,6 +164,9 @@ def test_predictive_demote_does_not_misfire_on_detrended_rssi(tmp_path):
     cfg = LearnedPriorConfig(enabled=True, persist_dir=str(tmp_path))
     lp = LearnedPrior("test-misfire", cfg)
 
+    # White-box: prime the internal cell table directly to isolate
+    # predictive_ceiling's bin/projection math. If the cell storage shape
+    # changes, this may break on churn rather than a real regression.
     def prime(rssi_lo, ceiling, n=50):
         b = lp.rssi_bin(rssi_lo)
         for rung in range(ceiling + 1):
