@@ -26,7 +26,9 @@ class RssiNormConfig:
     tx_power_dbm_by_mcs: tuple[int, ...] = (29, 28, 25, 23, 19, 19, 19, 19)
 
 
-def normalize_rssi(rssi_raw, mcs, cfg: RssiNormConfig):
+def normalize_rssi(
+    rssi_raw: float | None, mcs: int | None, cfg: RssiNormConfig
+) -> float | None:
     """EIRP-normalize one RSSI reading: rssi_raw + (P_ref − curve[mcs]).
     Clamps mcs into the curve's index range. None-safe (returns rssi_raw
     when disabled, or when rssi_raw / mcs is None)."""
