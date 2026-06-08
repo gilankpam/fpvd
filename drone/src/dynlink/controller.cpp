@@ -2,6 +2,7 @@
 
 #include "dynlink/apply_direction.hpp"
 #include "dynlink/local_compute.hpp"
+#include "dynlink/txpower_curve.hpp"
 
 #include <cassert>
 #include <cstring>
@@ -197,6 +198,10 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
                 lastProbeMcs_ = rung;
             }
         }
+        // Per-MCS tx power (operating-rung coupling): back off on the high-PAPR
+        // 64-QAM rungs to keep the PA linear, full power at low MCS for range.
+        // RadioTxpower::apply is diff-based, so iw only runs when the value changes.
+        if (radio_) radio_->apply(d.txPowerDbm);
     }
     lastTx_ = d;
 }
@@ -225,6 +230,9 @@ void DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
                             cfg.safe.bandwidth, static_cast<uint8_t>(rung), false, 1);
         lastProbeMcs_ = rung;
     }
+    // Safe recovery: drive power for the (low) safe rung unconditionally, matching
+    // the other safe sub-commands. Low MCS -> high power -> robust recovery.
+    if (radio_) radio_->applySafe(txpowerDbmForMcs(cfg.safe.mcs));
 }
 
 // ---- poll loop --------------------------------------------------------------
@@ -412,8 +420,8 @@ void DynamicLinkController::run(int evfd) {
                             lastEnc_ = d;
                         } else if (dir == ApplyDir::Up) {
                             // Raise capacity (mcs) now; the encoder bitrate
-                            // expands after the outer gap. tx power is constant
-                            // (set at radio bring-up), so there is no power step.
+                            // expands after the outer gap. dispatchTxApply also
+                            // steps tx power with the mcs (per-MCS curve).
                             dispatchTxApply(cfg, d);
                             applyPending = d;
                             applyState = ApplyState::UpGap;
