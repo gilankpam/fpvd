@@ -151,3 +151,36 @@ def test_decision_and_flightlog_carry_rssi_raw(tmp_path):
         last = [json.loads(line) for line in f if line.strip()][-1]
     assert last["rssi"] == -55.0
     assert last["rssi_raw"] == -65.0
+
+
+def test_predictive_demote_does_not_misfire_on_detrended_rssi(tmp_path):
+    """Promote MCS->MCS+ drops the drone's power → raw RSSI steps down →
+    negative raw slope → predictive_ceiling at the projected raw RSSI lands
+    in a low-ceiling bin and would demote. After EIRP-normalization the RSSI
+    is flat (slope ~0), so predictive_ceiling stays at the operating ceiling
+    and does NOT demote."""
+    from fpvdgs.dynlink.learned_prior import LearnedPrior, LearnedPriorConfig
+
+    cfg = LearnedPriorConfig(enabled=True, persist_dir=str(tmp_path))
+    lp = LearnedPrior("test-misfire", cfg)
+
+    def prime(rssi_lo, ceiling, n=50):
+        b = lp.rssi_bin(rssi_lo)
+        for rung in range(ceiling + 1):
+            lp._cells[b][rung] = [1.0, float(n)]
+
+    # Low-RSSI region tops out at MCS1; high-RSSI region supports MCS5.
+    prime(-80.0, 1)
+    prime(-50.0, 5)
+
+    current_mcs = 5
+    # Raw path: rssi -62, slope -6/tick → projected -80 → ceiling 1 < 5 → DEMOTE.
+    pc_raw = lp.predictive_ceiling(-62.0, -6.0)
+    assert pc_raw == 1
+    assert pc_raw < current_mcs            # raw RSSI WOULD have demoted
+
+    # Normalized path: rssi -50, slope 0 (power step removed) → projected -50
+    # → ceiling 5, not below current → NO demote.
+    pc_norm = lp.predictive_ceiling(-50.0, 0.0)
+    assert pc_norm == 5
+    assert not (pc_norm < current_mcs)     # normalized RSSI does NOT demote
