@@ -88,6 +88,14 @@ that is out of scope.
    running (no separate enable flag — no new config).
 6. **`dispatchTxSafe`** — apply `txpowerMbmForMcs(cfg.safe.mcs)` (low safe MCS → high power →
    good for recovery).
+7. **Config lock** (`src/config/lock.cpp`) — add `{"link","txpower"}` to `kLockedPaths` so a
+   `PATCH /config` of `link.txpower` while `dynamicLink.enabled` returns `400
+   dynamic_link_locked` (same as `link.mcs`). The curve now owns tx power per-decision, so a
+   manual value would be silently overridden — reject it instead. Update the stale NOTE
+   comment (lines ~12–20) that says `link.txpower` is deliberately unlocked / constant; keep
+   `link.stbc` / `link.ldpc` unlocked (still config-preserved, not DL decisions). The boot
+   path is unaffected — `link.txpower` is still read at radio bring-up; to change it the
+   operator disables DL first, exactly like `link.mcs`.
 
 ## Dynamics
 
@@ -112,6 +120,9 @@ that is out of scope.
   unchanged (diff guard).
 - `dispatchTxSafe` applies `txpowerMbmForMcs(safe.mcs)`.
 - `RadioTxpower::apply(mbm)` issues the correct `iw` argument (mocked spawn).
+- Config lock: `PATCH link.txpower` while `dynamicLink.enabled` → rejected with
+  `dynamic_link_locked` (`lockedPaths` contains `link.txpower`); accepted when DL disabled;
+  `link.stbc`/`link.ldpc` remain accepted while DL enabled (not newly locked).
 
 ## Out of scope
 
