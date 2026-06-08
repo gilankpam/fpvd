@@ -135,3 +135,12 @@ def test_rssi_norm_parsed_from_tuning_block():
     assert agg.rssi_norm.enabled is False
     assert agg.rssi_norm.p_ref_dbm == 30
     assert agg.rssi_norm.tx_power_dbm_by_mcs == (30, 29, 26, 24, 20, 20, 20, 20)
+
+
+def test_rssi_norm_partial_override_keeps_defaults():
+    """The rollback path: flip `enabled` off without restating the curve.
+    Unspecified fields fall back to the drone-mirror defaults."""
+    agg = build_aggregator({"tuning": {"rssi_norm": {"enabled": False}}})
+    assert agg.rssi_norm.enabled is False
+    assert agg.rssi_norm.p_ref_dbm == 29
+    assert agg.rssi_norm.tx_power_dbm_by_mcs == (29, 28, 25, 23, 19, 19, 19, 19)

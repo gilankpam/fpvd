@@ -246,12 +246,14 @@ def _build_aggregator(raw: dict) -> SignalAggregator:
     s = raw.get("smoothing", {})
     starv = s.get("starvation_threshold_pps", 50.0)
     rn = raw.get("rssi_norm", {}) or {}
+    # Defer to the dataclass for default values so the drone-mirror curve
+    # lives in exactly one place (signals.RssiNormConfig).
+    d = RssiNormConfig()
     rssi_norm = RssiNormConfig(
-        enabled=bool(rn.get("enabled", True)),
-        p_ref_dbm=int(rn.get("p_ref_dbm", 29)),
+        enabled=bool(rn.get("enabled", d.enabled)),
+        p_ref_dbm=int(rn.get("p_ref_dbm", d.p_ref_dbm)),
         tx_power_dbm_by_mcs=tuple(
-            int(x) for x in rn.get(
-                "tx_power_dbm_by_mcs", (29, 28, 25, 23, 19, 19, 19, 19))
+            int(x) for x in rn.get("tx_power_dbm_by_mcs", d.tx_power_dbm_by_mcs)
         ),
     )
     return SignalAggregator(
