@@ -131,7 +131,6 @@ def test_first_healthy_tick_does_not_roll(tmp_path, monkeypatch):
 def test_decision_and_flightlog_carry_rssi_raw(tmp_path):
     """Both the decision snapshot and the flight-log record carry the
     measured rssi_raw alongside the normalized rssi."""
-    import glob
     import json
 
     p = Policy(_cfg(tmp_path), _profile())
@@ -146,8 +145,9 @@ def test_decision_and_flightlog_carry_rssi_raw(tmp_path):
     p.close()  # flushes the flight log
 
     # Flight-log record
-    files = sorted(glob.glob(str(tmp_path / "fl" / "*.jsonl")))
+    files = sorted((tmp_path / "fl").glob("*.jsonl"))
     assert files, "expected a flight-log file"
-    last = [json.loads(line) for line in open(files[-1]) if line.strip()][-1]
+    with open(files[-1]) as f:
+        last = [json.loads(line) for line in f if line.strip()][-1]
     assert last["rssi"] == -55.0
     assert last["rssi_raw"] == -65.0
