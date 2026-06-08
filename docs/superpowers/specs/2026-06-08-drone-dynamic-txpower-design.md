@@ -83,13 +83,11 @@ that is out of scope.
    directly (`iw dev <iface> set txpower fixed <mBm>`), keep the diff guard (`current_`) so
    `iw` only runs when the value changes.
 5. **`dispatchTxApply`** (`controller.cpp`) — in the existing MCS-change block (where
-   `setRadio` and the probe retune already fire), call `radio_->apply(d.txPowerMbm)` when the
-   curve is enabled. Co-located so power changes exactly when MCS changes.
+   `setRadio` and the probe retune already fire), call `radio_->apply(d.txPowerMbm)`.
+   Co-located so power changes exactly when MCS changes. Always on when dynamic-link is
+   running (no separate enable flag — no new config).
 6. **`dispatchTxSafe`** — apply `txpowerMbmForMcs(cfg.safe.mcs)` (low safe MCS → high power →
    good for recovery).
-7. **Config** — `dynamicLink.txPowerCurveEnabled` (bool, default `true`). When false, the
-   controller does not touch power and the boot `link.txpower` stays in effect (instant
-   rollback without redeploy).
 
 ## Dynamics
 
@@ -111,7 +109,7 @@ that is out of scope.
 - `txpowerMbmForMcs(mcs)` returns the expected mBm for MCS0–7 and clamps out-of-range input.
 - `applyLocalCompute` sets `d.txPowerMbm` from the curve for representative MCS values.
 - `dispatchTxApply` calls `RadioTxpower::apply` with the correct mBm; **no** call when MCS is
-  unchanged (diff guard); **no** call when `txPowerCurveEnabled=false`.
+  unchanged (diff guard).
 - `dispatchTxSafe` applies `txpowerMbmForMcs(safe.mcs)`.
 - `RadioTxpower::apply(mbm)` issues the correct `iw` argument (mocked spawn).
 
