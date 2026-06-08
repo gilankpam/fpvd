@@ -35,7 +35,7 @@ TEST_CASE("applyLocalCompute overrides bitrate/k/n/depth/fps, keeps mcs/bw/txpow
     // untouched:
     CHECK(d.mcs == 5);
     CHECK(d.bandwidth == 20);
-    CHECK(d.txPowerDbm == 27);
+    CHECK(d.txPowerDbm == 19);   // now SET from the per-MCS curve (mcs5 -> 19 dBm)
 }
 
 TEST_CASE("applyLocalCompute is monotonic in mcs (higher rung -> higher bitrate)") {
@@ -65,4 +65,15 @@ TEST_CASE("applyLocalCompute at the probe ceiling (mcs == ceiling)") {
     int k = computeK(wt, 1500, 60, 0.5, 2.0, 2, 50);
     CHECK(d.k == static_cast<uint8_t>(k));
     CHECK(d.bitrateKbps == computeBitrateKbps(wt, k, computeN(k, 0.5), 1000, 24000));
+}
+
+TEST_CASE("applyLocalCompute sets txPowerDbm from the per-MCS curve") {
+    DlRuntimeConfig cfg = cfgWithBitrate();
+    Decision d{};
+    d.bandwidth = 20;
+
+    d.mcs = 0; applyLocalCompute(cfg, d); CHECK(d.txPowerDbm == 29);
+    d.mcs = 3; applyLocalCompute(cfg, d); CHECK(d.txPowerDbm == 23);
+    d.mcs = 4; applyLocalCompute(cfg, d); CHECK(d.txPowerDbm == 19);
+    d.mcs = 7; applyLocalCompute(cfg, d); CHECK(d.txPowerDbm == 19);
 }

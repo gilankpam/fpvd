@@ -12,8 +12,9 @@ namespace fpvd::dynlink {
 // spec). Applied via the existing per-decision depth diff in dispatchTxApply.
 inline constexpr uint8_t kInterleaveDepth = 1;
 
-// Overwrites d.bitrateKbps / d.k / d.n / d.depth / d.fps in place from the
-// drone-local engine. Leaves d.mcs, d.bandwidth, d.txPowerDbm untouched.
+// Overwrites d.bitrateKbps / d.k / d.n / d.depth / d.fps / d.txPowerDbm in place
+// from the drone-local engine (txPowerDbm via the per-MCS curve). Leaves d.mcs,
+// d.bandwidth untouched.
 void applyLocalCompute(const DlRuntimeConfig& cfg, Decision& d);
 
 } // namespace fpvd::dynlink

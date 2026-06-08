@@ -2,6 +2,7 @@
 #include "dynlink/local_compute.hpp"
 #include "dynlink/bitrate.hpp"
 #include "dynlink/fec.hpp"
+#include "dynlink/txpower_curve.hpp"
 #include "probe/probe_constants.hpp"
 
 namespace fpvd::dynlink {
@@ -27,6 +28,7 @@ void applyLocalCompute(const DlRuntimeConfig& cfg, Decision& d) {
                                        b.minBitrateKbps, b.maxBitrateKbps);
     d.depth       = kInterleaveDepth;
     d.fps         = sat8(b.fps);
+    d.txPowerDbm  = txpowerDbmForMcs(d.mcs);   // per-MCS PA-linearity backoff curve
 }
 
 } // namespace fpvd::dynlink
