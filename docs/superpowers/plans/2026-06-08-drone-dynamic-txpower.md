@@ -309,12 +309,32 @@ Replace it with:
 }
 ```
 
-- [ ] **Step 4: Build and run the full suite**
+- [ ] **Step 4: Fix the stale "tx power is constant" comment**
+
+In `drone/src/dynlink/controller.cpp`, the `ApplyDir::Up` branch (around the staggered apply)
+has a now-wrong comment. Replace:
+
+```cpp
+                            // Raise capacity (mcs) now; the encoder bitrate
+                            // expands after the outer gap. tx power is constant
+                            // (set at radio bring-up), so there is no power step.
+```
+with:
+```cpp
+                            // Raise capacity (mcs) now; the encoder bitrate
+                            // expands after the outer gap. dispatchTxApply also
+                            // steps tx power with the mcs (per-MCS curve).
+```
+
+(The OSD `TX` field needs no change — `writeStatus(lastApplied_, ...)` already renders
+`d.txPowerDbm`, which Task 2 now populates; it will show the real per-MCS dBm instead of TX0.)
+
+- [ ] **Step 5: Build and run the full suite**
 
 Run: `cmake --build build -j && ./build/fpvd_tests`
 Expected: PASS — clean build, all tests green (this task adds no test but must not break any).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add drone/src/dynlink/controller.cpp
