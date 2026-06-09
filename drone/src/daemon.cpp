@@ -63,7 +63,7 @@ void Daemon::bootstrap(bool startProcesses) {
         radio_ = {rr.driver, rr.iface, rr.adapterId};
         seedOrchestrator();
         orch_.startAll();
-        reconcileBeamforming();
+        reconcileBeamforming(true);
         if (effective_.dynamicLink.enabled) {
             startController();
         } else {
@@ -213,7 +213,7 @@ void Daemon::osdHeartbeat() {
     }
 }
 
-void Daemon::reconcileBeamforming() {
+void Daemon::reconcileBeamforming(bool force) {
     const auto& bfc = effective_.link.beamforming;
     BfParams p;
     p.iface      = radio_.iface.empty() ? "wlan0" : radio_.iface;
@@ -222,7 +222,7 @@ void Daemon::reconcileBeamforming() {
     p.width      = effective_.link.width;
     p.ackTimeout = bfc.ackTimeout;
     p.intervalMs = bfc.intervalMs;
-    bf_.reconcile(bfc.enabled, p);
+    bf_.reconcile(bfc.enabled, p, force);
 }
 
 void Daemon::rewriteWaybeamJson() {
@@ -365,7 +365,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         }
         seedOrchestrator();
         orch_.startAll();
-        reconcileBeamforming();
+        reconcileBeamforming(true);
         // Start AFTER radio_ is refreshed so the snapshot's iface is fresh.
         if (enabledNew)
             startController();
@@ -468,6 +468,11 @@ ApplyResult Daemon::apply(bool reallyRestart) {
                 return {false, {}, restarted, rr.error, version_};
             }
         }
+
+        // Beamforming is reconciled here (not via the radio subsystem). Force a
+        // re-arm when the radio was touched this apply (a stbc/radiotap retune
+        // can reset the bf_monitor registers), otherwise reconcile normally.
+        reconcileBeamforming(subs.radio);
 
         // (B) Link-dropping change (channel and/or width) — defer ~200ms so the
         // HTTP response flushes before the air link (and wfb_tun session) drops.

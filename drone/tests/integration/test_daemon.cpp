@@ -806,6 +806,48 @@ TEST_CASE("status: probe summary reflects dynamicLink + running tx") {
     fs::remove_all(tmp);
 }
 
+TEST_CASE("apply: hot-path reconcileBeamforming fires when beamforming enabled") {
+    // Verify that a hot /apply (reallyRestart=true, no full rebuild) actually
+    // drives reconcileBeamforming() for a beamforming-only config change.  On a
+    // test host with no real wireless NIC the controller will land in Unsupported
+    // (no bf_monitor proc node), NOT Disabled — which is the observable proof that
+    // reconcile() ran and processed the request.
+    auto tmp = fs::temp_directory_path() / "fpvd-bf-hot-apply";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string(),
+        "tests/fixtures/fake_radio_tune.sh"
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // Confirm initial state is Disabled (bf never driven).
+    CHECK(d.beamformingStatus().state == fpvd::BfState::Disabled);
+
+    // Enable beamforming (stbc=false is the default, so no extra patch needed).
+    auto pr = d.patchPending(nlohmann::json::parse(
+        R"({"link":{"beamforming":{"enabled":true,"remoteMac":"00:c0:ca:dd:ee:ff"}}})"));
+    REQUIRE(pr.ok);
+
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);
+
+    // reconcile() ran: on a test host without a bf_monitor proc node the
+    // controller lands in Unsupported, not Disabled.  Either way it must NOT
+    // be Disabled (which would mean reconcile was never called).
+    CHECK(d.beamformingStatus().state != fpvd::BfState::Disabled);
+
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("apply: writes the system-stats OSD line when dynamic-link is off") {
     auto tmp = fs::temp_directory_path() / "fpvd-osd-base";
     auto paths = makeRoutingPaths(tmp, 46820);

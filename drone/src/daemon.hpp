@@ -93,7 +93,7 @@ private:
     // add() registers the spec; restart() starts the not-yet-running process.
     void addProbeStream();
     void removeProbeStream();
-    void reconcileBeamforming();
+    void reconcileBeamforming(bool force = false);
     void rewriteWaybeamJson();
     void startController();
     // Rebuild the msposd OSD spec from effective_ and (re)start it, so it picks
