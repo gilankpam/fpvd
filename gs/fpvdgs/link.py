@@ -72,7 +72,8 @@ class LinkCoordinator:
             st["state"] = "pending"
             st["reason"] = "drone unreachable; peer MAC unknown"
             return st
-        return self.beamforming.reconcile(enabled, primary, drone_mac)
+        return self.beamforming.reconcile(enabled, primary,
+                                          drone_mac if enabled else "")
 
     def apply_link(self, apply_to: str = "both") -> dict:
         pending_cfg = self.store.pending()
@@ -111,12 +112,17 @@ class LinkCoordinator:
                     push["beamforming"] = {"enabled": bf_enabled,
                                            "remoteMac": gs_mac}
                 try:
-                    if bf_enabled and self.beamforming is not None:
-                        drone_mac = (self.drone.get_status()
-                                     .get("beamforming", {}).get("localMac", ""))
                     if push:
                         self.drone.patch_config({"link": push})
                         self.drone.apply()
+                    # Read the drone's card MAC AFTER the enable push: the drone
+                    # only populates beamforming.localMac once its own BF is
+                    # enabled (it resolves the MAC in reconcile). Reading before
+                    # the push would see "" on the first apply, so the GS could
+                    # never arm without a second apply.
+                    if bf_enabled and self.beamforming is not None:
+                        drone_mac = (self.drone.get_status()
+                                     .get("beamforming", {}).get("localMac", ""))
                     drone_applied = True   # empty push => already in sync
                 except DroneUnreachable:
                     drone_reachable = False
@@ -151,6 +157,10 @@ class LinkCoordinator:
         else:
             self.renderer_write(last_good)
             self.runner.restart()
+            # Reconcile BF back to last-good so the beamformee HW doesn't stay in
+            # the new state while the committed config rolled back.
+            old_bf_enabled = bool((old_link.get("beamforming") or {}).get("enabled"))
+            self._reconcile_beamforming(old_bf_enabled, primary, drone_mac)
 
         res = {
             "gsApplied": bool(gs_applied),
