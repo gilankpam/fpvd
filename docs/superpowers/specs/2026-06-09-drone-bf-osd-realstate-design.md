@@ -1,11 +1,13 @@
 # Drone BF OSD (real-state indicator) — Design
 
 **Date:** 2026-06-09
-**Status:** Approved design, follow-up to GS downlink beamforming
-**Depends on:** `2026-06-09-gs-beamforming-downlink-design.md` (the GS beamformee
-must exist for `cbr_rssi` to ever populate). Best implemented **after** the
-GS+drone BF path is hardware-proven, so the OSD is built against a confirmed
-signal.
+**Status:** Approved design; implemented alongside `2026-06-09-bf-hardening-design.md`
+(#2 makes the controller actually arm on apply, which the OSD relies on).
+**Depends on:** `2026-06-09-gs-beamforming-downlink-design.md` (GS beamformee) and
+`2026-06-09-bf-hardening-design.md` #2 (hot-path reconcile).
+**Signal CONFIRMED LIVE (2026-06-09):** `bf_monitor_rfinfo` `cbr_rssi` measured at
+−48/−67 dBm with both sides armed end-to-end (was `0:0` when the GS wasn't
+responding) — so the working signal below is verified, not hypothetical.
 
 ## Goal
 
@@ -26,8 +28,10 @@ token : ndp_snr0 : ndp_snr1 : cbr_rssi0 : cbr_rssi1 : cbr_snr0 : cbr_snr1
 The `cbr_*` fields are the RF info of the CBR frame **received by the drone from
 the GS**. So:
 
-- `cbr_rssi0 != 0` ⇒ the drone is receiving reports ⇒ **BF working end-to-end**.
-- All-zero (`0:22:22:0:0:0:0`, the current live read) ⇒ no report ⇒ not working.
+- `cbr_rssi0 != 0` ⇒ the drone is receiving reports ⇒ **BF working end-to-end**
+  (verified live: `0:29:13:-48:-67:21:23`).
+- All-zero (`0:22:22:0:0:0:0`) ⇒ no report ⇒ not working (the state before the GS
+  beamformee was armed).
 
 This is far more reliable than the existing `BfStatus.lastCbr`, which is a
 premature read of `bf_monitor_trig` (read immediately after triggering, before
