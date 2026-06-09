@@ -36,36 +36,33 @@ See `../docs/superpowers/specs/2026-06-02-fpvd-gs-design.md`.
 
 ### `dynamicLink`
 
-Arms the in-process GS adaptive-link control loop. Disabled by default.
+Arms the in-process GS adaptive-link control loop. Disabled by default. The
+controller knobs live under a nested `controller` block; `enabled` is the
+top-level arm toggle.
 
 ```json
 "dynamicLink": {
   "enabled": false,
-  "maxMcs": 5,
-  "bandwidth": 20,
-  "txpower": { "min": 18, "max": 28 },
-  "radioProfile": "m8812eu2",
-  "droneAddr": null,
-  "dronePort": 9999,
-  "idrForward": true,
-  "idrPort": 11223,
-  "tuning": {}
+  "controller": {
+    "maxMcs": 5,
+    "radioProfile": "m8812eu2",
+    "droneAddr": null,
+    "dronePort": 9999,
+    "tuning": {}
+  }
 }
 ```
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `false` | Arms the in-process control loop. Toggle at runtime via `PATCH /config` + `POST /apply`. |
-| `maxMcs` | int 0–7 | `5` | Upper MCS bound the controller may select. |
-| `bandwidth` | 20 or 40 | `20` | RF bandwidth the controller targets (MHz). |
-| `txpower.min` / `.max` | int (dBm) | 18 / 28 | Tx-power range the controller may request. |
-| `radioProfile` | string | `"m8812eu2"` | Packaged radio profile (JSON under `gs/fpvdgs/dynlink/profiles/`). Determines per-MCS bitrate tables. |
-| `droneAddr` | string\|null | `null` | Drone's dynamic-link UDP address. Defaults to the host parsed from `drone.endpoint`. |
-| `dronePort` | int | `9999` | Drone's dynamic-link UDP port. |
-| `videoStreamId` | string | `"video"` | Substring matched against the wfb stats record `id` to select the **video** rx stream. The policy is driven by this stream only; the mavlink/tunnel rx records on `:8103` are ignored (their low packet rate would trip `link_starved` and pin MCS at the floor). |
-| `idrForward` | bool | `true` | Run the IDR-token relay (`127.0.0.1:idrPort` → `droneAddr:idrPort`) while the controller is active. Bridges PixelPilot keyframe requests to the drone's `idr_listen`; replaces the old standalone `socat` idr-forwarder. |
-| `idrPort` | int | `11223` | UDP port for the IDR relay (local listen + drone forward). |
-| `tuning` | object | `{}` | Opaque passthrough of advanced policy knobs (gate/fec/smoothing/cooldown). Merged over code defaults. |
+| `controller.maxMcs` | int 0–7 | `5` | Upper MCS bound the controller may select. |
+| `controller.radioProfile` | string | `"m8812eu2"` | Packaged radio profile (JSON under `gs/fpvdgs/dynlink/profiles/`). Determines per-MCS bitrate tables. |
+| `controller.droneAddr` | string\|null | `null` | Drone's dynamic-link UDP address. Defaults to the host parsed from `droneLink.endpoint`. |
+| `controller.dronePort` | int | `9999` | Drone's dynamic-link UDP port. |
+| `controller.tuning` | object | `{}` | Opaque passthrough of advanced policy knobs (gate/fec/smoothing/cooldown). Merged over code defaults. |
+
+The RF bandwidth the controller targets is **derived from `link.width`** — there is no separate `bandwidth` field. The video rx stream is selected by an internal constant (`videoStreamId = "video"`), not a config field; the policy is driven by that stream only (the mavlink/tunnel rx records on `:8103` are ignored, since their low packet rate would trip `link_starved` and pin MCS at the floor). Per-MCS tx power is owned by the drone (its tx-power curve), so the controller has no `txpower` field. The IDR-token relay is no longer controller config — see **IDR/keyframe relay** below.
 
 **Operating model.** The controller is an in-process daemon thread that
 consumes wfb-ng stats on `:8103` at 10 Hz (fpvd renders `log_interval = 100`
@@ -83,12 +80,20 @@ reachable via fpvd's `/air` proxy).
 `dynamic-link-gs` service (init `S99dynamic-link-gs`, which also ran a bundled
 `socat` idr-forwarder): it stops the service and moves the init script to
 `/root/fpvd-gs-rollback/` so fpvd owns the GS dynamic-link role — binding the
-HELLO listener on UDP `5801` and the IDR relay on `127.0.0.1:11223`.
+HELLO listener on UDP `5801` and the always-on IDR relay on `0.0.0.0:11223`.
 `deploy/gs/rollback.sh` restores it for a full revert to the pre-fpvd state.
+
+**IDR/keyframe relay.** A standalone, **always-on** relay (independent of
+`dynamicLink.enabled`, so it serves static *and* adaptive links) listens on
+`0.0.0.0:11223` and forwards PixelPilot keyframe-request tokens to the drone's
+`idr_listen` at `droneLink.endpoint` host:`11223`. It replaces the old
+standalone `socat` idr-forwarder. There is no config for it — the port is
+fixed; it is reported under `GET /status.idrRelay`.
 
 **Status.** `GET /status.dynamicLink` shows the controller state plus a
 `drone` sub-object with `reachable`, `dynamicLinkActive`, and `hello` — so a
-GS-armed / drone-not mismatch is immediately visible:
+GS-armed / drone-not mismatch is immediately visible; `GET /status.idrRelay`
+reports the always-on relay:
 
 ```json
 {
@@ -100,12 +105,14 @@ GS-armed / drone-not mismatch is immediately visible:
       "dynamicLinkActive": false,
       "hello": "announcing"
     }
-  }
+  },
+  "idrRelay": { "running": true, "listen": "0.0.0.0:11223" }
 }
 ```
 
 When `enabled` is false the block is `{"enabled": false, "running": false}`.
-`hello` is one of `"announcing"`, `"keepalive"`, `"none"`.
+`hello` is one of `"announcing"`, `"keepalive"`, `"none"`. `idrRelay.listen`
+is `null` if the relay failed to bind (e.g. the port was already taken).
 
 ### `pixelpilot`
 
