@@ -54,6 +54,8 @@ TEST_CASE("radio-tune.sh: txpower is dBm rendered as mBm (dBm*100)") {
     auto r2 = fpvd::tuneRadio("scripts/radio-tune.sh", "txpower", c, "wlan0", "8812eu");
     REQUIRE(r2.ok);
     CHECK(readAllText(rec).find("iw wlan0 set txpower fixed 2000") != std::string::npos);
+
+    fs::remove_all(tmp);
 }
 
 TEST_CASE("radio-tune.sh: channel width tokens") {
