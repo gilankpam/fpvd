@@ -283,12 +283,15 @@ The name `dynamicLink` meant two different subsystems. Restructured into:
 **Arming requires the drone reachable, on *and* off** (hard-gate both directions). Rationale:
 the dangerous state is half-armed (a GS controller streaming decisions to an unarmed drone), so
 toggling is gated. It self-heals across a battery swap: the GS controller keeps running
-(streaming into dropped UDP, harmless); the drone reboots, self-restores its armed state, the
-HELLO handshake re-completes, and driving resumes.
+(streaming into dropped UDP, harmless); the drone reboots, self-restores its armed state, and
+simply resumes acting on the GS's incoming MCS decisions.
 
-**No arm-order constraint.** Decisions are UDP — if the applier isn't up yet, packets are
-dropped harmlessly — and the controller waits for the drone HELLO handshake before emitting
-real decisions, so `/apply` can fire both lanes in any order.
+**No arm-order constraint.** There is no HELLO handshake (removed post-3b). Order is still
+irrelevant because: decisions are UDP, so any sent before the applier is up are dropped (no
+listener); and the drone boots on its **static link config**, switching only when a decision
+arrives, with the applier computing **per-MCS power locally from the curve** for every decision
+— so even the first decision it receives applies a sane power. `/apply` can fire both lanes in
+any order.
 
 **Controller is a pure MCS selector (Phase 3a/3b).** The v3 decision wire carries **MCS only**;
 the drone computes bitrate / FEC / depth / TX-power locally from that MCS. The field set is
@@ -410,7 +413,7 @@ behavior.
 ## `/status` (kept per-daemon)
 
 Each daemon keeps its own `/status`. The GS `/status` extends its existing `drone` sub-block
-(`reachable`, `dynamicLinkActive`, `hello`) into a summary digest of whatever drone runtime
+(`reachable`, `dynamicLinkActive`, …) into a summary digest of whatever drone runtime
 PixelPilot's menu needs (e.g. applier running, drone `lastApply.ok`), so PP reads a single
 `/status` without resurrecting an `/air`-style proxy.
 
