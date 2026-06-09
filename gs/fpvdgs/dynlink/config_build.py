@@ -28,6 +28,11 @@ log = logging.getLogger("fpvdgs.dynlink")
 PROFILES_DIR = Path(__file__).resolve().parent / "profiles"
 
 
+def drone_host_from_endpoint(endpoint, default="10.5.0.10"):
+    """Hostname of an http://host:port endpoint, or `default` if unparseable."""
+    return urlparse(endpoint).hostname or default
+
+
 def _raw_from_block(block: dict) -> dict:
     """Build a gs.yaml-shaped `raw` dict: tuning is the base, curated keys
     are overlaid so they always win over any tuning attempt."""
@@ -66,7 +71,7 @@ def make_dl_snapshot(effective: dict) -> dict:
     block["bandwidth"] = 40 if width == 40 else 20
     block["videoStreamId"] = "video"
     endpoint = effective.get("droneLink", {}).get("endpoint", "http://10.5.0.10:8080")
-    host = urlparse(endpoint).hostname or "10.5.0.10"
+    host = drone_host_from_endpoint(endpoint)
     block["droneAddr"] = block.get("droneAddr") or host
     block["dronePort"] = int(block.get("dronePort") or 9999)
     return block

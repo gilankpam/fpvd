@@ -64,6 +64,20 @@ def test_app_shutdown_order_pixelpilot_before_runner():
     assert events.index("pp") < events.index("runner")
 
 
+def test_app_starts_idr_relay_always_even_when_dynamiclink_disabled():
+    # The IDR relay is standing infra: it must start regardless of
+    # dynamicLink.enabled (it serves static links too) and stop on shutdown.
+    store = ConfigStore({"pixelpilot": {"enabled": False},
+                         "dynamicLink": {"enabled": False}})
+    idr = _Fake("idr")
+    app = App(store, _Fake("runner"), _Fake("http"), api=None,
+              dynlink=_Fake("dynlink"), idr_relay=idr)
+    app.start()
+    assert "start" in idr.calls
+    app.shutdown()
+    assert "stop" in idr.calls
+
+
 def test_link_coordinator_has_beamforming_wired(tmp_path, monkeypatch):
     """build_app must wire a BeamformingController + wlans_resolver into the
     coordinator so /link/apply can arm the GS beamformee."""

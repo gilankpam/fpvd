@@ -9,6 +9,17 @@ import pytest
 from fpvdgs import supervisor
 
 
+class _FakeIdrRelay:
+    def __init__(self):
+        self.started = self.stopped = 0
+    def start(self):
+        self.started += 1
+    def stop(self):
+        self.stopped += 1
+    def status(self):
+        return {"running": self.started > self.stopped, "listen": "0.0.0.0:11223"}
+
+
 def _free_port():
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -47,7 +58,8 @@ def daemon(tmp_path, fake_drone):
     app = supervisor.build_app(
         defaults_path=str(defaults), overlay_path=str(overlay),
         cfg_out=str(cfg_out), host="127.0.0.1", port=api_port,
-        runner_cmd=fake_runner, ready_port=ready_port, ready_timeout=5.0)
+        runner_cmd=fake_runner, ready_port=ready_port, ready_timeout=5.0,
+        idr_relay=_FakeIdrRelay())
     app.start()
     t = threading.Thread(target=app.serve_forever, daemon=True)
     t.start()
@@ -125,7 +137,7 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
 
     app = supervisor.build_app(str(defaults), str(tmp_path / "config.json"),
                                str(cfg_out), "127.0.0.1", 0,
-                               runner_cmd=["true"])
+                               runner_cmd=["true"], idr_relay=_FakeIdrRelay())
     code, body = app.api.handle("GET", "/status", {}, b"")
     assert code == 200
     assert "dynamicLink" in body
@@ -176,7 +188,8 @@ def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
     api_port = _free_port()
     app = supervisor.build_app(str(defaults), str(tmp_path / "config.json"),
                                str(cfg_out), "127.0.0.1", api_port,
-                               runner_cmd=["true"], probe_spawn=fake_spawn)
+                               runner_cmd=["true"], probe_spawn=fake_spawn,
+                               idr_relay=_FakeIdrRelay())
     app.start()
     t = threading.Thread(target=app.serve_forever, daemon=True)
     t.start()

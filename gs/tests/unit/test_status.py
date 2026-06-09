@@ -99,6 +99,13 @@ def test_status_omits_beamforming_when_not_given():
     assert "beamforming" not in out
 
 
+def test_build_status_emits_idr_relay():
+    from fpvdgs.status import build_status
+    out = build_status("v", {}, {}, {"reachable": True},
+                       idr_relay={"running": True, "listen": "0.0.0.0:11223"})
+    assert out["idrRelay"] == {"running": True, "listen": "0.0.0.0:11223"}
+
+
 def test_status_includes_beamforming_block():
     bf = {"requested": True, "state": "active", "reason": "",
           "iface": "wlan0", "localMac": "84:fc:14:6c:36:e6",

@@ -24,7 +24,8 @@ from .beamforming_armer import BeamformingArmer
 from .config import ConfigStore
 from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
-from .dynlink.config_build import make_dl_snapshot
+from .dynlink.config_build import make_dl_snapshot, drone_host_from_endpoint
+from .idr_relay import IdrRelay
 from .link import LinkCoordinator
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .probe.config_build import make_probe_snapshot
@@ -34,7 +35,7 @@ from .runner_supervisor import RunnerSupervisor, ProcessSupervisor, resolve_wlan
 
 class App:
     def __init__(self, store, runner, http_server, api, dynlink,
-                 pixelpilot=None, probe=None, armer=None):
+                 pixelpilot=None, probe=None, armer=None, idr_relay=None):
         self.store = store
         self.runner = runner
         self.http = http_server
@@ -43,9 +44,12 @@ class App:
         self.pixelpilot = pixelpilot
         self.probe = probe
         self.armer = armer
+        self.idr_relay = idr_relay
 
     def start(self):
         self.runner.start()
+        if self.idr_relay is not None:
+            self.idr_relay.start()   # always-on: keyframe relay serves static + adaptive links
         if self.armer is not None:
             self.armer.start()   # boot re-arm: keeps the GS beamformee armed to config
         if (self.pixelpilot is not None
@@ -69,12 +73,14 @@ class App:
             self.pixelpilot.shutdown()
         if self.probe is not None:
             self.probe.stop()
+        if self.idr_relay is not None:
+            self.idr_relay.stop()
         self.runner.shutdown()
 
 
 def build_app(defaults_path, overlay_path, cfg_out, host, port,
               runner_cmd, ready_port=8103, ready_timeout=10.0, log_path=None,
-              probe_spawn=None):
+              probe_spawn=None, idr_relay=None):
     store = ConfigStore.load(defaults_path, overlay_path)
     effective = store.effective()
     schema.validate_effective(effective)
@@ -89,6 +95,10 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
                               ready_timeout=ready_timeout, log_path=log_path)
 
     drone = DroneClient(effective.get("droneLink", {}).get("endpoint", "http://10.5.0.10:8080"))
+
+    if idr_relay is None:
+        endpoint = effective.get("droneLink", {}).get("endpoint", "http://10.5.0.10:8080")
+        idr_relay = IdrRelay(drone_host_from_endpoint(endpoint))
 
     probe_ctrl = ProbeController(make_probe_snapshot(effective), spawn=probe_spawn)
 
@@ -168,7 +178,8 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
                                        dynamic_link=_dynamic_link_status(reachable),
                                        pixelpilot=_pixelpilot_status(),
                                        probe=_probe_status(),
-                                       beamforming=beamforming.status())
+                                       beamforming=beamforming.status(),
+                                       idr_relay=idr_relay.status())
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out,
@@ -176,7 +187,8 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     http_server = make_http_server(api, host, port)
     return App(store, runner, http_server, api, dynlink,
-               pixelpilot=pixelpilot, probe=probe_ctrl, armer=armer)
+               pixelpilot=pixelpilot, probe=probe_ctrl, armer=armer,
+               idr_relay=idr_relay)
 
 
 def main(argv=None):
