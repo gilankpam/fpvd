@@ -52,6 +52,37 @@ A BF-only change currently reports `"radio"` in `restarted` because
 `diff.cpp:10` sets `d.radio` for any `link` delta. Not harmful; out of scope
 unless trivial during implementation.
 
+### Verified (2026-06-09): `setRadio` does NOT reset the TXBF registers
+A final review raised a concern that under DL-on, a `stbc`/`ldpc` retune is
+applied asynchronously by the DL control thread (`dl_.setConfig` → `setRadio`)
+*after* the synchronous `reconcileBeamforming(force=true)` — an inverted order
+that would re-arm BF before the reset. **Hardware verification refuted the
+premise:** the `bf_monitor` registers (`ENABLE_NDPA=1`, Remote MAC set) survived
+an extended active-DL session (~7 min, `soundingCount` 4421, MCS adapting, so
+`setRadio` was called many times). `setRadio` is a wfb_tx radiotap-header change,
+not a card re-init, so it does not touch `REG_TXBF_*`. The `force` flag is
+therefore only genuinely needed for the full-rebuild card bring-up (already
+`force=true`); the DL-on ordering is a non-issue and needs no fix.
+
+## #2b — Sounding-loop resilience (real bug found during verification)
+
+The same verification found the live drone's BF loop **dead**: `state=error`,
+`reason="bf_monitor_trig write failed"`, `soundingCount` + `rfinfo` token frozen.
+The loop's error path does `status_.state = Error; return;` — so a **single
+transient `bf_monitor_trig` write failure kills the sounding loop permanently**
+(until a reconcile), even though the registers stay armed. BF silently stops.
+
+### Fix
+The loop must tolerate transient write failures instead of exiting:
+- On a `bf_monitor_trig` write failure: set `state=Error` with the reason but
+  **do not `return`** — sleep and retry on the next tick.
+- On a subsequent successful sounding: if the state was `Error`, recover it to
+  `Active` and clear the reason (self-heal).
+- Only write `bf_monitor_en "1"` after a *successful* sounding write (don't
+  enable off a failed trig).
+The loop still exits only on `stopFlag_` (reconcile/stop). A persistently broken
+node leaves the loop in `Error` but alive and retrying — never a silent death.
+
 ## #3 — GS: auto-manage STBC + surface drone validation errors
 
 The drone schema (`drone/src/config/validate.cpp:64-77`) enforces:
