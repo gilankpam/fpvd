@@ -158,25 +158,30 @@ void BeamformingController::loop() {
         std::string trig = resolveLocalMac(procBase_, sysBase_, p.iface);
         trig += " " + p.remoteMac + " 0 0 " + std::to_string(token) +
                 " " + std::to_string(bw);
-        if (!writeNode(p.iface, "bf_monitor_trig", trig)) {
+        bool ok = writeNode(p.iface, "bf_monitor_trig", trig);
+        if (!ok) {
+            // Transient write failure: record it but KEEP the loop alive so it
+            // self-heals on the next tick. A single failure must not kill BF.
             std::lock_guard<std::mutex> g(mu_);
             status_.state = BfState::Error;
             status_.reason = "bf_monitor_trig write failed";
-            return;
-        }
-        token = (token + 1) % 64;
-        std::string cbr = readNode(p.iface, "bf_monitor_trig");
-        int cbrRssi = parseCbrRssi(readNode(p.iface, "bf_monitor_rfinfo"));
-        {
+        } else {
+            token = (token + 1) % 64;
+            std::string cbr = readNode(p.iface, "bf_monitor_trig");
+            int cbrRssi = parseCbrRssi(readNode(p.iface, "bf_monitor_rfinfo"));
             std::lock_guard<std::mutex> g(mu_);
             status_.soundingCount++;
             status_.cbrRssi = cbrRssi;
             status_.lastCbr = cbr.empty() ? std::nullopt
                                           : std::optional<std::string>(cbr);
+            if (status_.state == BfState::Error) {   // recovered from a transient failure
+                status_.state = BfState::Active;
+                status_.reason.clear();
+            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(p.intervalMs));
         if (stopFlag_.load()) break;
-        writeNode(p.iface, "bf_monitor_en", "1");
+        if (ok) writeNode(p.iface, "bf_monitor_en", "1");
     }
 }
 

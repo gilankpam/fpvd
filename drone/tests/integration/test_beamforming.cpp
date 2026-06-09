@@ -129,3 +129,29 @@ TEST_CASE("beamforming: force re-writes conf even when params unchanged") {
     bf.stop();
     fs::remove_all(tmp);
 }
+
+TEST_CASE("beamforming: loop survives a transient trig write failure and self-heals") {
+    auto tmp = fs::temp_directory_path() / "fpvd-bf-resilient";
+    fs::remove_all(tmp);
+    auto ifd = makeIface(tmp / "proc", "wlan0", /*withBfNode=*/true);
+    // Make bf_monitor_trig a DIRECTORY so the loop's trig writes fail.
+    fs::create_directory(ifd / "bf_monitor_trig");
+
+    fpvd::BeamformingController bf((tmp / "proc").string(), (tmp / "sys").string());
+    fpvd::BfParams p; p.iface = "wlan0"; p.driver = "8812eu";
+    p.remoteMac = "00:c0:ca:dd:ee:ff"; p.intervalMs = 5;
+    bf.reconcile(true, p);                       // arms (conf write ok); loop starts
+
+    std::this_thread::sleep_for(60ms);           // loop has tried trig writes (all fail)
+    CHECK(bf.status().state == fpvd::BfState::Error);   // in error...
+    CHECK(bf.status().soundingCount == 0);              // ...no successful soundings
+
+    // The loop must still be ALIVE: clear the failure and confirm it recovers.
+    fs::remove(ifd / "bf_monitor_trig");         // remove the dir; writes now create a file
+    std::this_thread::sleep_for(60ms);
+    auto s = bf.status();
+    CHECK(s.state == fpvd::BfState::Active);      // recovered (loop did NOT die)
+    CHECK(s.soundingCount > 0);                   // sounding again
+    bf.stop();
+    fs::remove_all(tmp);
+}
