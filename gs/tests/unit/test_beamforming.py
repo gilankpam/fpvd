@@ -79,3 +79,20 @@ def test_write_failure_reports_error(tmp_path):
     bf = BeamformingController(proc_base=str(proc))
     st = bf.reconcile(True, "wlan0", "00:c0:ca:dd:ee:ff")
     assert st["state"] == "error"
+
+
+def test_disable_write_failure_reports_error(tmp_path, monkeypatch):
+    proc, conf = _node(tmp_path, "wlan0")
+    bf = BeamformingController(proc_base=proc)
+    bf.reconcile(True, "wlan0", "00:c0:ca:dd:ee:ff")   # arm OK
+    # Make the next write fail without disturbing supported()/the path's existence.
+    import fpvdgs.beamforming as mod
+    orig_open = open
+    def boom(path, *a, **k):
+        if str(path).endswith("bf_monitor_conf") and (a[:1] == ("w",) or k.get("mode") == "w"):
+            raise OSError("read-only")
+        return orig_open(path, *a, **k)
+    monkeypatch.setattr("builtins.open", boom)
+    st = bf.reconcile(False, "wlan0", "")
+    assert st["state"] == "error"
+    assert "reset" in st["reason"].lower()

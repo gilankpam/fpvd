@@ -49,7 +49,10 @@ class BeamformingController:
     def reconcile(self, enabled: bool, iface: str, peer_mac: str) -> dict:
         if not enabled:
             if self._armed and self.supported(self._iface):
-                self._write_conf(self._iface, "0 00:00:00:00:00:00 0 0")
+                if not self._write_conf(self._iface, "0 00:00:00:00:00:00 0 0"):
+                    self._armed = False
+                    self._state, self._reason = "error", "bf_monitor_conf reset failed"
+                    return self.status()
             self._armed, self._iface, self._peer = False, iface, ""
             self._state, self._reason = "disabled", ""
             return self.status()
