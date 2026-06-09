@@ -74,7 +74,7 @@ std::string BeamformingController::readNode(const std::string& iface,
     return ss.str();
 }
 
-void BeamformingController::reconcile(bool enabled, const BfParams& p) {
+void BeamformingController::reconcile(bool enabled, const BfParams& p, bool force) {
     if (!enabled) {
         stop();
         std::lock_guard<std::mutex> g(mu_);
@@ -83,13 +83,14 @@ void BeamformingController::reconcile(bool enabled, const BfParams& p) {
         return;
     }
 
-    // Already running with identical params => no-op.
-    {
+    // Already running with identical params => no-op, UNLESS force (e.g. a radio
+    // reset wiped the registers and we must re-write the conf node).
+    if (!force) {
         std::lock_guard<std::mutex> g(mu_);
         if (running_ && params_ == p && status_.state == BfState::Active)
             return;
     }
-    // Any change while running => restart cleanly.
+    // Any change (or forced re-arm) while running => restart cleanly.
     stop();
 
     BfStatus s;

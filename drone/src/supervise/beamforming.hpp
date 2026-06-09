@@ -52,7 +52,7 @@ public:
 
     // Idempotent: starts, stops, or restarts the sounding loop to match the
     // desired (enabled, params) state.
-    void reconcile(bool enabled, const BfParams& p);
+    void reconcile(bool enabled, const BfParams& p, bool force = false);
     void stop();                  // stop loop + reset driver state
     BfStatus status() const;
 

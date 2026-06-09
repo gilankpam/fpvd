@@ -101,3 +101,23 @@ TEST_CASE("beamforming: reconcile is idempotent and disables on enabled=false") 
     CHECK(bf.status().state == fpvd::BfState::Disabled);
     fs::remove_all(tmp);
 }
+
+TEST_CASE("beamforming: force re-writes conf even when params unchanged") {
+    auto tmp = fs::temp_directory_path() / "fpvd-bf-force";
+    fs::remove_all(tmp);
+    auto ifd = makeIface(tmp / "proc", "wlan0", /*withBfNode=*/true);
+    fpvd::BeamformingController bf((tmp / "proc").string(), (tmp / "sys").string());
+    fpvd::BfParams p; p.iface = "wlan0"; p.driver = "8812eu";
+    p.remoteMac = "00:c0:ca:dd:ee:ff"; p.intervalMs = 5;
+    bf.reconcile(true, p);
+    CHECK(bf.status().state == fpvd::BfState::Active);
+
+    // Simulate a radio reset wiping the conf node, then a same-params reconcile.
+    std::ofstream(ifd / "bf_monitor_conf", std::ios::trunc) << "WIPED";
+    bf.reconcile(true, p, /*force=*/false);          // idempotent => NOT rewritten
+    CHECK(readFile(ifd / "bf_monitor_conf") == "WIPED");
+    bf.reconcile(true, p, /*force=*/true);           // force => rewritten
+    CHECK(readFile(ifd / "bf_monitor_conf") == "1 00:c0:ca:dd:ee:ff 0 0");
+    bf.stop();
+    fs::remove_all(tmp);
+}
