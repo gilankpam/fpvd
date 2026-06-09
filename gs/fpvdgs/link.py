@@ -75,7 +75,7 @@ class LinkCoordinator:
         return self.beamforming.reconcile(enabled, primary,
                                           drone_mac if enabled else "")
 
-    def apply_link(self, apply_to: str = "both") -> dict:
+    def apply_link(self, apply_to: str = "both", *, commit: bool = True) -> dict:
         pending_cfg = self.store.pending()
         if self.validate is not None:
             self.validate(pending_cfg)   # raises (e.g. SchemaError) on bad values
@@ -163,7 +163,8 @@ class LinkCoordinator:
                 mode = "bounce"
 
         if gs_applied:
-            self.store.commit()
+            if commit:
+                self.store.commit()
             self._last_sync = (apply_to == "both") and drone_applied
         else:
             self.renderer_write(last_good)

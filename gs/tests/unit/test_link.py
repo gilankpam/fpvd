@@ -161,6 +161,44 @@ def test_apply_both_healthz_ok_but_patch_raises_still_applies_gs():
     assert res["inSync"] is False
 
 
+class _CommitCountingStore(ConfigStore):
+    """ConfigStore that records how many times commit() was called."""
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.commits = 0
+
+    def commit(self):
+        self.commits += 1
+        super().commit()
+
+
+def test_apply_link_commit_false_applies_hw_but_does_not_commit():
+    store = _CommitCountingStore({"link": {"channel": 132, "width": 40, "region": "US"}})
+    store.patch({"link": {"channel": 100}})
+    runner, drone, written = FakeRunner(), FakeDrone(reachable=True), []
+    coord = _coord(store, runner, drone, written)
+    res = coord.apply_link("both", commit=False)
+    # HW applied (bounce) and result reports gsApplied...
+    assert res["gsApplied"] is True
+    assert runner.restarts == 1
+    assert written[-1]["link"]["channel"] == 100
+    # ...but the store was NOT committed (unified apply commits once, later).
+    assert store.commits == 0
+    assert store.effective()["link"]["channel"] == 132
+    # _last_sync is still set on success.
+    assert coord.in_sync() is True
+
+
+def test_apply_link_default_commits():
+    store = _CommitCountingStore({"link": {"channel": 132, "width": 40, "region": "US"}})
+    store.patch({"link": {"channel": 100}})
+    runner, drone, written = FakeRunner(), FakeDrone(reachable=True), []
+    coord = _coord(store, runner, drone, written)
+    coord.apply_link("both")          # default commit=True
+    assert store.commits == 1
+    assert store.effective()["link"]["channel"] == 100
+
+
 def test_apply_link_rollback_on_runner_failure():
     class FailingRunner:
         def restart(self):

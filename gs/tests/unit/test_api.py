@@ -19,9 +19,11 @@ class FakeDrone:
     def __init__(self):
         self.calls = []
         self.patch_raises = None   # set to an exception to make patch_config raise
+        self.apply_raises = None   # set to an exception to make apply() raise
+        self._reachable = True     # toggle for healthz()
 
     def healthz(self):
-        return True
+        return self._reachable
 
     def patch_config(self, d):
         self.calls.append(("PATCH", d))
@@ -31,6 +33,11 @@ class FakeDrone:
 
     def apply(self):
         self.calls.append(("POST", "/apply", None))
+        if self.apply_raises is not None:
+            raise self.apply_raises
+        return {}
+
+    def get_status(self):
         return {}
 
     # opaque proxy hook (Api._proxy calls drone._request)
@@ -215,11 +222,33 @@ def test_patch_config_then_apply_renders_cfg():
     assert "wifi_channel" in open(cfg_out).read()
 
 
-def test_apply_refuses_pending_link_change():
-    api, store, _, _ = _api()
-    api.handle("PATCH", "/link", {}, json.dumps({"link": {"channel": 100}}).encode())
+def test_apply_shared_link_change_reachable_pushes_drone():
+    api, store, drone, cfg_out = _api()
+    # boot render of last-good so the coordinator has a cfg to roll back to
+    render_mod.write_cfg(cfg_out, render_mod.render_cfg(store.effective()))
+    api.handle("PATCH", "/config", {}, json.dumps({"link": {"channel": 100}}).encode())
     code, obj = api.handle("POST", "/apply", {}, b"")
-    assert code == 409
+    assert code == 200
+    # coordinator ran: shared link change pushed to the (reachable) drone
+    assert obj["sharedLink"]["gsApplied"] is True
+    assert obj["sharedLink"]["droneApplied"] is True
+    assert store.effective()["link"]["channel"] == 100
+    assert "wifi_channel = 100" in open(cfg_out).read()
+    # link-only change must NOT also trigger the GS-local wfb lane
+    assert obj["gs"]["wfbBounced"] is True   # the coordinator bounced (mode=bounce)
+
+
+def test_apply_shared_link_change_unreachable_soft_degrades():
+    api, store, drone, cfg_out = _api()
+    render_mod.write_cfg(cfg_out, render_mod.render_cfg(store.effective()))
+    drone._reachable = False
+    api.handle("PATCH", "/config", {}, json.dumps({"link": {"channel": 100}}).encode())
+    code, obj = api.handle("POST", "/apply", {}, b"")
+    # drone DOWN still applies on the GS (soft-degrade), 200
+    assert code == 200
+    assert obj["sharedLink"]["gsApplied"] is True
+    assert obj["sharedLink"]["droneApplied"] is False
+    assert store.effective()["link"]["channel"] == 100
 
 
 def test_link_apply_both_renders_and_pushes():
@@ -300,7 +329,7 @@ class _FakeRunner:
         return True
 
 
-def _api_with_dynlink(tmp_path):
+def _api_with_dynlink(tmp_path, drone=None):
     import json
     from fpvdgs import render, schema
     from fpvdgs.api import Api
@@ -319,13 +348,13 @@ def _api_with_dynlink(tmp_path):
     runner = _FakeRunner()
     cfg_out = str(tmp_path / "wfb.cfg")
     api = Api(store=store, schema=schema, render_mod=render, runner=runner,
-              drone=DroneClient("http://127.0.0.1:1"), link=None,
+              drone=drone or DroneClient("http://127.0.0.1:1"), link=None,
               status_fn=lambda: {}, cfg_out=cfg_out, dynlink=ctrl)
     return api, store, ctrl, runner
 
 
 def test_enable_dynamiclink_starts_controller_without_bouncing_runner(tmp_path):
-    api, store, ctrl, runner = _api_with_dynlink(tmp_path)
+    api, store, ctrl, runner = _api_with_dynlink(tmp_path, drone=FakeDrone())
     store.patch({"dynamicLink": {"enabled": True}})
     code, body = api.handle("POST", "/apply", {}, b"")
     assert code == 200 and body["applied"] is True
@@ -335,7 +364,7 @@ def test_enable_dynamiclink_starts_controller_without_bouncing_runner(tmp_path):
 
 
 def test_disable_dynamiclink_stops_controller(tmp_path):
-    api, store, ctrl, runner = _api_with_dynlink(tmp_path)
+    api, store, ctrl, runner = _api_with_dynlink(tmp_path, drone=FakeDrone())
     store.patch({"dynamicLink": {"enabled": True}})
     api.handle("POST", "/apply", {}, b"")
     store.patch({"dynamicLink": {"enabled": False}})
@@ -345,13 +374,35 @@ def test_disable_dynamiclink_stops_controller(tmp_path):
 
 
 def test_tuning_change_while_enabled_calls_set_config(tmp_path):
-    api, store, ctrl, runner = _api_with_dynlink(tmp_path)
+    api, store, ctrl, runner = _api_with_dynlink(tmp_path, drone=FakeDrone())
     store.patch({"dynamicLink": {"enabled": True}})
     api.handle("POST", "/apply", {}, b"")
     store.patch({"dynamicLink": {"controller": {"maxMcs": 3}}})
     api.handle("POST", "/apply", {}, b"")
     assert any(c[0] == "set_config" for c in ctrl.calls)
     assert runner.restarts == 0
+
+
+def test_apply_enable_toggle_unreachable_hard_gates(tmp_path):
+    # dynamicLink.enabled flips False->True but the drone is unreachable: hard-gate
+    # with 409 and commit nothing.
+    api, store, ctrl, runner = _api_with_dynlink(tmp_path)   # DroneClient -> unreachable
+    store.patch({"dynamicLink": {"enabled": True}})
+    code, obj = api.handle("POST", "/apply", {}, b"")
+    assert code == 409
+    assert obj["applied"] is False
+    assert ctrl.calls == []                                  # controller not started
+    assert store.effective()["dynamicLink"]["enabled"] is False   # NOT committed
+
+
+def test_apply_enable_toggle_reachable_ok(tmp_path):
+    drone = FakeDrone()                                      # healthz() -> True
+    api, store, ctrl, runner = _api_with_dynlink(tmp_path, drone=drone)
+    store.patch({"dynamicLink": {"enabled": True}})
+    code, obj = api.handle("POST", "/apply", {}, b"")
+    assert code == 200
+    assert ("start", None) in ctrl.calls                    # controller started
+    assert store.effective()["dynamicLink"]["enabled"] is True
 
 
 def test_wfb_change_bounces_runner_and_leaves_controller_alone(tmp_path):
@@ -410,6 +461,28 @@ def test_pixelpilot_change_restarts_pp_not_wfb(tmp_path):
     assert store.effective()["pixelpilot"]["screenMode"] == "1280x720@60"
 
 
+def test_apply_pixelpilot_only_fires_gs_local_not_drone(tmp_path):
+    api, store, pp, runner = _api_with_pp(tmp_path)
+    store.patch({"pixelpilot": {"screenMode": "1280x720@60"}})
+    code, body = api.handle("POST", "/apply", {}, b"")
+    assert code == 200
+    assert body["gs"]["applied"] is True
+    assert body["gs"]["wfbBounced"] is False       # pixelpilot-only: no wfb bounce
+    assert body["drone"]["fired"] is False         # _drone_dirty False
+    assert ("restart", None) in pp.calls
+    assert store.effective()["pixelpilot"]["screenMode"] == "1280x720@60"
+
+
+def test_apply_drone_dirty_fires_drone_lane():
+    api, store, drone, _ = _api()
+    api._drone_dirty = True                          # a prior drone PATCH marked it dirty
+    code, body = api.handle("POST", "/apply", {}, b"")
+    assert code == 200
+    assert body["drone"] == {"fired": True, "applied": True}
+    assert ("POST", "/apply", None) in drone.calls
+    assert api._drone_dirty is False                 # cleared after firing
+
+
 def test_wfb_change_does_not_touch_pixelpilot(tmp_path):
     api, store, pp, runner = _api_with_pp(tmp_path)
     store.patch({"wfb": {"raw": {"common": {"foo": 1}}}})
@@ -458,7 +531,7 @@ class _FakeProbe:
     def status(self): return {"running": self.started, "streams": 1, "mcs": {}}
 
 
-def _api_with_dl_and_probe(tmp_path):
+def _api_with_dl_and_probe(tmp_path, drone=None):
     from fpvdgs.api import Api
     from fpvdgs.config import ConfigStore
     from fpvdgs.drone_client import DroneClient
@@ -478,13 +551,13 @@ def _api_with_dl_and_probe(tmp_path):
     runner = _FakeRunner()
     cfg_out = str(tmp_path / "wfb.cfg")
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
-              drone=DroneClient("http://127.0.0.1:1"), link=None,
+              drone=drone or DroneClient("http://127.0.0.1:1"), link=None,
               status_fn=lambda: {}, cfg_out=cfg_out, dynlink=ctrl, probe=probe)
     return api, store, ctrl, probe, runner
 
 
 def test_enable_dynamiclink_starts_probe(tmp_path):
-    api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path)
+    api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path, drone=FakeDrone())
     store.patch({"dynamicLink": {"enabled": True}})
     code, _ = api.handle("POST", "/apply", {}, b"")
     assert code == 200
@@ -493,7 +566,7 @@ def test_enable_dynamiclink_starts_probe(tmp_path):
 
 
 def test_disable_dynamiclink_stops_probe(tmp_path):
-    api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path)
+    api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path, drone=FakeDrone())
     store.patch({"dynamicLink": {"enabled": True}})
     api.handle("POST", "/apply", {}, b"")
     store.patch({"dynamicLink": {"enabled": False}})

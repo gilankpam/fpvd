@@ -52,7 +52,7 @@ class Api:
             if key == ("PATCH", "/config"):
                 return self._patch_config(self._json(body))
             if key == ("POST", "/apply"):
-                return self._apply_gs()
+                return self._apply()
             if key == ("POST", "/reset"):
                 self.store.reset()
                 self.render_mod.write_cfg(self.cfg_out,
@@ -116,33 +116,71 @@ class Api:
     def _without(cfg: dict, *keys) -> dict:
         return {k: v for k, v in cfg.items() if k not in keys}
 
-    def _apply_gs(self):
+    def _apply(self):
         pending = self.store.pending()
         effective = self.store.effective()
-        # Guard: link drift must go through /link/apply (drone coordination).
-        if pending.get("link") != effective.get("link"):
-            return 409, {"error": "link changed; use POST /link/apply"}
+
+        # validate up front (idempotent with the coordinator's own validate)
         self.schema.validate_effective(pending)
 
-        # Anything outside dynamicLink/pixelpilot (link already equal) needs the
-        # runner. (probe carries no config now; its lifecycle rides dynamicLink.)
-        wfb_changed = (self._without(pending, "dynamicLink", "pixelpilot")
-                       != self._without(effective, "dynamicLink", "pixelpilot"))
-        if wfb_changed:
-            self.render_mod.write_cfg(self.cfg_out,
-                                      self.render_mod.render_cfg(pending))
+        # hard-gate: a dynamicLink.enabled toggle requires the drone reachable (on AND off)
+        en_old = bool(effective.get("dynamicLink", {}).get("enabled", False))
+        en_new = bool(pending.get("dynamicLink", {}).get("enabled", False))
+        if en_old != en_new and not self.drone.healthz():
+            return 409, {"applied": False,
+                         "error": "dynamicLink.enabled requires the drone reachable"}
+
+        result = {"applied": True}
+
+        # --- shared-link lane (coordinator): renders pending + retune/bounce + drone push; NO commit
+        link_changed = pending.get("link") != effective.get("link")
+        coord = None
+        if link_changed:
+            coord = self.link.apply_link(commit=False)
+            result["sharedLink"] = coord
+            if not coord.get("gsApplied"):
+                return 500, {"applied": False, "sharedLink": coord,
+                             "error": "link apply failed"}
+
+        # --- GS-local wfb lane: render+bounce for non-link/dynamicLink/pixelpilot changes,
+        #     unless the coordinator already bounced (it renders the whole pending) ---
+        coord_bounced = bool(coord) and coord.get("mode") == "bounce"
+        wfb_changed = (self._without(pending, "link", "dynamicLink", "pixelpilot")
+                       != self._without(effective, "link", "dynamicLink", "pixelpilot"))
+        wfb_bounced = False
+        if wfb_changed and not coord_bounced:
+            self.render_mod.write_cfg(self.cfg_out, self.render_mod.render_cfg(pending))
             if not self.runner.restart():
                 self.render_mod.restore_bak(self.cfg_out)
                 self.runner.restart()
                 return 500, {"applied": False,
                              "error": "runner failed; rolled back to last-good cfg"}
+            wfb_bounced = True
 
+        # --- GS-local controllers (no runner bounce) ---
         self._route_dynamic_link(effective.get("dynamicLink", {}),
                                  pending.get("dynamicLink", {}), pending)
         self._route_pixelpilot(effective.get("pixelpilot", {}),
                                pending.get("pixelpilot", {}), pending)
+
+        # --- commit the GS store ONCE (covers the link + GS-local lanes) ---
         self.store.commit()
-        return 200, {"applied": True}
+        result["gs"] = {"applied": True, "wfbBounced": wfb_bounced or coord_bounced}
+
+        # --- drone lane ---
+        if self._drone_dirty:
+            try:
+                self.drone.apply()
+                result["drone"] = {"fired": True, "applied": True}
+            except DroneUnreachable:
+                result["drone"] = {"fired": True, "applied": False, "reachable": False}
+            except DroneRejected as e:
+                result["drone"] = {"fired": True, "applied": False, "error": e.message}
+            self._drone_dirty = False
+        else:
+            result["drone"] = {"fired": False, "applied": False}
+
+        return 200, result
 
     def _route_dynamic_link(self, dl_old, dl_new, pending):
         """Start/stop/reconfigure the in-process controller AND the observe-only
