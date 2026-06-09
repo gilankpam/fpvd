@@ -13,7 +13,7 @@ public:
     /* Write the steady-state line reflecting the last applied decision.
      * rssiDbm is a hint; pass 0 if unknown. Safe to call on every tick
      * — file is rewritten atomically (tmpfile+rename). */
-    void writeStatus(const Decision& d, int rssiDbm, int bfCode = 0);
+    void writeStatus(const Decision& d, int rssiDbm, int bfCode);
 
     /* Write a transient event line on top of the status line. msposd
      * renders both if present. */
