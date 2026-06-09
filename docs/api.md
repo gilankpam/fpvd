@@ -93,9 +93,10 @@ curl http://127.0.0.1:8080/defaults
 
 ```json
 {
-  "link": {"channel": 161, "width": 20, "txpower": 1, "mcs": 2,
+  "link": {"channel": 161, "width": 20, "txpower": 20, "mcs": 2,
            "fec": {"k": 8, "n": 12}, "stbc": false, "ldpc": false,
-           "linkId": 7669206, "mtu": 1500, "wlanAdapter": null},
+           "linkId": 7669206, "mtu": 1500, "wlanAdapter": null,
+           "txpowerCurve": null},
   "video": {"codec": "h265", "resolution": "1920x1080", "fps": 60,
             "bitrate": 8192, "rcMode": "cbr", "gopSize": 1.0, "qpDelta": -4,
             "roi": {"enabled": true, "qp": 0, "center": 0.4, "steps": 2}},
@@ -109,8 +110,8 @@ curl http://127.0.0.1:8080/defaults
     "applyStaggerMs": 50, "applySubPaceMs": 5, "mavlinkEnable": true,
     "osd": {"enabled": true, "debugLatency": false},
     "roiQp": {"thresholdKbps": 6000, "lowAnchorKbps": 2000, "floor": -24, "step": 3},
-    "safe": {"mcs": 1, "k": 8, "n": 12, "depth": 1,
-             "bandwidth": 20, "txPowerDbm": 20, "bitrateKbps": 2000}
+    "failsafe": {"mcs": 1, "k": 8, "n": 12, "depth": 1,
+                 "bandwidth": 20, "txPowerDbm": 20, "bitrateKbps": 2000}
   },
   "services": {}
 }
@@ -187,9 +188,10 @@ curl -X PATCH http://127.0.0.1:8080/config \
 
 ```jsonc
 {
-  "link": {"channel": 161, "width": 20, "txpower": 1, "mcs": 2,
+  "link": {"channel": 161, "width": 20, "txpower": 20, "mcs": 2,
            "fec": {"k": 8, "n": 12}, "stbc": false, "ldpc": false,
-           "linkId": 7669206, "mtu": 1500, "wlanAdapter": null},
+           "linkId": 7669206, "mtu": 1500, "wlanAdapter": null,
+           "txpowerCurve": null},
   "video": {"codec": "h265", "resolution": "1920x1080", "fps": 90,
             "bitrate": 12000, "rcMode": "cbr", "gopSize": 1.0, "qpDelta": -4,
             "roi": {"enabled": true, "qp": 0, "center": 0.4, "steps": 2}},
@@ -321,7 +323,13 @@ Returns daemon runtime state: uptime, config version, last apply outcome, radio 
   "radio": {
     "driver": "88XXau",       // string — kernel module name
     "iface": "wlan0",         // string — network interface name
-    "adapterId": "0bda:8812"  // string or null — USB vendor:product id
+    "adapterId": "0bda:8812", // string or null — USB vendor:product id
+    "txpowerCurve": [29, 28, 25, 23, 19, 19, 19, 19],
+                              // array[8] — resolved effective TX power curve in dBm (one per MCS 0..7)
+    "txpowerCurveSource": "bl-m8812eu2"
+                              // string — source of the curve: "override" (from link.txpowerCurve),
+                              //   a radio name (e.g. "bl-m8812eu2") when using the per-radio default,
+                              //   or "fallback" when no radio-specific curve was found
   },
   "processes": [              // array — one entry per supervised process
     {
@@ -360,7 +368,9 @@ curl http://127.0.0.1:8080/status
   "radio": {
     "driver": "88XXau",
     "iface": "wlan0",
-    "adapterId": "0bda:8812"
+    "adapterId": "0bda:8812",
+    "txpowerCurve": [29, 28, 25, 23, 19, 19, 19, 19],
+    "txpowerCurveSource": "bl-m8812eu2"
   },
   "processes": [
     {"name": "wfb_video_tx", "pid": 234, "state": "running", "restarts": 0, "lastExitCode": null},
@@ -387,7 +397,7 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 "link": {
   "channel": 161,       // integer, 1..200 — Wi-Fi channel number
   "width": 20,          // integer, 20 or 40 — channel width in MHz
-  "txpower": 1,         // integer, 1..63 — TX power (driver units)
+  "txpower": 20,        // integer, 0..30 — TX power in dBm
   "mcs": 2,             // integer, 0..7 — MCS index
   "fec": {
     "k": 8,             // integer, 1..31 — FEC data shards (k < n, n ≤ 32)
@@ -397,8 +407,11 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
   "ldpc": false,        // boolean — enable LDPC
   "linkId": 7669206,    // integer — wfb-ng link ID (must match GS)
   "mtu": 1500,          // integer — packet MTU in bytes
-  "wlanAdapter": null   // string or null — force a specific wlan interface name;
+  "wlanAdapter": null,  // string or null — force a specific wlan interface name;
                         //                  null = auto-detect via radio-up.sh
+  "txpowerCurve": null  // array[8] | null — per-MCS TX power in dBm (MCS 0..7);
+                        //   null = use the per-radio default curve;
+                        //   an 8-entry array overrides it. Each entry 0..30.
 }
 ```
 
@@ -406,7 +419,7 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 |-------|------|---------|--------------|
 | `channel` | integer | `161` | 1 – 200 |
 | `width` | integer | `20` | `20` or `40` |
-| `txpower` | integer | `1` | 1 – 63 |
+| `txpower` | integer | `20` | 0 – 30 (dBm) |
 | `mcs` | integer | `2` | 0 – 7 |
 | `fec.k` | integer | `8` | 1 – 31, must be < `fec.n` |
 | `fec.n` | integer | `12` | 2 – 32, must be > `fec.k` |
@@ -415,6 +428,7 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 | `linkId` | integer | `7669206` | — |
 | `mtu` | integer | `1500` | — |
 | `wlanAdapter` | string \| null | `null` | interface name or `null` |
+| `txpowerCurve` | array\[8\] \| null | `null` | `null` = per-radio default curve; 8-entry array overrides it, each entry 0 – 30 (dBm, one per MCS 0..7) |
 
 ### `video` — encoder parameters
 
@@ -530,9 +544,10 @@ Controls the on-drone `dl-applier` process from the `wfbng-dynamic-link` project
     "floor": -24,                // integer, <= 0 — minimum (most negative) QP delta
     "step": 3                    // integer, >= 1 — QP step per curve segment
   },
-  "safe": {
+  "failsafe": {
     // Per-airframe failsafe ceilings: dl-applier will not exceed these values
     // regardless of what the ground-station controller requests.
+    // Note: a legacy "safe" overlay key is migrated to "failsafe" on load.
     "mcs": 1,           // integer, 0..7 — maximum MCS index dl-applier may set
     "k": 8,             // integer, 1..31 — maximum FEC k shard count (k < n, n ≤ 32)
     "n": 12,            // integer, 2..32 — maximum FEC n shard count (n > k, n ≤ 32)
@@ -559,13 +574,13 @@ Controls the on-drone `dl-applier` process from the `wfbng-dynamic-link` project
 | `roiQp.lowAnchorKbps` | integer | `2000` | > 0 |
 | `roiQp.floor` | integer | `-24` | <= 0 |
 | `roiQp.step` | integer | `3` | >= 1 |
-| `safe.mcs` | integer | `1` | 0 – 7 |
-| `safe.k` | integer | `8` | 1 – 31, must be < `safe.n` |
-| `safe.n` | integer | `12` | 2 – 32, must be > `safe.k` |
-| `safe.depth` | integer | `1` | 1 – 8 |
-| `safe.bandwidth` | integer | `20` | `20` or `40` |
-| `safe.txPowerDbm` | integer | `20` | -10 – 30 |
-| `safe.bitrateKbps` | integer | `2000` | > 0 |
+| `failsafe.mcs` | integer | `1` | 0 – 7 |
+| `failsafe.k` | integer | `8` | 1 – 31, must be < `failsafe.n` |
+| `failsafe.n` | integer | `12` | 2 – 32, must be > `failsafe.k` |
+| `failsafe.depth` | integer | `1` | 1 – 8 |
+| `failsafe.bandwidth` | integer | `20` | `20` or `40` |
+| `failsafe.txPowerDbm` | integer | `20` | -10 – 30 |
+| `failsafe.bitrateKbps` | integer | `2000` | > 0 |
 
 ### `services` — user-defined services
 
@@ -848,16 +863,16 @@ curl -X POST http://127.0.0.1:8080/apply
 
 ### Enable adaptive link
 
-Enable `dl-applier` supervision with custom safe ceilings for a long-range airframe.
+Enable `dl-applier` supervision with custom failsafe ceilings for a long-range airframe.
 
 ```bash
-# Stage: configure safe ceilings and enable adaptive link
+# Stage: configure failsafe ceilings and enable adaptive link
 curl -X PATCH http://127.0.0.1:8080/config \
   -H 'content-type: application/json' \
   -d '{
     "dynamicLink": {
       "enabled": true,
-      "safe": {
+      "failsafe": {
         "mcs": 2,
         "bitrateKbps": 6000,
         "txPowerDbm": 25
