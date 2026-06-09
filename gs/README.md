@@ -19,22 +19,23 @@ See `../docs/superpowers/specs/2026-06-02-fpvd-gs-design.md`.
 
 ## API
 
+`/config` is the **unified front door**: `GET` returns ONE merged tree (GS-local + the drone's config, fetched over the link), `PATCH` routes each leaf to the GS or the drone, and `POST /apply` fans changes out to three lanes (GS-local / shared-link coordinator / drone). The old `/link`, `/link/apply`, and `/air/*` routes are **gone** — they folded into `/config` + `/apply`. See [`../docs/api.md`](../docs/api.md) for the full unified tree, the section→side routing table, and the apply-lane policy.
+
 | Method | Path | Behavior |
 |---|---|---|
-| GET | /config[?pending=true] | effective or pending GS config |
-| PATCH | /config | merge sparse JSON into pending (link.* rejected) |
-| POST | /apply | commit pending → effective; render cfg; bounce runner |
-| POST | /reset | drop overlay |
-| GET | /defaults | baseline |
+| GET | /config[?pending=true] | unified tree (GS + drone merged); `_meta` carries drone reachability |
+| PATCH | /config | merge sparse unified tree into pending; routes each leaf to GS or drone |
+| POST | /apply | 3-lane router: GS-local / shared-link coordinator / drone proxy |
+| POST | /reset | drop GS overlay |
+| GET | /defaults | GS-local baseline |
 | GET | /status | daemon + runner/radio/link state |
 | GET | /healthz | 200 |
-| GET/PATCH | /air/config, POST /air/apply, GET /air/status | opaque proxy to drone fpvd |
-| GET | /link | overlap params + droneReachable |
-| PATCH/POST | /link, /link/apply | GS-local-first link change; applyTo "gs"|"both" |
 
 ## Config reference
 
-### `dynamicLink`
+> `GET /config` now returns the **unified tree** (GS-local + the drone's config merged into one Option-C object — `link.{gs,drone}`, `dynamicLink.{controller,applier}`, drone `video`/`telemetry`/… alongside GS `wfb`/`pixelpilot`). This section documents the **GS-local** pieces (the in-process `dynamicLink.controller` and the `pixelpilot` launch knobs); see [`../docs/api.md`](../docs/api.md) for the full merged shape, `_meta` semantics, and apply-lane routing.
+
+### `dynamicLink` (GS-local: `controller`)
 
 Arms the in-process GS adaptive-link control loop. Disabled by default. The
 controller knobs live under a nested `controller` block; `enabled` is the
@@ -71,8 +72,9 @@ Enabling, disabling, or tuning is applied at runtime via `PATCH /config` +
 `POST /apply` with **no wfb restart** — the runner is never bounced for
 `dynamicLink`-only changes.
 
-The drone side must be armed separately (its own `dynamicLink.enabled`,
-reachable via fpvd's `/air` proxy).
+`dynamicLink.enabled` is a shared toggle: the apply lane arms the GS
+controller and the drone applier together and hard-gates the toggle on drone
+reachability (toggling while the drone is unreachable → `409`, no change).
 
 **Deploy cutover.** `deploy/gs/deploy.sh` retires the standalone
 `dynamic-link-gs` service (init `S99dynamic-link-gs`, which also ran a bundled
@@ -179,13 +181,14 @@ restarting PixelPilot only — the radio link is untouched.
 lastExit, fault}`; `{enabled:false, running:false}` when disabled. Changes to
 `pixelpilot.*` restart only PixelPilot; a link/wfb change leaves it running.
 
-## On-device smoke (run after deploy; needs the drone reachable for /air and /link "both")
+## On-device smoke (run after deploy; needs the drone reachable for the shared-link/drone lanes)
 
 1. `pidof fpvd wfb_rx wfb_tx` — all present; no `wfb-server`/`S98wifibroadcast`.
 2. `curl -s :8080/status` — runner.running true; radio shows channel/width per wlan.
-3. `(echo>/dev/tcp/127.0.0.1/8103)` — open; dynamic-link-gs still connected; video flowing.
-4. GS-local: `curl -XPATCH :8080/config -d '{"wfb":{"mavlink":{"peer":"connect://127.0.0.1:14550"}}}'` then `curl -XPOST :8080/apply` — 200; only the runner bounced.
-5. Link bootstrap (drone reachable): `curl -XPATCH :8080/link -d '{"link":{"channel":100}}'` then `curl -XPOST :8080/link/apply -d '{"applyTo":"both"}'` — `{gsApplied:true,droneApplied:true}`; link re-establishes on the new channel.
-6. Link bootstrap (drone offline / different channel): same with `{"applyTo":"gs"}` — `droneApplied:false`, GS moves to the drone's channel and the link comes up.
-7. `/air`: `curl :8080/air/status` round-trips the drone fpvd's status.
-8. PixelPilot: `pidof pixelpilot` present; `curl -s :8080/status` shows `pixelpilot.running:true`. `curl -XPATCH :8080/config -d '{"pixelpilot":{"videoScale":1.5}}'` then `curl -XPOST :8080/apply` — 200; only PixelPilot restarts (wfb_rx/wfb_tx PIDs unchanged).
+3. `(echo>/dev/tcp/127.0.0.1/8103)` — open; the controller still connected; video flowing.
+4. Unified read: `curl -s :8080/config | jq '._meta'` — `droneReachable:true`, `droneStale:false`; `link.drone`/`video`/… subtrees populated.
+5. GS-local: `curl -XPATCH :8080/config -d '{"wfb":{"mavlink":{"peer":"connect://127.0.0.1:14550"}}}'` then `curl -XPOST :8080/apply` — 200; only the runner bounced.
+6. Shared link (drone reachable): `curl -XPATCH :8080/config -d '{"link":{"channel":100}}'` then `curl -XPOST :8080/apply` — `sharedLink:{gsApplied:true,droneApplied:true}`; link re-establishes on the new channel.
+7. Shared link (drone offline / different channel): same PATCH+apply — soft-degrades to `sharedLink.droneApplied:false`, GS still moves and the link comes up.
+8. Drone passthrough: `curl -XPATCH :8080/config -d '{"video":{"bitrate":9000}}'` then `curl -XPOST :8080/apply` — `drone:{fired:true,applied:true}`; the drone's `/config` reflects it.
+9. PixelPilot: `pidof pixelpilot` present; `curl -s :8080/status` shows `pixelpilot.running:true`. `curl -XPATCH :8080/config -d '{"pixelpilot":{"videoScale":1.5}}'` then `curl -XPOST :8080/apply` — 200; only PixelPilot restarts (wfb_rx/wfb_tx PIDs unchanged).

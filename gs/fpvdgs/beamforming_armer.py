@@ -1,10 +1,11 @@
 """GS beamformee boot re-arm loop.
 
-The BeamformingController only arms on a /link/apply. After a GS restart/reboot
-(which clears the driver's TXBF registers), link.beamforming.enabled stays true
-but the beamformee is never re-armed — BF silently stays off. This background
-loop arms it once the drone is reachable, retrying until then. Idempotent with
-/link/apply (a no-op when already active or disabled); never disarms.
+The BeamformingController only arms on an /apply (the shared-link lane, via the
+coordinator's apply_link()). After a GS restart/reboot (which clears the
+driver's TXBF registers), link.beamforming.enabled stays true but the
+beamformee is never re-armed — BF silently stays off. This background loop arms
+it once the drone is reachable, retrying until then. Idempotent with the
+shared-link apply (a no-op when already active or disabled); never disarms.
 """
 
 import threading
