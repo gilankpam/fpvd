@@ -1,67 +1,67 @@
 {
+  "link": {
+    "width": 20
+  },
   "dynamicLink": {
     "enabled": true,
-    "maxMcs": 5,
-    "bandwidth": 20,
-    "txpower": { "min": 18, "max": 28 },
-    "radioProfile": "m8812eu2",
-    "droneAddr": null,
-    "dronePort": 9999,
-    "videoStreamId": "video",
-    "idrForward": true,
-    "idrPort": 11223,
-    "tuning": {
-      "video": { "framerate": 60, "per_packet_airtime_us": 80, "max_latency_ms": 100 },
-      "fec": {
-        "depth_max": 1,
-        "k_bounds": { "min": 2, "max": 50 },
-        "base_redundancy_ratio": 0.4,
-        "max_redundancy_ratio": 1.0,
-        "blocks_per_frame": 1.4,
-        "n_loss_threshold": 0.015,
-        "n_loss_windows": 3,
-        "n_loss_step": 1,
-        "n_recover_windows": 10,
-        "n_recover_step": 1,
-        "max_n_escalation": 6
-      },
-      "gate": {
-        "snr_ema_alpha": 0.3,
-        "snr_slope_alpha": 0.3,
-        "snr_predict_horizon_ticks": 3,
-        "snr_safety_margin": 4,
-        "loss_margin_weight": 20,
-        "fec_margin_weight": 5,
-        "hysteresis_up_db": 5.0,
-        "hysteresis_down_db": 1.0,
-        "emergency_loss_rate": 0.10,
-        "emergency_fec_pressure": 0.50,
-        "max_mcs": 5,
-        "max_mcs_step_up": 1
-      },
-      "profile_selection": {
-        "hold_modes_down_ms": 1000,
-        "min_between_changes_ms": 200,
-        "fast_downgrade": true,
-        "upward_confidence_loops": 12
-      },
-      "smoothing": {
-        "ewma_alpha_rssi": 0.2,
-        "ewma_alpha_fec": 0.2,
-        "ewma_alpha_burst": 0.1,
-        "starvation_threshold_pps": 50
-      },
-      "cooldown": {
-        "min_change_interval_ms_fec": 200,
-        "min_change_interval_ms_depth": 200,
-        "min_change_interval_ms_radio": 200,
-        "min_change_interval_ms_cross": 50
-      },
-      "policy": {
-        "starvation_windows": 15,
-        "bitrate": { "utilization_factor": 0.7, "min_bitrate_kbps": 1000, "max_bitrate_kbps": 24000 }
-      },
-      "safe_defaults": { "video": { "k": 2, "n": 3 }, "depth": 1, "mcs": 0 }
+    "controller": {
+      "maxMcs": 5,
+      "radioProfile": "m8812eu2",
+      "droneAddr": null,
+      "dronePort": 9999,
+      "tuning": {
+        "video": { "framerate": 60, "per_packet_airtime_us": 80, "max_latency_ms": 100 },
+        "fec": {
+          "depth_max": 1,
+          "k_bounds": { "min": 2, "max": 50 },
+          "base_redundancy_ratio": 0.4,
+          "max_redundancy_ratio": 1.0,
+          "blocks_per_frame": 1.4,
+          "n_loss_threshold": 0.015,
+          "n_loss_windows": 3,
+          "n_loss_step": 1,
+          "n_recover_windows": 10,
+          "n_recover_step": 1,
+          "max_n_escalation": 6
+        },
+        "gate": {
+          "snr_ema_alpha": 0.3,
+          "snr_slope_alpha": 0.3,
+          "snr_predict_horizon_ticks": 3,
+          "snr_safety_margin": 4,
+          "loss_margin_weight": 20,
+          "fec_margin_weight": 5,
+          "hysteresis_up_db": 5.0,
+          "hysteresis_down_db": 1.0,
+          "emergency_loss_rate": 0.10,
+          "emergency_fec_pressure": 0.50,
+          "max_mcs": 5,
+          "max_mcs_step_up": 1
+        },
+        "profile_selection": {
+          "hold_modes_down_ms": 1000,
+          "min_between_changes_ms": 200,
+          "fast_downgrade": true,
+          "upward_confidence_loops": 12
+        },
+        "smoothing": {
+          "ewma_alpha_rssi": 0.2,
+          "ewma_alpha_fec": 0.2,
+          "ewma_alpha_burst": 0.1,
+          "starvation_threshold_pps": 50
+        },
+        "cooldown": {
+          "min_change_interval_ms_fec": 200,
+          "min_change_interval_ms_depth": 200,
+          "min_change_interval_ms_radio": 200,
+          "min_change_interval_ms_cross": 50
+        },
+        "policy": {
+          "starvation_windows": 15,
+          "bitrate": { "utilization_factor": 0.7, "min_bitrate_kbps": 1000, "max_bitrate_kbps": 24000 }
+        },
+        "safe_defaults": { "video": { "k": 2, "n": 3 }, "depth": 1, "mcs": 0 }
+      }
     }
   }
 }
