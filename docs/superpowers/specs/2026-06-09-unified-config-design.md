@@ -104,13 +104,12 @@ Routing convention PixelPilot can rely on:
 
     "controller": {               // → GS  (the brain that DECIDES — operating envelope)
       "maxMcs": 5,
-      "bandwidth": 20,
-      "txpower": { "min": 19, "max": 29 },   // dBm power curve (top..bottom MCS)
       "radioProfile": "m8812eu2",
       "droneAddr": null,          // null => host from droneLink.endpoint
       "dronePort": 9999,
-      "videoStreamId": "video",
       "tuning": {}                // opaque advanced policy passthrough
+      // bandwidth is read from link.width (10/20 → BW20, 40 → BW40); videoStreamId is the
+      // internal constant "video"; txpower is gone (v3 wire is MCS-only — power is drone-owned).
     },
     "applier": {                  // → DRONE  (OBEYS + GS-lost failsafe; stale when unreachable)
       "healthTimeoutMs": 10000,
@@ -118,17 +117,14 @@ Routing convention PixelPilot can rely on:
       "minIdrIntervalMs": 500,
       "applyStaggerMs": 50,
       "applySubPaceMs": 5,
-      "mavlinkEnable": true,
       "osd": { "enabled": true, "debugLatency": false },
       "roiQp": { "thresholdKbps": 6000, "lowAnchorKbps": 2000, "floor": -24, "step": 3 },
-      "failsafe": {               // values applied when the drone loses the GS (see below)
-        "mcs": 1,
-        "k": 8, "n": 12,
-        "depth": 1,
-        "bandwidth": 20,
-        "txPowerDbm": 29,         // low MCS -> high power -> robust recovery
-        "bitrateKbps": 2000
-      }
+      "failsafe": {               // applied when the drone loses the GS for healthTimeoutMs
+        "mcs": 1, "k": 8, "n": 12, "depth": 1,
+        "bandwidth": 20, "txPowerDbm": 20, "bitrateKbps": 2000
+      },
+      "bitrate": { "minBitrateKbps": 1000, "maxBitrateKbps": 24000 },  // drone-local compute (Phase 3a)
+      "fec":     { "baseRedundancyRatio": 0.5, "blocksPerFrame": 2.0, "kMin": 2, "kMax": 50 }  // drone-local
     }
   },
 
@@ -293,6 +289,25 @@ HELLO handshake re-completes, and driving resumes.
 **No arm-order constraint.** Decisions are UDP — if the applier isn't up yet, packets are
 dropped harmlessly — and the controller waits for the drone HELLO handshake before emitting
 real decisions, so `/apply` can fire both lanes in any order.
+
+**Controller is a pure MCS selector (Phase 3a/3b).** The v3 decision wire carries **MCS only**;
+the drone computes bitrate / FEC / depth / TX-power locally from that MCS. The field set is
+trimmed to match what the GS still actually uses:
+
+| Field | Disposition |
+|---|---|
+| `maxMcs`, `radioProfile`, `droneAddr`, `dronePort`, `tuning` | **kept** — the GS selector + UDP target |
+| `bandwidth` | **removed** — read from the shared `link.width` (`10/20 → BW20`, `40 → BW40`); one source of truth |
+| `videoStreamId` | **removed** — internal constant `"video"` (the stats-stream selector) |
+| `txpower.{min,max}` | **removed** — commanded nothing on the MCS-only wire; per-MCS power is the drone's `txpowerCurve` |
+
+The GS still needs to *know* per-MCS power for RSSI/EIRP normalization — it reads the drone's
+real curve from `/status.radio.txpowerCurve` (replacing both `controller.txpower` and the
+hand-configured `tuning.rssi_norm.tx_power_dbm_by_mcs` mirror).
+
+On the **applier**, the current drone schema adds `bitrate` (`minBitrateKbps`, `maxBitrateKbps`)
+and `fec` (`baseRedundancyRatio`, `blocksPerFrame`, `kMin`, `kMax`) — the Phase-3a drone-local
+compute — and drops the obsolete `mavlinkEnable`.
 
 ### Type 4 — parallel ceilings: **no cross-validation guard**
 
