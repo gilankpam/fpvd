@@ -304,9 +304,12 @@ trimmed to match what the GS still actually uses:
 | `videoStreamId` | **removed** — internal constant `"video"` (the stats-stream selector) |
 | `txpower.{min,max}` | **removed** — commanded nothing on the MCS-only wire; per-MCS power is the drone's `txpowerCurve` |
 
-The GS still needs to *know* per-MCS power for RSSI/EIRP normalization — it reads the drone's
-real curve from `/status.radio.txpowerCurve` (replacing both `controller.txpower` and the
-hand-configured `tuning.rssi_norm.tx_power_dbm_by_mcs` mirror).
+The GS still uses per-MCS power for RSSI/EIRP normalization, but **for this session it keeps its
+existing `tuning.rssi_norm.tx_power_dbm_by_mcs` mirror unchanged** — `controller.txpower` is
+removed only because it commanded nothing on the MCS-only wire. Sourcing the GS normalization
+curve from the drone's `/status.radio.txpowerCurve` (retiring the hand-maintained mirror) is a
+**future convergence, out of scope here** — the drone still publishes the curve, the GS just
+doesn't consume it yet.
 
 On the **applier**, the current drone schema adds `bitrate` (`minBitrateKbps`, `maxBitrateKbps`)
 and `fec` (`baseRedundancyRatio`, `blocksPerFrame`, `kMin`, `kMax`) — the Phase-3a drone-local
