@@ -68,3 +68,18 @@ def test_status_includes_pixelpilot_block():
                        pixelpilot=pp)
     assert out["pixelpilot"]["running"] is True
     assert out["pixelpilot"]["pid"] == 42
+
+
+def test_status_omits_beamforming_when_not_given():
+    out = build_status("1.0", _runner_state(), {}, {"reachable": True})
+    assert "beamforming" not in out
+
+
+def test_status_includes_beamforming_block():
+    bf = {"requested": True, "state": "active", "reason": "",
+          "iface": "wlan0", "localMac": "84:fc:14:6c:36:e6",
+          "peerMac": "00:c0:ca:dd:ee:ff"}
+    out = build_status("1.0", _runner_state(), {}, {"reachable": True},
+                       beamforming=bf)
+    assert out["beamforming"]["state"] == "active"
+    assert out["beamforming"]["peerMac"] == "00:c0:ca:dd:ee:ff"
