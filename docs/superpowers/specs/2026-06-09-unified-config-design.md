@@ -40,13 +40,11 @@ the single `/apply`.
 | Endpoint | Drone daemon | GS daemon | PixelPilot uses |
 |---|---|---|---|
 | `GET/PATCH /config`, `POST /apply` | still exist (drone-local, authoritative) | **unified front door** (routes to both) | **GS only** |
-| `GET /config/schema` | — | **new** — static per-leaf descriptor | GS (cached once) |
 | `GET /status` | kept (drone-local runtime) | kept (GS runtime + drone summary) | GS `/status` |
 | `/link`, `/link/apply`, `/air/*` | — | **removed** (folded into `/config`+`/apply`) | — |
 
-PixelPilot's entire vocabulary becomes `/config`, `/config/schema`, `/apply`, `/status` — all
-on the GS. The drone's own `/config` / `/status` remain for direct/CLI/debug access, but PP
-never needs `/air`.
+PixelPilot's entire vocabulary becomes `/config`, `/apply`, `/status` — all on the GS. The
+drone's own `/config` / `/status` remain for direct/CLI/debug access, but PP never needs `/air`.
 
 ## Tree shape — Option C (feature tree, side-split inside split features)
 
@@ -181,30 +179,27 @@ Routing convention PixelPilot can rely on:
 The **IDR relay** (PixelPilot keyframe-request forwarding) is **not** in the config tree — see
 "IDR relay" below.
 
-## Routing descriptor — `GET /config/schema`
+## Routing is structural — no schema endpoint
 
-Because the side is structural for split features, the descriptor shrinks to: coarse
-section→side ownership for wholly-owned sections, plus per-leaf metadata for client-side
-rendering/validation. It is **static and cacheable**; PixelPilot fetches it once.
+Because Option C exposes the side structurally, PixelPilot derives routing from the tree itself.
+There is **no** `/config/schema` (or any descriptor) endpoint.
 
-```jsonc
-{
-  "link.channel":          { "target": "both",  "requiresDrone": false, "applyPolicy": "degrade" },
-  "link.gs.txpower":       { "target": "gs",    "unit": "dBm", "range": [0,30] },
-  "link.drone.mcs":        { "target": "drone", "requiresDrone": true,  "range": [0,7] },
-  "link.drone.rxpower":    { "target": "drone", "requiresDrone": true,  "unit": "dBm", "range": [0,30] },
-  "adaptiveLink.enabled":  { "target": "both",  "requiresDrone": true,  "applyPolicy": "gate" },
-  "video.bitrate":         { "target": "drone", "requiresDrone": true },
-  "pixelpilot.videoScale": { "target": "gs",    "restart": "pixelpilot" }
-  // … one entry per leaf (or per wholly-owned section)
-}
-```
-
-PixelPilot uses it to **group** the menu (GS / Drone / Both), **gray out** drone fields during
-a battery swap, **render + validate** locally (`unit`, `range`, enum), and **warn correctly**
-(`applyPolicy: gate` → "needs the drone"; `restart: pixelpilot` → "this restarts the video").
-
-`mW` may be shown as a display label next to dBm values; dBm is the stored/validated unit.
+- **Split features** — `link.gs.*` / `adaptiveLink.controller.*` → GS; `link.drone.*` /
+  `adaptiveLink.applier.*` → DRONE; node-top-level (`link.channel`, `adaptiveLink.enabled`) →
+  BOTH.
+- **Wholly-owned sections** — a small, stable, documented section→side map:
+  `video` / `image` / `telemetry` / `recording` / `services` → DRONE;
+  `wfb` / `pixelpilot` / `droneLink` → GS. PixelPilot, being our own consumer, knows this map by
+  convention. Combined with `_meta.droneStale`, it tells PP which subtrees to gray out during a
+  battery swap.
+- **Validation is server-side** — `PATCH /config` is the source of truth: it validates each leaf
+  (range, unit, enum) and returns `400` with the offending field, which PP surfaces. Reactive
+  validation is sufficient for a config menu; PP does not pre-validate. Units and ranges (e.g.
+  txpower dBm 0–30) are documented for display hints, and `mW` may be shown as a label beside the
+  dBm value (dBm is the stored/validated unit).
+- **Apply policy** (gate vs degrade) is enforced by the GS at apply time. The one gated field
+  (`adaptiveLink.enabled`) is known by convention and also reported in the `/apply` result, so PP
+  can warn proactively and react to the outcome.
 
 ## Storage & apply model — C-1 composed facade
 
@@ -236,7 +231,7 @@ the drone is unreachable (no separate endpoint needed).
 
 ### Per-field apply policy
 
-Apply policy is **per-field**, carried in the descriptor and enforced by `/apply`:
+Apply policy is **per-field**, enforced by `/apply`:
 
 | Field group | Drone unreachable behavior |
 |---|---|
@@ -360,6 +355,7 @@ link), and the GS infra endpoint. The GS infra field is renamed `drone.endpoint`
 ## Open questions
 
 - Exact field set of the GS `/status` drone summary (driven by PixelPilot's menu needs).
-- Whether the descriptor is served per-leaf or per-section for wholly-owned sections (cosmetic).
+- Whether `_meta` should carry an explicit `droneOwned` section list so PixelPilot's graying is
+  data-driven instead of relying on the documented section→side convention.
 - Migration mechanics for the `safe` → `failsafe` overlay key at cutover.
 ```
