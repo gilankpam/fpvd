@@ -84,10 +84,10 @@ class Api:
             return 409, {"error": "link changed; use POST /link/apply"}
         self.schema.validate_effective(pending)
 
-        # Anything outside dynamicLink/pixelpilot (link already equal) needs the
-        # runner. (probe carries no config now; its lifecycle rides dynamicLink.)
-        wfb_changed = (self._without(pending, "dynamicLink", "pixelpilot")
-                       != self._without(effective, "dynamicLink", "pixelpilot"))
+        # Anything outside adaptiveLink/pixelpilot (link already equal) needs the
+        # runner. (probe carries no config now; its lifecycle rides adaptiveLink.)
+        wfb_changed = (self._without(pending, "adaptiveLink", "pixelpilot")
+                       != self._without(effective, "adaptiveLink", "pixelpilot"))
         if wfb_changed:
             self.render_mod.write_cfg(self.cfg_out,
                                       self.render_mod.render_cfg(pending))
@@ -97,8 +97,8 @@ class Api:
                 return 500, {"applied": False,
                              "error": "runner failed; rolled back to last-good cfg"}
 
-        self._route_dynamic_link(effective.get("dynamicLink", {}),
-                                 pending.get("dynamicLink", {}), pending)
+        self._route_dynamic_link(effective.get("adaptiveLink", {}),
+                                 pending.get("adaptiveLink", {}), pending)
         self._route_pixelpilot(effective.get("pixelpilot", {}),
                                pending.get("pixelpilot", {}), pending)
         self.store.commit()
@@ -130,7 +130,7 @@ class Api:
         runner. Mirrors _route_dynamic_link (set_argv ≈ set_config)."""
         if self.pixelpilot is None or pp_old == pp_new:
             return
-        # enabled defaults to True here (unlike dynamicLink's False): pixelpilot
+        # enabled defaults to True here (unlike adaptiveLink's False): pixelpilot
         # ships enabled in defaults.json and App boot-starts it under the same
         # default, so a missing key means "running", not "off".
         was, now = bool(pp_old.get("enabled", True)), bool(pp_new.get("enabled", True))
