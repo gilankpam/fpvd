@@ -36,7 +36,32 @@ class FakeDrone:
         return 200, json.dumps({"proxied": path}).encode()
 
 
-def _api():
+class _FakeDroneCache:
+    """Returns a fixed (drone_cfg, meta) pair for GET /config rendering.
+    Defaults to a never-seen drone (None, droneStale) so callers that don't
+    pass drone state still exercise the GS side of the unified tree."""
+    def __init__(self, cfg=None, meta=None):
+        self._cfg = cfg
+        self._meta = meta or {"droneReachable": False, "droneStale": True,
+                              "droneLastSeen": None}
+
+    def read(self):
+        return self._cfg, self._meta
+
+
+_DRONE_CFG = {
+    "link": {"channel": 132, "width": 40, "linkId": 7669206,
+             "mcs": 3, "txpower": 25, "fec": {"k": 8, "n": 12}},
+    "dynamicLink": {"enabled": False, "healthTimeoutMs": 10000,
+                    "failsafe": {"mcs": 1}},
+    "video": {"codec": "h265", "fps": 60},
+    "telemetry": {"router": "msposd"},
+}
+_DRONE_META = {"droneReachable": True, "droneStale": False,
+               "droneLastSeen": "2026-06-10T00:00:00Z"}
+
+
+def _api(drone_cache=None):
     import tempfile
     cfg_out = os.path.join(tempfile.mkdtemp(), "wifibroadcast.cfg")
     store = ConfigStore({"link": {"channel": 132, "width": 40, "region": "US"},
@@ -49,7 +74,8 @@ def _api():
         lambda cfg: render_mod.write_cfg(cfg_out, render_mod.render_cfg(cfg)),
         runner, drone, validate=schema.validate_effective)
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
-              drone=drone, link=link, status_fn=lambda: {"ok": True}, cfg_out=cfg_out)
+              drone=drone, link=link, status_fn=lambda: {"ok": True}, cfg_out=cfg_out,
+              drone_cache=drone_cache or _FakeDroneCache())
     return api, store, drone, cfg_out
 
 
@@ -59,11 +85,31 @@ def test_healthz():
     assert code == 200
 
 
-def test_get_config_returns_effective():
-    api, _, _, _ = _api()
-    code, obj = api.handle("GET", "/config", {}, b"")
+def test_get_config_returns_unified_tree():
+    # GS link.region now lives under link.gs; shared keys (channel) stay flat.
+    api, _, _, _ = _api(
+        drone_cache=_FakeDroneCache(_DRONE_CFG, _DRONE_META))
+    code, body = api.handle("GET", "/config", {}, b"")
     assert code == 200
-    assert obj["link"]["channel"] == 132
+    assert body["_meta"]["droneReachable"] is True
+    assert body["link"]["channel"] == 132
+    assert body["link"]["gs"]["region"] == "US"
+    assert body["link"]["drone"]["mcs"] == 3
+    assert body["dynamicLink"]["controller"] == {}   # GS has no controller block here
+    assert "applier" in body["dynamicLink"]
+    assert body["dynamicLink"]["applier"]["healthTimeoutMs"] == 10000
+    assert body["video"] == {"codec": "h265", "fps": 60}
+
+
+def test_get_config_renders_gs_when_drone_never_seen():
+    # default _FakeDroneCache: never-seen drone -> empty drone subtrees, GS renders.
+    api, _, _, _ = _api()
+    code, body = api.handle("GET", "/config", {}, b"")
+    assert code == 200
+    assert body["_meta"]["droneStale"] is True
+    assert body["link"]["channel"] == 132
+    assert body["link"]["gs"]["region"] == "US"
+    assert body["link"]["drone"] == {}
 
 
 def test_patch_config_rejects_link():

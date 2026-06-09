@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from .schema import SchemaError
+from .facade import build_config_tree
 from .dynlink.config_build import make_dl_snapshot
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .probe.config_build import make_probe_snapshot
@@ -13,7 +14,8 @@ from .probe.config_build import make_probe_snapshot
 
 class Api:
     def __init__(self, store, schema, render_mod, runner, drone, link,
-                 status_fn, cfg_out, dynlink=None, pixelpilot=None, probe=None):
+                 status_fn, cfg_out, dynlink=None, pixelpilot=None, probe=None,
+                 drone_cache=None):
         self.store = store
         self.schema = schema
         self.render_mod = render_mod
@@ -25,6 +27,7 @@ class Api:
         self.dynlink = dynlink
         self.pixelpilot = pixelpilot
         self.probe = probe
+        self.drone_cache = drone_cache
 
     def _json(self, body: bytes) -> dict:
         return json.loads(body or b"{}")
@@ -40,7 +43,9 @@ class Api:
                 return 200, self.store.defaults()
             if key == ("GET", "/config"):
                 pending = query.get("pending", ["false"])[0] == "true"
-                return 200, (self.store.pending() if pending else self.store.effective())
+                gs_cfg = self.store.pending() if pending else self.store.effective()
+                drone_cfg, meta = self.drone_cache.read()
+                return 200, build_config_tree(gs_cfg, drone_cfg, meta)
             if key == ("PATCH", "/config"):
                 sparse = self._json(body)
                 self.schema.validate_config_patch(sparse)

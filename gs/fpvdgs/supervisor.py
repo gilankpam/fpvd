@@ -23,6 +23,7 @@ from .beamforming import BeamformingController
 from .beamforming_armer import BeamformingArmer
 from .config import ConfigStore
 from .drone_client import DroneClient
+from .drone_cache import DroneConfigCache
 from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot, drone_host_from_endpoint
 from .idr_relay import IdrRelay
@@ -96,6 +97,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     endpoint = effective.get("droneLink", {}).get("endpoint", "http://10.5.0.10:8080")
     drone = DroneClient(endpoint)
+    drone_cache = DroneConfigCache(drone)
 
     if idr_relay is None:
         idr_relay = IdrRelay(drone_host_from_endpoint(endpoint))
@@ -183,7 +185,8 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out,
-              dynlink=dynlink, pixelpilot=pixelpilot, probe=probe_ctrl)
+              dynlink=dynlink, pixelpilot=pixelpilot, probe=probe_ctrl,
+              drone_cache=drone_cache)
 
     http_server = make_http_server(api, host, port)
     return App(store, runner, http_server, api, dynlink,
