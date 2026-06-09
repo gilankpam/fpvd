@@ -184,7 +184,6 @@ def _api_with_dynlink(tmp_path):
                 "dynamicLink": {"enabled": False,
                                  "controller": {"maxMcs": 5,
                                                 "radioProfile": "m8812eu2",
-                                                "droneAddr": None,
                                                 "dronePort": 9999, "tuning": {}}}}
     store = ConfigStore(defaults)
     ctrl = _FakeController()
@@ -343,7 +342,6 @@ def _api_with_dl_and_probe(tmp_path):
                 "dynamicLink": {"enabled": False,
                                  "controller": {"maxMcs": 5,
                                                 "radioProfile": "m8812eu2",
-                                                "droneAddr": None,
                                                 "dronePort": 9999, "tuning": {}}}}
     store = ConfigStore(defaults)
     ctrl = _FakeController()     # existing fake dynlink controller in this file

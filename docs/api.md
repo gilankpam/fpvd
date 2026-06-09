@@ -616,7 +616,7 @@ An object whose keys are service names and whose values are service definitions.
 
 The adaptive link has two halves. The drone runs the **applier** — the [`dynamicLink`](#dynamiclink--adaptive-link-controller) block in the Config schema above — which receives decisions and applies them to the radio and encoder. The **controller** (the brain that *decides*) runs on the ground station as a separate daemon, `fpvdgs`, with its own HTTP+JSON API on the GS (same shapes as this document: `GET`/`PATCH /config`, `POST /apply`, `GET /status`, plus an opaque `/air/*` proxy to the drone fpvd).
 
-The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the dual-gate MCS selector + trailing FEC/bitrate loop, and emits decision packets over UDP to the drone applier (`droneAddr:dronePort`, default `:9999`). It is configured by the GS daemon's own `dynamicLink` block — top-level `enabled` plus a nested `controller` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
+The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the dual-gate MCS selector + trailing FEC/bitrate loop, and emits decision packets over UDP to the drone applier at the `droneLink.endpoint` host on `controller.dronePort` (default `9999`). It is configured by the GS daemon's own `dynamicLink` block — top-level `enabled` plus a nested `controller` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
 
 ```jsonc
 "dynamicLink": {
@@ -624,8 +624,7 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
   "controller": {
     "maxMcs": 5,                 // integer, 0..7 — upper MCS bound the controller may select
     "radioProfile": "m8812eu2",  // string — packaged radio profile (fpvdgs/dynlink/profiles/<name>.json)
-    "droneAddr": null,           // string|null — drone UDP address; null => host parsed from droneLink.endpoint
-    "dronePort": 9999,           // integer, 1..65535 — drone dynamic-link UDP listener port
+    "dronePort": 9999,           // integer, 1..65535 — drone dynamic-link UDP listener port (host comes from droneLink.endpoint)
     "tuning": {}                 // object — opaque passthrough of advanced policy knobs (see below)
   }
 }
@@ -636,8 +635,7 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
 | `enabled` | boolean | `false` | — |
 | `controller.maxMcs` | integer | `5` | 0 – 7 |
 | `controller.radioProfile` | string | `"m8812eu2"` | a packaged profile name (`fpvdgs/dynlink/profiles/<name>.json`) |
-| `controller.droneAddr` | string \| null | `null` | UDP address; `null` ⇒ host parsed from `droneLink.endpoint` |
-| `controller.dronePort` | integer | `9999` | 1 – 65535 |
+| `controller.dronePort` | integer | `9999` | 1 – 65535 (UDP host is always the `droneLink.endpoint` host) |
 | `controller.tuning` | object | `{}` | see [Tuning passthrough](#tuning-passthrough) |
 
 The RF bandwidth the controller targets is **derived from `link.width`** — it is no longer a separate `bandwidth` field. The video rx stream is selected by an internal constant (`videoStreamId = "video"`), no longer a config field. The IDR-token relay config (`idrForward`/`idrPort`) has been removed from the config — the relay **is** always-on GS infrastructure: it listens on `0.0.0.0:11223` and forwards keyframe tokens to the drone at `droneLink.endpoint` host:`11223`, independent of `dynamicLink.enabled` (so it serves static links too).

@@ -7,7 +7,6 @@
     "controller": {
       "maxMcs": 5,
       "radioProfile": "m8812eu2",
-      "droneAddr": null,
       "dronePort": 9999,
       "tuning": {
         "video": { "framerate": 60, "per_packet_airtime_us": 80, "max_latency_ms": 100 },

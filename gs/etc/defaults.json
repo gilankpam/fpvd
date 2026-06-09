@@ -21,7 +21,6 @@
     "controller": {
       "maxMcs": 5,
       "radioProfile": "m8812eu2",
-      "droneAddr": null,
       "dronePort": 9999,
       "tuning": {}
     }

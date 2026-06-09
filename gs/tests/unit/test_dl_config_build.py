@@ -7,7 +7,7 @@ def _block(**over):
     blk = {
         "enabled": True, "maxMcs": 5, "bandwidth": 20,
         "radioProfile": "m8812eu2",
-        "droneAddr": None, "dronePort": 9999, "tuning": {},
+        "dronePort": 9999, "tuning": {},
     }
     blk.update(over)
     return blk
@@ -39,21 +39,26 @@ def test_build_aggregator_reads_tuning_smoothing():
 
 def test_make_dl_snapshot_defaults_drone_host_from_endpoint():
     eff = {"link": {"width": 20},
-           "dynamicLink": {"enabled": True, "controller": _block(droneAddr=None)},
+           "dynamicLink": {"enabled": True, "controller": _block()},
            "droneLink": {"endpoint": "http://10.5.0.10:8080"}}
     snap = make_dl_snapshot(eff)
     assert snap["droneAddr"] == "10.5.0.10"
     assert snap["dronePort"] == 9999
 
 
-def test_make_dl_snapshot_explicit_drone_addr_wins():
-    eff = {"link": {"width": 20},
-           "dynamicLink": {"enabled": True,
-                            "controller": _block(droneAddr="10.5.0.99", dronePort=12345)},
-           "droneLink": {"endpoint": "http://10.5.0.10:8080"}}
+def test_make_dl_snapshot_ignores_controller_droneaddr_uses_endpoint_host():
+    # droneLink.endpoint is the single source of truth for the drone host;
+    # any controller.droneAddr in config is ignored.
+    eff = {
+        "link": {"width": 40},
+        "droneLink": {"endpoint": "http://10.0.0.9:8080"},
+        "dynamicLink": {"enabled": True,
+                        "controller": {"droneAddr": "10.5.0.99", "dronePort": 12345,
+                                       "radioProfile": "m8812eu2", "tuning": {}}},
+    }
     snap = make_dl_snapshot(eff)
-    assert snap["droneAddr"] == "10.5.0.99"
-    assert snap["dronePort"] == 12345
+    assert snap["droneAddr"] == "10.0.0.9"   # endpoint host wins, NOT 10.5.0.99
+    assert snap["dronePort"] == 12345        # dronePort is still honored
 
 
 def test_make_dl_snapshot_reads_dynamiclink_controller_and_dronelink():

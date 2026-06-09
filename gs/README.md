@@ -46,7 +46,6 @@ top-level arm toggle.
   "controller": {
     "maxMcs": 5,
     "radioProfile": "m8812eu2",
-    "droneAddr": null,
     "dronePort": 9999,
     "tuning": {}
   }
@@ -58,8 +57,7 @@ top-level arm toggle.
 | `enabled` | bool | `false` | Arms the in-process control loop. Toggle at runtime via `PATCH /config` + `POST /apply`. |
 | `controller.maxMcs` | int 0–7 | `5` | Upper MCS bound the controller may select. |
 | `controller.radioProfile` | string | `"m8812eu2"` | Packaged radio profile (JSON under `gs/fpvdgs/dynlink/profiles/`). Determines per-MCS bitrate tables. |
-| `controller.droneAddr` | string\|null | `null` | Drone's dynamic-link UDP address. Defaults to the host parsed from `droneLink.endpoint`. |
-| `controller.dronePort` | int | `9999` | Drone's dynamic-link UDP port. |
+| `controller.dronePort` | int | `9999` | Drone's dynamic-link UDP port. The UDP host is always the host of `droneLink.endpoint` (single source of truth). |
 | `controller.tuning` | object | `{}` | Opaque passthrough of advanced policy knobs (gate/fec/smoothing/cooldown). Merged over code defaults. |
 
 The RF bandwidth the controller targets is **derived from `link.width`** — there is no separate `bandwidth` field. The video rx stream is selected by an internal constant (`videoStreamId = "video"`), not a config field; the policy is driven by that stream only (the mavlink/tunnel rx records on `:8103` are ignored, since their low packet rate would trip `link_starved` and pin MCS at the floor). Per-MCS tx power is owned by the drone (its tx-power curve), so the controller has no `txpower` field. The IDR-token relay is no longer controller config — see **IDR/keyframe relay** below.

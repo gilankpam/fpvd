@@ -62,7 +62,8 @@ def resolve_profile(block: dict) -> RadioProfile:
 def make_dl_snapshot(effective: dict) -> dict:
     """Self-contained snapshot the controller consumes. The controller block is
     dynamicLink.controller; bandwidth is derived from link.width; the drone UDP
-    target resolves from controller.droneAddr else the host of droneLink.endpoint."""
+    host is the host of droneLink.endpoint (single source of truth); dronePort
+    comes from controller.dronePort."""
     dl = effective.get("dynamicLink", {})
     block = dict(dl.get("controller", {}))
     block["enabled"] = bool(dl.get("enabled", False))
@@ -71,8 +72,7 @@ def make_dl_snapshot(effective: dict) -> dict:
     block["bandwidth"] = 40 if width == 40 else 20
     block["videoStreamId"] = "video"
     endpoint = effective.get("droneLink", {}).get("endpoint", "http://10.5.0.10:8080")
-    host = drone_host_from_endpoint(endpoint)
-    block["droneAddr"] = block.get("droneAddr") or host
+    block["droneAddr"] = drone_host_from_endpoint(endpoint)
     block["dronePort"] = int(block.get("dronePort") or 9999)
     return block
 

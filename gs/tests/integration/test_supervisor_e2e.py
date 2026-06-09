@@ -131,7 +131,6 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
         "dynamicLink": {"enabled": False,
                          "controller": {"maxMcs": 5,
                                         "radioProfile": "m8812eu2",
-                                        "droneAddr": None,
                                         "dronePort": 9999, "tuning": {}}}}))
     cfg_out = tmp_path / "wfb.cfg"
 
