@@ -53,8 +53,8 @@ std::vector<ValidationError> validate(const Config& c) {
         errs.push_back({"link.width", "must be 10, 20, or 40"});
     if (c.link.mcs < 0 || c.link.mcs > 7)
         errs.push_back({"link.mcs", "must be 0..7"});
-    if (c.link.txpower < 1 || c.link.txpower > 63)
-        errs.push_back({"link.txpower", "must be 1..63"});
+    if (c.link.txpower < 0 || c.link.txpower > 30)
+        errs.push_back({"link.txpower", "must be 0..30 (dBm)"});
     if (c.link.fec.k < 1 || c.link.fec.k > 32 ||
         c.link.fec.n < 1 || c.link.fec.n > 32 ||
         c.link.fec.k >= c.link.fec.n)

@@ -2,7 +2,7 @@
   "link": {
     "channel": 161,
     "width": 20,
-    "txpower": 1,
+    "txpower": 20,
     "mcs": 2,
     "fec": {
       "k": 8,

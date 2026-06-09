@@ -1,5 +1,6 @@
 #include "doctest.h"
 #include "config/validate.hpp"
+#include <algorithm>
 
 using fpvd::Config;
 using fpvd::validate;
@@ -219,6 +220,16 @@ TEST_CASE("validate: dynamicLink.roiQp.step >= 1") {
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.roiQp.step");
+}
+
+TEST_CASE("link.txpower is validated as dBm 0..30") {
+    fpvd::Config c{};
+    c.link.txpower = 20;                       // valid dBm
+    CHECK(fpvd::validate(c).empty());
+    c.link.txpower = 31;                       // above radio max
+    auto errs = fpvd::validate(c);
+    CHECK(std::any_of(errs.begin(), errs.end(),
+        [](const fpvd::ValidationError& e){ return e.path == "link.txpower"; }));
 }
 
 TEST_CASE("validate: beamforming off ignores stale fields") {

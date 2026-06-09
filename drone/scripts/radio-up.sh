@@ -44,11 +44,8 @@ case "${FPVD_WIDTH:-20}" in
     *)  iw $WLAN_DEV set channel "${FPVD_CHANNEL:-161}" HT20 ;;
 esac
 iw reg set 00
-if [ "$driver" = "88XXau" ]; then
-    iw $WLAN_DEV set txpower fixed $(( ${FPVD_TXPOWER:-1} * -100 ))
-else
-    iw $WLAN_DEV set txpower fixed $(( ${FPVD_TXPOWER:-1} *  50 ))
-fi
+# txpower is dBm; iw expects mBm (milli-dBm) = dBm * 100.
+iw $WLAN_DEV set txpower fixed $(( ${FPVD_TXPOWER:-20} * 100 ))
 
 # Chipset poke for ssc33x boards (telemetry serial enablement).
 if command -v ipcinfo >/dev/null 2>&1; then

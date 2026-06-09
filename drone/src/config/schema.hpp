@@ -47,7 +47,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beamforming, enabled, remoteMac,
 struct Link {
     int channel{161};
     int width{20};
-    int txpower{1};
+    int txpower{20};
     int mcs{2};
     Fec fec{};
     bool stbc{true};

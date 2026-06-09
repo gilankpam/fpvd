@@ -19,11 +19,8 @@ case "$action" in
         esac
         ;;
     txpower)
-        if [ "${FPVD_DRIVER:-}" = "88XXau" ]; then
-            iw "$iface" set txpower fixed $(( ${FPVD_TXPOWER:-1} * -100 ))
-        else
-            iw "$iface" set txpower fixed $(( ${FPVD_TXPOWER:-1} *  50 ))
-        fi
+        # txpower is dBm; iw expects mBm = dBm * 100.
+        iw "$iface" set txpower fixed $(( ${FPVD_TXPOWER:-20} * 100 ))
         ;;
     mtu)
         ip link set "$iface" mtu "${FPVD_MTU:-1500}"
