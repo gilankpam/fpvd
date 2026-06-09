@@ -195,7 +195,8 @@ void Daemon::writeOsdBaseLine() {
     {
         std::ofstream f(tmp, std::ios::trunc);
         if (!f) return;
-        f << "&L50&F30 &B  T&T  W&W  CPU&C\n";
+        const char* bf = bfOsdCode() == 2 ? " B+" : bfOsdCode() == 1 ? " B-" : "";
+        f << "&L50&F30 &B  T&T  W&W  CPU&C" << bf << "\n";
     }
     std::error_code ec;
     std::filesystem::rename(tmp, path, ec);
