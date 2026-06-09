@@ -4,7 +4,7 @@ import configparser
 from fpvdgs.render import render_cfg, write_cfg
 
 EFFECTIVE = {
-    "link": {"channel": 132, "width": 40, "txpower": 19, "region": "US",
+    "link": {"channel": 132, "width": 40, "rxpower": 19, "region": "US",
              "linkId": 7669206, "beamforming": {"enabled": False}, "wlans": "auto"},
     "wfb": {"profile": "gs", "mavlink": {"peer": "connect://127.0.0.1:14550"},
             "raw": {"gs_tunnel": {"ldpc": 1}}},
@@ -46,6 +46,18 @@ def test_render_omits_txpower_when_unset():
     eff = {"link": {"channel": 132, "width": 40, "region": "US"}, "wfb": {}}
     cfg = _parse_literals(render_cfg(eff))
     assert "wifi_txpower" not in cfg["common"]
+
+
+def test_render_emits_rxpower_as_wifi_txpower():
+    out = render_cfg({"link": {"channel": 132, "width": 40, "region": "US",
+                               "rxpower": 1500}, "wfb": {"profile": "gs", "raw": {}}})
+    assert "wifi_txpower = 1500" in out
+
+
+def test_render_omits_txpower_when_rxpower_null():
+    out = render_cfg({"link": {"channel": 132, "width": 40, "region": "US",
+                               "rxpower": None}, "wfb": {"profile": "gs", "raw": {}}})
+    assert "wifi_txpower" not in out
 
 
 def test_render_does_not_emit_link_id():

@@ -37,7 +37,9 @@ def retune_commands(wlans, link: dict) -> list[list[str]]:
         cmds.append(["iw", "reg", "set", region])
     channel = link.get("channel")
     width = link.get("width", 20)
-    txpower = link.get("txpower")
+    # rxpower (GS card power) — the iw verb is still 'txpower', but the config
+    # key is rxpower since the GS card is a receiver.
+    txpower = link.get("rxpower")
     for wlan in wlans:
         if channel is not None:
             cmds.append(iw_args(wlan, channel, width))
