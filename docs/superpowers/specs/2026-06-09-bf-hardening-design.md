@@ -83,6 +83,18 @@ The loop must tolerate transient write failures instead of exiting:
 The loop still exits only on `stopFlag_` (reconcile/stop). A persistently broken
 node leaves the loop in `Error` but alive and retrying — never a silent death.
 
+## #2c — OSD freshness (real-state, verified)
+
+`cbr_rssi` from `bf_monitor_rfinfo` FREEZES at the last value when the GS stops
+echoing (the driver only updates it on CBR receipt). Verified live: disarming the
+GS beamformee left the drone's `cbr_rssi` frozen at −49 for 15s, so the OSD stayed
+`B+` (stale) despite BF no longer working. Fix: use the rfinfo **token** (field 0)
+as a liveness signal — it advances only on a new CBR and freezes when the GS goes
+silent. `BfStatus.cbrFresh` is false after `kCbrStaleTicks` (=10, ~1s at 100ms)
+consecutive same-token ticks; `bfOsdCode` returns `B+` (2) only when
+`cbrRssi != 0 && cbrFresh`, else `B-` (1) while Active. So `B+` now drops to `B-`
+within ~1s of reports stopping.
+
 ## #3 — GS: auto-manage STBC + surface drone validation errors
 
 The drone schema (`drone/src/config/validate.cpp:64-77`) enforces:
