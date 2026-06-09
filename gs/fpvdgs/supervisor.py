@@ -20,6 +20,7 @@ def adapter_matches_profile(adapter_id, radio_profile) -> bool:
 from . import __version__, radio, render as render_mod, schema, status as status_mod
 from .api import Api, make_http_server
 from .beamforming import BeamformingController
+from .beamforming_armer import BeamformingArmer
 from .config import ConfigStore
 from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
@@ -33,7 +34,7 @@ from .runner_supervisor import RunnerSupervisor, ProcessSupervisor, resolve_wlan
 
 class App:
     def __init__(self, store, runner, http_server, api, dynlink,
-                 pixelpilot=None, probe=None):
+                 pixelpilot=None, probe=None, armer=None):
         self.store = store
         self.runner = runner
         self.http = http_server
@@ -41,9 +42,12 @@ class App:
         self.dynlink = dynlink
         self.pixelpilot = pixelpilot
         self.probe = probe
+        self.armer = armer
 
     def start(self):
         self.runner.start()
+        if self.armer is not None:
+            self.armer.start()   # boot re-arm: keeps the GS beamformee armed to config
         if (self.pixelpilot is not None
                 and self.store.effective().get("pixelpilot", {}).get("enabled", True)):
             self.pixelpilot.start()
@@ -58,6 +62,8 @@ class App:
 
     def shutdown(self):
         self.http.shutdown()
+        if self.armer is not None:
+            self.armer.stop()
         self.dynlink.stop()
         if self.pixelpilot is not None:
             self.pixelpilot.shutdown()
@@ -96,6 +102,8 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         log_path="/tmp/pixelpilot.log")
 
     beamforming = BeamformingController()
+    armer = BeamformingArmer(beamforming, drone, resolve_wlans,
+                             lambda: store.effective())
 
     def renderer_write(eff):
         render_mod.write_cfg(cfg_out, render_mod.render_cfg(eff))
@@ -168,7 +176,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     http_server = make_http_server(api, host, port)
     return App(store, runner, http_server, api, dynlink,
-               pixelpilot=pixelpilot, probe=probe_ctrl)
+               pixelpilot=pixelpilot, probe=probe_ctrl, armer=armer)
 
 
 def main(argv=None):
