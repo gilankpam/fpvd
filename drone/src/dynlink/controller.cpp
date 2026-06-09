@@ -436,7 +436,7 @@ void DynamicLinkController::run(int evfd) {
                         }
 
                         lastApplied_ = d;
-                        osd_->writeStatus(lastApplied_, 0);
+                        osd_->writeStatus(lastApplied_, 0, 0);
                         watchdog_->notifyDecision(now);
                         lastDecisionMs_ = now;
                         {
