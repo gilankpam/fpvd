@@ -231,7 +231,7 @@ void Daemon::reconcileBeamforming(bool force) {
 int Daemon::bfOsdCode() const {
     auto bf = bf_.status();
     if (bf.state != BfState::Active) return 0;
-    return bf.cbrRssi != 0 ? 2 : 1;
+    return (bf.cbrRssi != 0 && bf.cbrFresh) ? 2 : 1;
 }
 
 void Daemon::rewriteWaybeamJson() {

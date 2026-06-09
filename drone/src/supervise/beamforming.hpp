@@ -34,6 +34,7 @@ struct BfStatus {
     int bw{0};
     long soundingCount{0};
     int cbrRssi{0};             // cbr_rssi0 from bf_monitor_rfinfo; 0 = no report
+    bool cbrFresh{false};       // rfinfo token advancing = receiving fresh reports
     std::optional<std::string> lastCbr;
 };
 
@@ -47,6 +48,10 @@ std::string resolveLocalMac(const std::string& procBase,
 // Parse the 4th colon-field (cbr_rssi0, dBm) of a bf_monitor_rfinfo line.
 // Returns 0 on empty/malformed input (0 == no report received).
 int parseCbrRssi(const std::string& rfinfo);
+
+// Parse the 1st colon-field (sounding token) of a bf_monitor_rfinfo line.
+// Returns -1 on empty/malformed input. The token advances only on a new CBR.
+int parseCbrToken(const std::string& rfinfo);
 
 class BeamformingController {
 public:

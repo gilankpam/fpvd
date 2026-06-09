@@ -100,6 +100,7 @@ nlohmann::json buildStatus(Daemon& d) {
             {"bw", bf.bw},
             {"soundingCount", bf.soundingCount},
             {"cbrRssi", bf.cbrRssi},
+            {"cbrFresh", bf.cbrFresh},
             {"lastCbr", bf.lastCbr.has_value()
                          ? nlohmann::json(bf.lastCbr.value())
                          : nlohmann::json(nullptr)}

@@ -8,6 +8,11 @@
 
 namespace fpvd {
 
+// Consecutive same-token ticks before a report is considered stale (no fresh CBR).
+// At the default 100 ms interval this is ~2 s; at the 5 ms test interval it is 100 ms,
+// which is safely above the 40 ms recovery-check window in the integration test.
+static constexpr int kCbrStaleTicks = 20;
+
 static std::string extractMac(const std::string& text) {
     // Find the first aa:bb:cc:dd:ee:ff token.
     for (size_t i = 0; i + 17 <= text.size(); ++i) {
@@ -42,6 +47,12 @@ std::string resolveLocalMac(const std::string& procBase,
         }
     }
     return "";
+}
+
+int parseCbrToken(const std::string& rfinfo) {
+    size_t colon = rfinfo.find(':');
+    std::string tok = rfinfo.substr(0, colon);   // colon==npos -> whole string
+    try { return std::stoi(tok); } catch (...) { return -1; }
 }
 
 int parseCbrRssi(const std::string& rfinfo) {
@@ -150,6 +161,8 @@ void BeamformingController::startLoop() {
 
 void BeamformingController::loop() {
     int token = 0;
+    int lastCbrToken = -1;
+    int cbrStaleTicks = 0;
     BfParams p;
     { std::lock_guard<std::mutex> g(mu_); p = params_; }
     const int bw = modulationWidth(p.width);
@@ -168,10 +181,18 @@ void BeamformingController::loop() {
         } else {
             token = (token + 1) % 64;
             std::string cbr = readNode(p.iface, "bf_monitor_trig");
-            int cbrRssi = parseCbrRssi(readNode(p.iface, "bf_monitor_rfinfo"));
+            std::string rf = readNode(p.iface, "bf_monitor_rfinfo");
+            int cbrRssi = parseCbrRssi(rf);
+            int cbrTok = parseCbrToken(rf);
+            // The rfinfo token advances only on a NEW CBR; if it stops moving the
+            // GS has gone silent. Mark stale after kCbrStaleTicks unchanged ticks.
+            if (cbrTok != lastCbrToken) { lastCbrToken = cbrTok; cbrStaleTicks = 0; }
+            else if (cbrStaleTicks < kCbrStaleTicks) { ++cbrStaleTicks; }
+            const bool fresh = (cbrTok >= 0) && (cbrStaleTicks < kCbrStaleTicks);
             std::lock_guard<std::mutex> g(mu_);
             status_.soundingCount++;
             status_.cbrRssi = cbrRssi;
+            status_.cbrFresh = fresh;
             status_.lastCbr = cbr.empty() ? std::nullopt
                                           : std::optional<std::string>(cbr);
             if (status_.state == BfState::Error) {   // recovered from a transient failure

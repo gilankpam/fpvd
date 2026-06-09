@@ -130,6 +130,37 @@ TEST_CASE("beamforming: force re-writes conf even when params unchanged") {
     fs::remove_all(tmp);
 }
 
+TEST_CASE("beamforming: parseCbrToken extracts the 1st rfinfo field") {
+    CHECK(fpvd::parseCbrToken("4:30:15:-48:-67:21:23") == 4);
+    CHECK(fpvd::parseCbrToken("63:0:0:0:0:0:0") == 63);
+    CHECK(fpvd::parseCbrToken("") == -1);
+    CHECK(fpvd::parseCbrToken("garbage") == -1);
+}
+
+TEST_CASE("beamforming: cbrFresh drops false when the rfinfo token stops advancing") {
+    auto tmp = fs::temp_directory_path() / "fpvd-bf-fresh";
+    fs::remove_all(tmp);
+    auto ifd = makeIface(tmp / "proc", "wlan0", /*withBfNode=*/true);
+    // Frozen rfinfo: token never changes -> stale.
+    std::ofstream(ifd / "bf_monitor_rfinfo", std::ios::trunc) << "4:30:15:-48:-67:21:23";
+
+    fpvd::BeamformingController bf((tmp / "proc").string(), (tmp / "sys").string());
+    fpvd::BfParams p; p.iface = "wlan0"; p.driver = "8812eu";
+    p.remoteMac = "00:c0:ca:dd:ee:ff"; p.intervalMs = 5;
+    bf.reconcile(true, p);
+
+    std::this_thread::sleep_for(120ms);          // many ticks of a frozen token
+    CHECK(bf.status().cbrFresh == false);         // detected stale
+
+    // Advance the token -> fresh again.
+    { std::ofstream f(ifd / "bf_monitor_rfinfo", std::ios::trunc);
+      f << "9:30:15:-48:-67:21:23"; }
+    std::this_thread::sleep_for(40ms);
+    CHECK(bf.status().cbrFresh == true);          // recovered
+    bf.stop();
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("beamforming: loop survives a transient trig write failure and self-heals") {
     auto tmp = fs::temp_directory_path() / "fpvd-bf-resilient";
     fs::remove_all(tmp);
