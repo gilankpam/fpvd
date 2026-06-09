@@ -64,6 +64,16 @@ Config loadEffective(const std::string& defaultsPath,
     catch (const nlohmann::json::exception& e) {
         throw StoreError(std::string("overlay parse error: ") + e.what());
     }
+    // Back-compat: the adaptive-link failsafe key was renamed safe -> failsafe.
+    // Migrate a legacy overlay so a deployed drone's failsafe is preserved.
+    if (overlayJ.is_object() && overlayJ.contains("dynamicLink") &&
+        overlayJ["dynamicLink"].is_object()) {
+        auto& dlj = overlayJ["dynamicLink"];
+        if (dlj.contains("safe") && !dlj.contains("failsafe")) {
+            dlj["failsafe"] = dlj["safe"];
+            dlj.erase("safe");
+        }
+    }
     auto merged = deepMergeJson(baseJ, overlayJ);
     try { return merged.get<Config>(); }
     catch (const nlohmann::json::exception& e) {

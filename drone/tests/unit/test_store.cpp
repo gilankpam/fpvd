@@ -94,3 +94,14 @@ TEST_CASE("store: defaults file carries dynamicLink section") {
     CHECK(c.dynamicLink.failsafe.mcs == 1);
     CHECK(c.dynamicLink.roiQp.thresholdKbps == 6000);
 }
+
+TEST_CASE("loadEffective migrates a legacy dynamicLink.safe overlay key to failsafe") {
+    auto dir = std::filesystem::temp_directory_path() / "fpvd-safe-migrate";
+    std::filesystem::create_directories(dir);
+    auto defaults = dir / "defaults.json";
+    auto overlay  = dir / "config.json";
+    { std::ofstream f(defaults); f << R"({"dynamicLink":{"failsafe":{"mcs":1}}})"; }
+    { std::ofstream f(overlay);  f << R"({"dynamicLink":{"safe":{"mcs":4}}})"; }
+    auto c = fpvd::loadEffective(defaults.string(), overlay.string());
+    CHECK(c.dynamicLink.failsafe.mcs == 4);   // legacy key honored, not dropped
+}
