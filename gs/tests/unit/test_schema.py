@@ -47,44 +47,35 @@ def test_validate_effective_accepts_10mhz():
 
 def test_validate_effective_ok():
     validate_effective({
-        "link": {"channel": 132, "width": 40, "txpower": 19, "region": "US",
+        "link": {"channel": 132, "width": 40, "rxpower": 19, "region": "US",
                  "linkId": 7669206, "beamforming": {"enabled": False}, "wlans": "auto"},
         "wfb": {"profile": "gs", "mavlink": {"peer": "connect://127.0.0.1:14550"}, "raw": {}},
-        "drone": {"endpoint": "http://10.5.0.10:8080"},
+        "droneLink": {"endpoint": "http://10.5.0.10:8080"},
     })
 
 
-def _eff(**dl):
+def _eff(**ctl):
     base = {"link": {"channel": 132, "width": 40, "region": "US"},
-            "dynamicLink": {"enabled": False, "maxMcs": 5, "bandwidth": 20,
-                            "txpower": {"min": 18, "max": 28},
-                            "radioProfile": "m8812eu2", "dronePort": 9999,
-                            "tuning": {}}}
-    base["dynamicLink"].update(dl)
+            "adaptiveLink": {"enabled": False,
+                             "controller": {"maxMcs": 5,
+                                            "radioProfile": "m8812eu2",
+                                            "dronePort": 9999,
+                                            "tuning": {}}}}
+    base["adaptiveLink"]["controller"].update(ctl)
     return base
 
 
-def test_config_patch_allows_dynamiclink():
-    schema.validate_config_patch({"dynamicLink": {"enabled": True}})  # no raise
+def test_config_patch_allows_adaptivelink():
+    schema.validate_config_patch({"adaptiveLink": {"enabled": True}})  # no raise
 
 
-def test_effective_accepts_valid_dynamiclink():
+def test_effective_accepts_valid_adaptivelink():
     schema.validate_effective(_eff())  # no raise
 
 
 def test_effective_rejects_bad_max_mcs():
     with pytest.raises(SchemaError):
         schema.validate_effective(_eff(maxMcs=9))
-
-
-def test_effective_rejects_bad_bandwidth():
-    with pytest.raises(SchemaError):
-        schema.validate_effective(_eff(bandwidth=15))
-
-
-def test_effective_rejects_inverted_txpower():
-    with pytest.raises(SchemaError):
-        schema.validate_effective(_eff(txpower={"min": 30, "max": 10}))
 
 
 def test_effective_rejects_unknown_radio_profile():
@@ -96,9 +87,48 @@ def test_effective_accepts_known_radio_profile():
     schema.validate_effective(_eff(radioProfile="m8812eu2"))  # no raise
 
 
-def test_effective_rejects_bad_idr_port():
+def test_effective_rejects_bad_drone_port():
     with pytest.raises(SchemaError):
-        schema.validate_effective(_eff(idrPort=70000))
+        schema.validate_effective(_eff(dronePort=70000))
+
+
+def test_config_patch_accepts_adaptivelink_and_dronelink():
+    from fpvdgs import schema
+    schema.validate_config_patch({"adaptiveLink": {"enabled": True}})
+    schema.validate_config_patch({"droneLink": {"endpoint": "http://x:8080"}})
+
+
+def test_config_patch_rejects_old_keys():
+    import pytest
+    from fpvdgs import schema
+    with pytest.raises(schema.SchemaError):
+        schema.validate_config_patch({"dynamicLink": {"enabled": True}})
+    with pytest.raises(schema.SchemaError):
+        schema.validate_config_patch({"drone": {"endpoint": "x"}})
+
+
+def test_link_patch_accepts_rxpower_not_txpower():
+    import pytest
+    from fpvdgs import schema
+    schema.validate_link_patch({"link": {"rxpower": 20}})
+    with pytest.raises(schema.SchemaError):
+        schema.validate_link_patch({"link": {"txpower": 20}})
+
+
+def test_validate_adaptivelink_controller():
+    import pytest
+    from fpvdgs import schema
+    schema.validate_effective({
+        "link": {"channel": 132, "region": "US", "width": 40},
+        "adaptiveLink": {"enabled": True,
+                         "controller": {"maxMcs": 5, "radioProfile": "m8812eu2",
+                                        "dronePort": 9999}},
+    })
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective({
+            "link": {"channel": 132, "region": "US", "width": 40},
+            "adaptiveLink": {"controller": {"maxMcs": 9}},   # out of 0..7
+        })
 
 
 def test_config_patch_accepts_pixelpilot():
