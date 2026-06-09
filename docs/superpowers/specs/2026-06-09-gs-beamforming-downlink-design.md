@@ -217,9 +217,12 @@ operator ── POST /link/apply {apply_to:"both"} ──▶ GS coordinator
   ├─ validate (schema)
   ├─ capability preflight: supported(wlans[0])  ── fail ⇒ 4xx, abort
   ├─ gs_mac  = sysfs address of wlans[0]
-  ├─ drone_mac = drone GET /status → beamforming.localMac
   ├─ drone PATCH /config {link:{beamforming:{enabled:true, remoteMac:gs_mac}}} + apply
   │     └─ drone reconcileBeamforming(): sounds gs_mac, harvests report, applies Q
+  ├─ drone_mac = drone GET /status → beamforming.localMac
+  │     ⚠ read AFTER the push: the drone only populates localMac once its own BF
+  │       is enabled, so reading before the push returns "" and the GS would need
+  │       a second apply to arm. Push-then-read arms in a single apply.
   ├─ GS reconcile(enabled=true, wlans[0], drone_mac): write bf_monitor_conf "1 <drone_mac> 0 0"
   │     └─ GS HW auto-echoes compressed beamforming report to the drone
   ├─ RF retune/bounce only if non-BF link fields changed
