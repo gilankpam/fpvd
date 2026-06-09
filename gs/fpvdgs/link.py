@@ -9,7 +9,7 @@ from .drone_client import DroneUnreachable, DroneRejected
 from .schema import SchemaError
 
 # Only the truly-shared radio params go to the drone. GS-only keys
-# (region, wlans, txpower) are per-side and never pushed. `beamforming` is
+# (region, wlans, rxpower) are per-side and never pushed. `beamforming` is
 # pushed separately (with the MAC transformed) by apply_link.
 DRONE_PUSH_KEYS = ("channel", "width", "linkId")
 
@@ -43,7 +43,7 @@ class LinkCoordinator:
 
     def _can_retune_live(self, old, new):
         """A live iw retune is safe only when the change is limited to fields
-        that `iw` can apply on a running monitor card (channel/width/txpower/
+        that `iw` can apply on a running monitor card (channel/width/rxpower/
         region) AND the radiotap BW class is unchanged. `beamforming` is
         reconciled separately, so it is excluded here. Anything else (wlans,
         linkId, …) or a 40 MHz crossing falls back to a full runner bounce."""
@@ -51,7 +51,7 @@ class LinkCoordinator:
             return False
         changed = {k for k in set(old) | set(new)
                    if k != "beamforming" and old.get(k) != new.get(k)}
-        if not changed <= {"channel", "width", "txpower", "region"}:
+        if not changed <= {"channel", "width", "rxpower", "region"}:
             return False
         return _bw_class(old.get("width")) == _bw_class(new.get("width"))
 

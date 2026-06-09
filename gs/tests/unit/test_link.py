@@ -223,14 +223,14 @@ def test_10_to_20_width_retunes_live():
     assert runner.restarts == 0
 
 
-def test_txpower_change_retunes_live():
-    store = _store()  # width 40, no txpower
-    store.patch({"link": {"txpower": 2200}})
+def test_rxpower_change_retunes_live():
+    store = _store()  # width 40, no rxpower
+    store.patch({"link": {"rxpower": 2200}})
     runner, drone, retune = FakeRunner(), FakeDrone(reachable=False), FakeRetune(ok=True)
     coord = LinkCoordinator(store, lambda cfg: None, runner, drone, retune=retune)
     res = coord.apply_link("gs")
-    assert res["mode"] == "live"          # txpower is pure iw, no restart
-    assert retune.calls[0]["txpower"] == 2200
+    assert res["mode"] == "live"          # rxpower is pure iw, no restart
+    assert retune.calls[0]["rxpower"] == 2200
     assert runner.restarts == 0
 
 
@@ -262,7 +262,7 @@ def test_structural_change_bounces():
     runner, drone, retune = FakeRunner(), FakeDrone(reachable=False), FakeRetune(ok=True)
     coord = LinkCoordinator(store, lambda cfg: None, runner, drone, retune=retune)
     res = coord.apply_link("gs")
-    assert res["mode"] == "bounce"        # not channel/width/txpower/region -> bounce
+    assert res["mode"] == "bounce"        # not channel/width/rxpower/region -> bounce
     assert retune.calls == []
     assert runner.restarts == 1
 
