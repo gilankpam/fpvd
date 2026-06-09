@@ -315,7 +315,12 @@ On the **applier**, the current drone schema adds `bitrate` (`minBitrateKbps`, `
 and `fec` (`baseRedundancyRatio`, `blocksPerFrame`, `kMin`, `kMax`) — the Phase-3a drone-local
 compute — and drops the obsolete `mavlinkEnable`.
 
-### Type 4 — parallel ceilings: **no cross-validation guard**
+**`tuning` stays opaque this session.** `controller.tuning` remains the untyped gs.yaml-shaped
+passthrough it is today (the curated keys overlay it). The live subset is now small enough that
+promoting the operator-facing knobs to typed `controller.*` fields — keeping an opaque escape
+hatch only for the deep `learned_prior` / `smoothing` internals — is a sensible **follow-up**,
+but out of scope here. Note: the `api.md` `tuning` table is stale (it documents deleted
+SNR/hysteresis/FEC keys) and should be rewritten to the live subset when that promotion happens.
 
 `adaptiveLink.controller` (operating envelope the brain selects within) and
 `adaptiveLink.applier.failsafe` (the GS-lost fallback) are **independent by design**. The
