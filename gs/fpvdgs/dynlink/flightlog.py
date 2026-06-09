@@ -1,6 +1,6 @@
 """Per-flight structured JSONL logger (Phase 4, spec §8).
 
-One file per dynamicLink session, one JSON record per selector tick.
+One file per adaptiveLink session, one JSON record per selector tick.
 GS-side, dependency-free. Size-capped + rotated. Pulled off-device for
 analysis by gs/tools/flightlog_analyze.py."""
 from __future__ import annotations
