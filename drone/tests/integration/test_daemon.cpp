@@ -869,3 +869,36 @@ TEST_CASE("apply: writes the system-stats OSD line when dynamic-link is off") {
 
     fs::remove_all(tmp);
 }
+
+TEST_CASE("status: radio block includes txpowerCurve and txpowerCurveSource") {
+    auto tmp = fs::temp_directory_path() / "fpvd-test-txpower-curve-status";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    auto st = fpvd::buildStatus(d);
+    REQUIRE(st["radio"].contains("txpowerCurve"));
+    CHECK(st["radio"]["txpowerCurve"].is_array());
+    CHECK(st["radio"]["txpowerCurve"].size() == 8);
+    REQUIRE(st["radio"].contains("txpowerCurveSource"));
+    CHECK(st["radio"]["txpowerCurveSource"].is_string());
+
+    // bootstrap(false) does not bring up the radio (radio_ stays unset), and the
+    // defaults carry a null override, so the resolver returns the conservative
+    // per-radio fallback curve.
+    CHECK(st["radio"]["txpowerCurve"] ==
+          nlohmann::json::array({22, 22, 22, 20, 19, 19, 19, 19}));
+    CHECK(st["radio"]["txpowerCurveSource"] == "fallback");
+
+    fs::remove_all(tmp);
+}

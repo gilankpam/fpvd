@@ -1,5 +1,6 @@
 #include "status.hpp"
 #include "dynlink/runtime_config.hpp"
+#include "dynlink/txpower_curve.hpp"
 #include <chrono>
 
 namespace fpvd {
@@ -80,6 +81,11 @@ nlohmann::json buildStatus(Daemon& d) {
         };
     }
 
+    auto rc = dynlink::resolveTxpowerCurve(d.effective().link.txpowerCurve,
+                                           d.radio().adapterId, d.radio().driver);
+    nlohmann::json curveJ = nlohmann::json::array();
+    for (int8_t v : rc.curve) curveJ.push_back(static_cast<int>(v));
+
     return {
         {"uptime", uptimeSec},
         {"version", d.version()},
@@ -89,7 +95,9 @@ nlohmann::json buildStatus(Daemon& d) {
             {"iface", d.radio().iface},
             {"adapterId", d.radio().adapterId.has_value()
                            ? nlohmann::json(d.radio().adapterId.value())
-                           : nlohmann::json(nullptr)}
+                           : nlohmann::json(nullptr)},
+            {"txpowerCurve", curveJ},
+            {"txpowerCurveSource", rc.source}
         }},
         {"beamforming", {
             {"requested", bf.requested},
