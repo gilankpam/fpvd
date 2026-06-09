@@ -6,7 +6,7 @@ from fpvdgs.dynlink.config_build import (
 def _block(**over):
     blk = {
         "enabled": True, "maxMcs": 5, "bandwidth": 20,
-        "txpower": {"min": 18, "max": 28}, "radioProfile": "m8812eu2",
+        "radioProfile": "m8812eu2",
         "droneAddr": None, "dronePort": 9999, "tuning": {},
     }
     blk.update(over)
@@ -17,8 +17,6 @@ def test_curated_keys_map_into_policy_config():
     cfg = build_policy_config(_block())
     assert cfg.gate.max_mcs == 5
     assert cfg.leading.bandwidth == 20
-    assert cfg.leading.tx_power_min_dBm == 18
-    assert cfg.leading.tx_power_max_dBm == 28
 
 
 def test_tuning_passthrough_overrides_defaults():
@@ -40,19 +38,39 @@ def test_build_aggregator_reads_tuning_smoothing():
 
 
 def test_make_dl_snapshot_defaults_drone_host_from_endpoint():
-    eff = {"dynamicLink": _block(droneAddr=None),
-           "drone": {"endpoint": "http://10.5.0.10:8080"}}
+    eff = {"link": {"width": 20},
+           "adaptiveLink": {"enabled": True, "controller": _block(droneAddr=None)},
+           "droneLink": {"endpoint": "http://10.5.0.10:8080"}}
     snap = make_dl_snapshot(eff)
     assert snap["droneAddr"] == "10.5.0.10"
     assert snap["dronePort"] == 9999
 
 
 def test_make_dl_snapshot_explicit_drone_addr_wins():
-    eff = {"dynamicLink": _block(droneAddr="10.5.0.99", dronePort=12345),
-           "drone": {"endpoint": "http://10.5.0.10:8080"}}
+    eff = {"link": {"width": 20},
+           "adaptiveLink": {"enabled": True,
+                            "controller": _block(droneAddr="10.5.0.99", dronePort=12345)},
+           "droneLink": {"endpoint": "http://10.5.0.10:8080"}}
     snap = make_dl_snapshot(eff)
     assert snap["droneAddr"] == "10.5.0.99"
     assert snap["dronePort"] == 12345
+
+
+def test_make_dl_snapshot_reads_adaptivelink_controller_and_dronelink():
+    from fpvdgs.dynlink.config_build import make_dl_snapshot
+    eff = {
+        "link": {"width": 40},
+        "droneLink": {"endpoint": "http://10.0.0.9:8080"},
+        "adaptiveLink": {"enabled": True,
+                         "controller": {"maxMcs": 6, "dronePort": 9999,
+                                        "radioProfile": "m8812eu2", "tuning": {}}},
+    }
+    snap = make_dl_snapshot(eff)
+    assert snap["maxMcs"] == 6
+    assert snap["droneAddr"] == "10.0.0.9"      # host parsed from droneLink.endpoint
+    assert snap["dronePort"] == 9999
+    assert snap["bandwidth"] == 40              # derived from link.width
+    assert snap["videoStreamId"] == "video"     # internal constant
 
 
 def test_gate_parses_probe_knobs():

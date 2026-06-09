@@ -1,6 +1,7 @@
 # gs/fpvdgs/dynlink/config_build.py
-"""Translate fpvd's `dynamicLink` config block into the policy/aggregator
-objects the lifted control core expects, and build the controller snapshot.
+"""Translate fpvd's `adaptiveLink.controller` config block into the
+policy/aggregator objects the lifted control core expects, and build the
+controller snapshot.
 
 The lifted `_build_policy_config(raw)` / `_build_aggregator(raw)` consume a
 dict shaped like the old gs.yaml. We construct that `raw` from the opaque
@@ -35,11 +36,6 @@ def _raw_from_block(block: dict) -> dict:
     gate = raw.setdefault("gate", {})
     if "bandwidth" in block:
         leading["bandwidth"] = int(block["bandwidth"])
-    tx = block.get("txpower") or {}
-    if "min" in tx:
-        leading["tx_power_min_dBm"] = float(tx["min"])
-    if "max" in tx:
-        leading["tx_power_max_dBm"] = float(tx["max"])
     if "maxMcs" in block:
         gate["max_mcs"] = int(block["maxMcs"])
     return raw
@@ -59,11 +55,17 @@ def resolve_profile(block: dict) -> RadioProfile:
 
 
 def make_dl_snapshot(effective: dict) -> dict:
-    """Self-contained snapshot the controller consumes. Resolves the drone
-    UDP target: explicit dynamicLink.droneAddr wins, else the host from
-    drone.endpoint; port defaults to 9999 (the fpvd drone's listener)."""
-    block = dict(effective.get("dynamicLink", {}))
-    endpoint = effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080")
+    """Self-contained snapshot the controller consumes. The controller block is
+    adaptiveLink.controller; bandwidth is derived from link.width; the drone UDP
+    target resolves from controller.droneAddr else the host of droneLink.endpoint."""
+    al = effective.get("adaptiveLink", {})
+    block = dict(al.get("controller", {}))
+    block["enabled"] = bool(al.get("enabled", False))
+    # bandwidth is the RF width — single source of truth is link.width (10/20 -> 20, 40 -> 40).
+    width = int(effective.get("link", {}).get("width", 20))
+    block["bandwidth"] = 40 if width == 40 else 20
+    block["videoStreamId"] = "video"
+    endpoint = effective.get("droneLink", {}).get("endpoint", "http://10.5.0.10:8080")
     host = urlparse(endpoint).hostname or "10.5.0.10"
     block["droneAddr"] = block.get("droneAddr") or host
     block["dronePort"] = int(block.get("dronePort") or 9999)
