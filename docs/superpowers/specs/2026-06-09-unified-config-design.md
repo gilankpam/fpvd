@@ -32,8 +32,10 @@ the single `/apply`.
   a dumb applier.
 - `/status` is **not** unified. Each daemon keeps reporting its own runtime; the GS `/status`
   carries a `drone` summary sub-block (see below).
-- No new control features. This is a config-surface refactor plus a handful of schema
-  clarifications that fall out of the merge.
+- Primarily a config-surface refactor. It also bundles one drone-side capability — making the
+  per-MCS TX power curve config-driven (per-radio default + operator override) and exposing it in
+  `/status.radio` (see [Drone per-MCS TX power curve](#drone-per-mcs-tx-power-curve)) — plus the
+  schema clarifications that fall out of the merge. No other new control features.
 
 ## Consumer-facing surface
 
@@ -79,14 +81,15 @@ Routing convention PixelPilot can rely on:
     "linkId": 7669206,
     "beamforming": { "enabled": false },
 
-    "gs": {                       // → GS  (the GS card)
+    "gs": {                       // → GS  (the GS = receiver station)
       "region": "US",
-      "txpower": 22,              // dBm, UPLINK (GS TX). 0..30 per radioProfile
+      "rxpower": 22,              // dBm, the GS card power. 0..30 per radioProfile
       "wlans": "auto"
     },
-    "drone": {                    // → DRONE  (the drone radio; stale when unreachable)
+    "drone": {                    // → DRONE  (the drone = transmitter station; stale when unreachable)
       "mcs": 3,
-      "rxpower": 25,              // dBm, DOWNLINK (drone TX). 0..30. adaptive-off baseline
+      "txpower": 25,              // dBm, static baseline (adaptive-off). 0..30 per radioProfile
+      "txpowerCurve": null,       // dBm[8] per-MCS curve (adaptive-on), or null => detected-radio default
       "fec": { "k": 8, "n": 12 },
       "stbc": false,
       "ldpc": false,
@@ -255,19 +258,23 @@ coordinator** lane: GS-local-first, push the changed shared keys to the drone wh
 to a drone you cannot reach, and the drone self-restores its own channel on reboot. No staging,
 no reconnect-push.
 
-### Type 2 — `link.txpower` collision → `txpower` / `rxpower`, both dBm
+### Type 2 — `link.txpower` collision → unit unification, named by station role
 
-The two `txpower` fields were independent per-side radios with different units. Split into:
+In a *flat* merge the two `txpower` fields would collide, but **Option C already disambiguates
+them structurally** (`link.gs.*` vs `link.drone.*`), so no rename is needed to resolve the
+collision. Both *are* TX power; we name them by **station role** for operator clarity:
 
-- `link.gs.txpower` — the **GS uplink** TX power (the GS card).
-- `link.drone.rxpower` — the **drone downlink** TX power (the power behind the video the GS
-  receives). *(Doc note: it is a TX setting on the drone, not a measured RSSI.)*
+- `link.gs.rxpower` — the **GS** card power (the GS is the *receiving* station — its job is to
+  receive the video downlink).
+- `link.drone.txpower` — the **drone** radio power, static baseline (the drone is the
+  *transmitting* station). Adaptive-off.
 
 Both in **dBm**, validated against the `radioProfile`'s `tx_power_min/max_dBm` (0–30 for
 BL-M8812EU2). This retires the legacy `1..63` driver-units representation and the `radio-tune.sh`
 `×50 / ×-100` scaling — the static drone txpower renders via the same `iw … set txpower fixed
-<dBm×100>` the adaptive path already uses. The static `rxpower` is the **adaptive-off baseline**;
-when adaptive link is on, the per-MCS curve drives it (19–29 dBm for this radio).
+<dBm×100>` the adaptive path already uses. When adaptive link is on, the per-MCS
+[`txpowerCurve`](#drone-per-mcs-tx-power-curve) drives the drone power instead of the static
+baseline.
 
 ### Type 3 — `dynamicLink` collision → `adaptiveLink.controller` / `.applier`
 
@@ -311,6 +318,52 @@ its purpose. No cross-check.
 independent fields**. Keeping them in sync is the operator's responsibility — no validate-equal,
 no unification.
 
+## Drone per-MCS TX power curve
+
+The drone's per-MCS TX power (the PA anti-overdrive curve, today hardcoded as `kTxPowerDbmByMcs`
+in `drone/src/dynlink/txpower_curve.hpp`) becomes **hardware-defaulted but operator-overridable**,
+and is surfaced in `/status`.
+
+### Config — `link.drone.txpowerCurve`
+
+An 8-element dBm array (MCS 0–7), or `null`. It reuses the codebase's `null = auto` convention
+(cf. `link.drone.wlanAdapter`):
+
+- `null` (the default in `defaults.json`) → use the **detected radio's built-in default curve**.
+- 8-element array → explicit operator override.
+
+**Resolution at boot/apply:** `override (if set) → detected-radio default → conservative fallback`.
+
+The drone keeps a **baked-in registry of per-radio default curves**, keyed by the radio it already
+detects (`adapterId` `0bda:8812` first, then `driver`), seeded with the current `m8812eu2` curve
+`{29,28,25,23,19,19,19,19}`. New radios are characterized by adding a registry entry; the curve
+stays overridable for any radio meanwhile. These per-radio defaults are **baked-in, not in
+`defaults.json`** (they are hardware-dependent — `defaults.json` just carries `null`).
+
+The resolved curve threads into `DlRuntimeConfig`, so `local_compute.cpp` (per-decision power)
+and the failsafe path (`controller.cpp` → `applySafe(txpowerDbmForMcs(failsafe.mcs))`) read it
+instead of the `constexpr` global.
+
+**Validation:** exactly 8 entries, each within the radio's `tx_power_min/max_dBm` (0–30).
+Monotonicity is *not* enforced — a custom or flat curve is allowed.
+
+### Status — `/status.radio.txpowerCurve`
+
+The drone `/status.radio` block gains the **effective resolved** curve plus its source, so the
+operator and the GS can read the drone's real per-MCS power (directly useful for the pending GS
+RSSI/EIRP-normalization work):
+
+```jsonc
+"radio": {
+  "driver": "88XXau", "iface": "wlan0", "adapterId": "0bda:8812",
+  "txpowerCurve": [29,28,25,23,19,19,19,19],   // effective (resolved)
+  "txpowerCurveSource": "m8812eu2"             // "override" | "<radio>" | "fallback"
+}
+```
+
+Per-bandwidth curves (separate 20/40 MHz tables) are **out of scope** — a single 8-element curve,
+as today.
+
 ## IDR relay — invisible infrastructure
 
 The IDR/keyframe relay (PixelPilot → drone encoder, replacing the standalone `socat`
@@ -345,6 +398,9 @@ Each daemon keeps its own `/status`. The GS `/status` extends its existing `dron
 (`reachable`, `dynamicLinkActive`, `hello`) into a summary digest of whatever drone runtime
 PixelPilot's menu needs (e.g. applier running, drone `lastApply.ok`), so PP reads a single
 `/status` without resurrecting an `/air`-style proxy.
+
+The drone `/status.radio` block also gains the resolved per-MCS `txpowerCurve` (+ source) — see
+[Drone per-MCS TX power curve](#drone-per-mcs-tx-power-curve).
 
 ## Naming nit
 
