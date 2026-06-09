@@ -96,6 +96,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/unit/test_dl_fec.cpp
         tests/unit/test_dl_local_compute.cpp
         tests/unit/test_dl_txpower_curve.cpp
+        tests/unit/test_dl_txpower_resolve.cpp
         tests/integration/test_process.cpp
         tests/integration/test_supervisor.cpp
         tests/integration/test_orchestrator.cpp
