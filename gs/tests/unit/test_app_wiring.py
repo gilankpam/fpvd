@@ -25,7 +25,7 @@ class _Fake:
 
 def _app(pp_enabled, log=None):
     store = ConfigStore({"pixelpilot": {"enabled": pp_enabled},
-                         "adaptiveLink": {"enabled": False}})
+                         "dynamicLink": {"enabled": False}})
     runner = _Fake("runner", log)
     http = _Fake("http", log)
     dynlink = _Fake("dynlink", log)

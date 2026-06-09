@@ -40,15 +40,15 @@ def test_build_status_includes_dynamic_link_section():
           "drone": {"reachable": True, "dynamicLinkActive": True}}
     out = status.build_status("0.1.0", {"running": True}, {}, {"reachable": True},
                               dynamic_link=dl)
-    assert out["adaptiveLink"]["running"] is True
-    assert out["adaptiveLink"]["decision"]["mcs"] == 4
-    assert out["adaptiveLink"]["drone"]["dynamicLinkActive"] is True
+    assert out["dynamicLink"]["running"] is True
+    assert out["dynamicLink"]["decision"]["mcs"] == 4
+    assert out["dynamicLink"]["drone"]["dynamicLinkActive"] is True
 
 
 def test_build_status_omits_dynamic_link_when_absent():
     from fpvdgs import status
     out = status.build_status("0.1.0", {"running": True}, {}, {"reachable": True})
-    assert "adaptiveLink" not in out
+    assert "dynamicLink" not in out
 
 
 def _runner_state():

@@ -116,7 +116,7 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
         "link": {"channel": 132, "width": 40, "region": "US"},
         "wfb": {"profile": "gs", "raw": {}},
         "droneLink": {"endpoint": "http://127.0.0.1:1"},
-        "adaptiveLink": {"enabled": False,
+        "dynamicLink": {"enabled": False,
                          "controller": {"maxMcs": 5,
                                         "radioProfile": "m8812eu2",
                                         "droneAddr": None,
@@ -128,9 +128,9 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
                                runner_cmd=["true"])
     code, body = app.api.handle("GET", "/status", {}, b"")
     assert code == 200
-    assert "adaptiveLink" in body
+    assert "dynamicLink" in body
     assert "pixelpilot" in body
-    assert body["adaptiveLink"]["running"] is False
+    assert body["dynamicLink"]["running"] is False
 
 
 def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
@@ -167,7 +167,7 @@ def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
         "wfb": {"profile": "gs", "raw": {}},
         "droneLink": {"endpoint": "http://127.0.0.1:1"},
         "pixelpilot": {"enabled": False},
-        "adaptiveLink": {"enabled": True,
+        "dynamicLink": {"enabled": True,
                          "controller": {"maxMcs": 5,
                                          "radioProfile": "m8812eu2",
                                          "dronePort": 9999,

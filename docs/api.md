@@ -616,10 +616,10 @@ An object whose keys are service names and whose values are service definitions.
 
 The adaptive link has two halves. The drone runs the **applier** — the [`dynamicLink`](#dynamiclink--adaptive-link-controller) block in the Config schema above — which receives decisions and applies them to the radio and encoder. The **controller** (the brain that *decides*) runs on the ground station as a separate daemon, `fpvdgs`, with its own HTTP+JSON API on the GS (same shapes as this document: `GET`/`PATCH /config`, `POST /apply`, `GET /status`, plus an opaque `/air/*` proxy to the drone fpvd).
 
-The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the dual-gate MCS selector + trailing FEC/bitrate loop, and emits decision packets over UDP to the drone applier (`droneAddr:dronePort`, default `:9999`). It is configured by the GS daemon's own `adaptiveLink` block — top-level `enabled` plus a nested `controller` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
+The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the dual-gate MCS selector + trailing FEC/bitrate loop, and emits decision packets over UDP to the drone applier (`droneAddr:dronePort`, default `:9999`). It is configured by the GS daemon's own `dynamicLink` block — top-level `enabled` plus a nested `controller` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
 
 ```jsonc
-"adaptiveLink": {
+"dynamicLink": {
   "enabled": false,              // boolean — arm the in-process control loop
   "controller": {
     "maxMcs": 5,                 // integer, 0..7 — upper MCS bound the controller may select
@@ -642,7 +642,7 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
 
 The RF bandwidth the controller targets is **derived from `link.width`** — it is no longer a separate `bandwidth` field. The video rx stream is selected by an internal constant (`videoStreamId = "video"`), no longer a config field. The IDR-token relay config (`idrForward`/`idrPort`) has been removed from the config — the relay is becoming always-on GS infra.
 
-**Operating model.** Enabling, disabling, or tuning is applied at runtime via `PATCH /config` + `POST /apply` with **no wfb restart** — the GS runner is never bounced for `adaptiveLink`-only changes. The controller reads wfb-ng stats on `:8103` (fpvd renders `log_interval = 100` so the feed is 10 Hz). The drone side must be armed **independently** (its own `dynamicLink.enabled`, reachable via the GS `/air` proxy); `GET /status.adaptiveLink` reports the controller state plus a `drone` sub-object (`reachable`, `dynamicLinkActive`, `hello`) so a GS-armed/drone-not mismatch is visible.
+**Operating model.** Enabling, disabling, or tuning is applied at runtime via `PATCH /config` + `POST /apply` with **no wfb restart** — the GS runner is never bounced for `dynamicLink`-only changes. The controller reads wfb-ng stats on `:8103` (fpvd renders `log_interval = 100` so the feed is 10 Hz). The drone side must be armed **independently** (its own `dynamicLink.enabled`, reachable via the GS `/air` proxy); `GET /status.dynamicLink` reports the controller state plus a `drone` sub-object (`reachable`, `dynamicLinkActive`, `hello`) so a GS-armed/drone-not mismatch is visible.
 
 #### Tuning passthrough
 
@@ -893,7 +893,7 @@ Binds `0.0.0.0:8080` (same posture as the drone). Source of truth: `/etc/fpvd/{d
 
 | | Drone | Ground station |
 |--|--|--|
-| Config schema | link + video + image + telemetry + recording + dynamicLink + services | **radio-only**: `link` + `wfb` + `droneLink` (+ `adaptiveLink`, `pixelpilot`) |
+| Config schema | link + video + image + telemetry + recording + dynamicLink + services | **radio-only**: `link` + `wfb` + `droneLink` (+ `dynamicLink`, `pixelpilot`) |
 | `link` fields | channel, width, txpower, **mcs, fec, stbc, ldpc**, mtu, … | channel, width, rxpower, region, linkId, beamforming, wlans — **no mcs/fec/stbc/ldpc** (drone-owned for video; GS uplink uses wfb-ng defaults) |
 | `GET /healthz` body | `{}` | `{"ok": true}` |
 | Error body | `{error, message, details}` | `{"error": "<message>"}` |
@@ -1047,7 +1047,7 @@ curl -X PATCH http://127.0.0.1:8080/air/config \            # drone-only config
 | `wfb.raw` | object | `{}` | passthrough escape hatch |
 | `droneLink.endpoint` | string | `http://10.5.0.10:8080` | drone fpvd base URL |
 
-There is intentionally **no** `mcs`/`fec`/`ldpc`/`stbc` on the GS: video downlink FEC/modulation is auto-detected by `wfb_rx` (drone-owned), and the GS uplink TX uses wfb-ng's defaults. There are also no `video`/`image`/`telemetry`/`recording`/`services` sections — those are drone-only. (`adaptiveLink` and `pixelpilot` are GS-side sections — see below and the GS adaptive-link section above.)
+There is intentionally **no** `mcs`/`fec`/`ldpc`/`stbc` on the GS: video downlink FEC/modulation is auto-detected by `wfb_rx` (drone-owned), and the GS uplink TX uses wfb-ng's defaults. There are also no `video`/`image`/`telemetry`/`recording`/`services` sections — those are drone-only. (`dynamicLink` and `pixelpilot` are GS-side sections — see below and the GS adaptive-link section above.)
 
 ## PixelPilot managed service
 

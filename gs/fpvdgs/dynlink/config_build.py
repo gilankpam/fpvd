@@ -1,5 +1,5 @@
 # gs/fpvdgs/dynlink/config_build.py
-"""Translate fpvd's `adaptiveLink.controller` config block into the
+"""Translate fpvd's `dynamicLink.controller` config block into the
 policy/aggregator objects the lifted control core expects, and build the
 controller snapshot.
 
@@ -56,11 +56,11 @@ def resolve_profile(block: dict) -> RadioProfile:
 
 def make_dl_snapshot(effective: dict) -> dict:
     """Self-contained snapshot the controller consumes. The controller block is
-    adaptiveLink.controller; bandwidth is derived from link.width; the drone UDP
+    dynamicLink.controller; bandwidth is derived from link.width; the drone UDP
     target resolves from controller.droneAddr else the host of droneLink.endpoint."""
-    al = effective.get("adaptiveLink", {})
-    block = dict(al.get("controller", {}))
-    block["enabled"] = bool(al.get("enabled", False))
+    dl = effective.get("dynamicLink", {})
+    block = dict(dl.get("controller", {}))
+    block["enabled"] = bool(dl.get("enabled", False))
     # bandwidth is the RF width — single source of truth is link.width (10/20 -> 20, 40 -> 40).
     width = int(effective.get("link", {}).get("width", 20))
     block["bandwidth"] = 40 if width == 40 else 20

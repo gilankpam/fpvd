@@ -3,7 +3,7 @@
 from pathlib import Path
 
 LINK_KEYS = {"channel", "width", "rxpower", "region", "linkId", "beamforming", "wlans"}
-CONFIG_TOP_KEYS = {"wfb", "droneLink", "adaptiveLink", "pixelpilot"}   # link is excluded on purpose
+CONFIG_TOP_KEYS = {"wfb", "droneLink", "dynamicLink", "pixelpilot"}   # link is excluded on purpose
 DL_PROFILES_DIR = Path(__file__).resolve().parent / "dynlink" / "profiles"
 ALL_TOP_KEYS = {"link"} | CONFIG_TOP_KEYS
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
@@ -47,9 +47,9 @@ def validate_effective(cfg: dict) -> None:
     bf = link.get("beamforming")
     if bf is not None:
         _validate_beamforming(bf)
-    al = cfg.get("adaptiveLink")
-    if al is not None:
-        _validate_adaptive_link(al)
+    dl = cfg.get("dynamicLink")
+    if dl is not None:
+        _validate_dynamic_link(dl)
     pp = cfg.get("pixelpilot")
     if pp is not None:
         _validate_pixelpilot(pp)
@@ -65,21 +65,21 @@ def _validate_beamforming(bf: dict) -> None:
         raise SchemaError("link.beamforming.enabled must be a bool")
 
 
-def _validate_adaptive_link(al: dict) -> None:
-    if not isinstance(al.get("enabled", False), bool):
-        raise SchemaError("adaptiveLink.enabled must be a bool")
-    ctl = al.get("controller", {}) or {}
+def _validate_dynamic_link(dl: dict) -> None:
+    if not isinstance(dl.get("enabled", False), bool):
+        raise SchemaError("dynamicLink.enabled must be a bool")
+    ctl = dl.get("controller", {}) or {}
     max_mcs = ctl.get("maxMcs", 5)
     if not isinstance(max_mcs, int) or not 0 <= max_mcs <= 7:
-        raise SchemaError("adaptiveLink.controller.maxMcs must be an int in 0..7")
+        raise SchemaError("dynamicLink.controller.maxMcs must be an int in 0..7")
     port = ctl.get("dronePort", 9999)
     if not isinstance(port, int) or not 1 <= port <= 65535:
-        raise SchemaError("adaptiveLink.controller.dronePort must be an int in 1..65535")
+        raise SchemaError("dynamicLink.controller.dronePort must be an int in 1..65535")
     profile = ctl.get("radioProfile", "m8812eu2")
     if not (DL_PROFILES_DIR / f"{profile}.json").is_file():
         available = sorted(p.stem for p in DL_PROFILES_DIR.glob("*.json"))
         raise SchemaError(
-            f"adaptiveLink.controller.radioProfile {profile!r} not found; available: {available}")
+            f"dynamicLink.controller.radioProfile {profile!r} not found; available: {available}")
 
 
 def _validate_pixelpilot(pp: dict) -> None:

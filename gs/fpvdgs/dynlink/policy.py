@@ -508,7 +508,7 @@ class Policy:
 
     def close(self) -> None:
         """Flush the learned prior + close the flight log. Called by the
-        controller when the adaptiveLink loop tears down."""
+        controller when the dynamicLink loop tears down."""
         if self.learned_prior is not None:
             self.learned_prior.flush()
         self.flightlog.close()

@@ -39,7 +39,7 @@ def test_build_aggregator_reads_tuning_smoothing():
 
 def test_make_dl_snapshot_defaults_drone_host_from_endpoint():
     eff = {"link": {"width": 20},
-           "adaptiveLink": {"enabled": True, "controller": _block(droneAddr=None)},
+           "dynamicLink": {"enabled": True, "controller": _block(droneAddr=None)},
            "droneLink": {"endpoint": "http://10.5.0.10:8080"}}
     snap = make_dl_snapshot(eff)
     assert snap["droneAddr"] == "10.5.0.10"
@@ -48,7 +48,7 @@ def test_make_dl_snapshot_defaults_drone_host_from_endpoint():
 
 def test_make_dl_snapshot_explicit_drone_addr_wins():
     eff = {"link": {"width": 20},
-           "adaptiveLink": {"enabled": True,
+           "dynamicLink": {"enabled": True,
                             "controller": _block(droneAddr="10.5.0.99", dronePort=12345)},
            "droneLink": {"endpoint": "http://10.5.0.10:8080"}}
     snap = make_dl_snapshot(eff)
@@ -56,12 +56,12 @@ def test_make_dl_snapshot_explicit_drone_addr_wins():
     assert snap["dronePort"] == 12345
 
 
-def test_make_dl_snapshot_reads_adaptivelink_controller_and_dronelink():
+def test_make_dl_snapshot_reads_dynamiclink_controller_and_dronelink():
     from fpvdgs.dynlink.config_build import make_dl_snapshot
     eff = {
         "link": {"width": 40},
         "droneLink": {"endpoint": "http://10.0.0.9:8080"},
-        "adaptiveLink": {"enabled": True,
+        "dynamicLink": {"enabled": True,
                          "controller": {"maxMcs": 6, "dronePort": 9999,
                                         "radioProfile": "m8812eu2", "tuning": {}}},
     }

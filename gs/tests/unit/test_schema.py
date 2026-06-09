@@ -56,20 +56,20 @@ def test_validate_effective_ok():
 
 def _eff(**ctl):
     base = {"link": {"channel": 132, "width": 40, "region": "US"},
-            "adaptiveLink": {"enabled": False,
+            "dynamicLink": {"enabled": False,
                              "controller": {"maxMcs": 5,
                                             "radioProfile": "m8812eu2",
                                             "dronePort": 9999,
                                             "tuning": {}}}}
-    base["adaptiveLink"]["controller"].update(ctl)
+    base["dynamicLink"]["controller"].update(ctl)
     return base
 
 
-def test_config_patch_allows_adaptivelink():
-    schema.validate_config_patch({"adaptiveLink": {"enabled": True}})  # no raise
+def test_config_patch_allows_dynamiclink():
+    schema.validate_config_patch({"dynamicLink": {"enabled": True}})  # no raise
 
 
-def test_effective_accepts_valid_adaptivelink():
+def test_effective_accepts_valid_dynamiclink():
     schema.validate_effective(_eff())  # no raise
 
 
@@ -92,9 +92,9 @@ def test_effective_rejects_bad_drone_port():
         schema.validate_effective(_eff(dronePort=70000))
 
 
-def test_config_patch_accepts_adaptivelink_and_dronelink():
+def test_config_patch_accepts_dynamiclink_and_dronelink():
     from fpvdgs import schema
-    schema.validate_config_patch({"adaptiveLink": {"enabled": True}})
+    schema.validate_config_patch({"dynamicLink": {"enabled": True}})
     schema.validate_config_patch({"droneLink": {"endpoint": "http://x:8080"}})
 
 
@@ -102,7 +102,7 @@ def test_config_patch_rejects_old_keys():
     import pytest
     from fpvdgs import schema
     with pytest.raises(schema.SchemaError):
-        schema.validate_config_patch({"dynamicLink": {"enabled": True}})
+        schema.validate_config_patch({"adaptiveLink": {"enabled": True}})
     with pytest.raises(schema.SchemaError):
         schema.validate_config_patch({"drone": {"endpoint": "x"}})
 
@@ -115,19 +115,19 @@ def test_link_patch_accepts_rxpower_not_txpower():
         schema.validate_link_patch({"link": {"txpower": 20}})
 
 
-def test_validate_adaptivelink_controller():
+def test_validate_dynamiclink_controller():
     import pytest
     from fpvdgs import schema
     schema.validate_effective({
         "link": {"channel": 132, "region": "US", "width": 40},
-        "adaptiveLink": {"enabled": True,
+        "dynamicLink": {"enabled": True,
                          "controller": {"maxMcs": 5, "radioProfile": "m8812eu2",
                                         "dronePort": 9999}},
     })
     with pytest.raises(schema.SchemaError):
         schema.validate_effective({
             "link": {"channel": 132, "region": "US", "width": 40},
-            "adaptiveLink": {"controller": {"maxMcs": 9}},   # out of 0..7
+            "dynamicLink": {"controller": {"maxMcs": 9}},   # out of 0..7
         })
 
 

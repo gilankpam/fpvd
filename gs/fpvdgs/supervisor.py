@@ -51,10 +51,10 @@ class App:
         if (self.pixelpilot is not None
                 and self.store.effective().get("pixelpilot", {}).get("enabled", True)):
             self.pixelpilot.start()
-        if self.store.effective().get("adaptiveLink", {}).get("enabled"):
+        if self.store.effective().get("dynamicLink", {}).get("enabled"):
             self.dynlink.start()
         if (self.probe is not None
-                and self.store.effective().get("adaptiveLink", {}).get("enabled")):
+                and self.store.effective().get("dynamicLink", {}).get("enabled")):
             self.probe.start()
 
     def serve_forever(self):
@@ -123,7 +123,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
     _warned = {"adapter": False}
 
     def _dynamic_link_status(reachable):
-        eff_dl = store.effective().get("adaptiveLink", {})
+        eff_dl = store.effective().get("dynamicLink", {})
         st = dynlink.status()
         st["enabled"] = bool(eff_dl.get("enabled"))
         drone_active = None
@@ -152,7 +152,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         return {"enabled": True, **pixelpilot.state()}
 
     def _probe_status():
-        if not store.effective().get("adaptiveLink", {}).get("enabled"):
+        if not store.effective().get("dynamicLink", {}).get("enabled"):
             return {"enabled": False, "running": False}
         return {"enabled": True, **probe_ctrl.status()}
 

@@ -151,7 +151,7 @@ def test_apply_rolls_back_on_runner_failure(tmp_path):
     assert store.effective().get("wfb", {}).get("mavlink", {}).get("peer") != "connect://127.0.0.1:9999"
 
 
-# --- adaptiveLink apply routing ---
+# --- dynamicLink apply routing ---
 class _FakeController:
     def __init__(self):
         self.calls = []
@@ -181,7 +181,7 @@ def _api_with_dynlink(tmp_path):
     defaults = {"link": {"channel": 132, "width": 40, "region": "US"},
                 "wfb": {"profile": "gs", "raw": {}},
                 "droneLink": {"endpoint": "http://10.5.0.10:8080"},
-                "adaptiveLink": {"enabled": False,
+                "dynamicLink": {"enabled": False,
                                  "controller": {"maxMcs": 5,
                                                 "radioProfile": "m8812eu2",
                                                 "droneAddr": None,
@@ -198,19 +198,19 @@ def _api_with_dynlink(tmp_path):
 
 def test_enable_dynamiclink_starts_controller_without_bouncing_runner(tmp_path):
     api, store, ctrl, runner = _api_with_dynlink(tmp_path)
-    store.patch({"adaptiveLink": {"enabled": True}})
+    store.patch({"dynamicLink": {"enabled": True}})
     code, body = api.handle("POST", "/apply", {}, b"")
     assert code == 200 and body["applied"] is True
     assert ("start", None) in ctrl.calls
     assert runner.restarts == 0          # adaptive-link-only change: no bounce
-    assert store.effective()["adaptiveLink"]["enabled"] is True
+    assert store.effective()["dynamicLink"]["enabled"] is True
 
 
 def test_disable_dynamiclink_stops_controller(tmp_path):
     api, store, ctrl, runner = _api_with_dynlink(tmp_path)
-    store.patch({"adaptiveLink": {"enabled": True}})
+    store.patch({"dynamicLink": {"enabled": True}})
     api.handle("POST", "/apply", {}, b"")
-    store.patch({"adaptiveLink": {"enabled": False}})
+    store.patch({"dynamicLink": {"enabled": False}})
     api.handle("POST", "/apply", {}, b"")
     assert ("stop", None) in ctrl.calls
     assert runner.restarts == 0
@@ -218,9 +218,9 @@ def test_disable_dynamiclink_stops_controller(tmp_path):
 
 def test_tuning_change_while_enabled_calls_set_config(tmp_path):
     api, store, ctrl, runner = _api_with_dynlink(tmp_path)
-    store.patch({"adaptiveLink": {"enabled": True}})
+    store.patch({"dynamicLink": {"enabled": True}})
     api.handle("POST", "/apply", {}, b"")
-    store.patch({"adaptiveLink": {"controller": {"maxMcs": 3}}})
+    store.patch({"dynamicLink": {"controller": {"maxMcs": 3}}})
     api.handle("POST", "/apply", {}, b"")
     assert any(c[0] == "set_config" for c in ctrl.calls)
     assert runner.restarts == 0
@@ -231,7 +231,7 @@ def test_wfb_change_bounces_runner_and_leaves_controller_alone(tmp_path):
     store.patch({"wfb": {"raw": {"common": {"foo": 1}}}})
     code, _ = api.handle("POST", "/apply", {}, b"")
     assert code == 200
-    assert runner.restarts == 1          # non-adaptiveLink change: bounce
+    assert runner.restarts == 1          # non-dynamicLink change: bounce
     assert ctrl.calls == []              # controller untouched (stayed disabled)
 
 
@@ -321,7 +321,7 @@ def test_patch_config_accepts_pixelpilot(tmp_path):
     assert store.pending()["pixelpilot"]["videoScale"] == 1.5
 
 
-# --- probe lifecycle rides the adaptiveLink transition (no probe config) ---
+# --- probe lifecycle rides the dynamicLink transition (no probe config) ---
 class _FakeProbe:
     def __init__(self): self.started = False; self.cfgs = []
     def start(self): self.started = True
@@ -340,7 +340,7 @@ def _api_with_dl_and_probe(tmp_path):
                          "linkId": 7669206, "wlans": ["wlan0"]},
                 "wfb": {"profile": "gs", "raw": {}},
                 "droneLink": {"endpoint": "http://10.5.0.10:8080"},
-                "adaptiveLink": {"enabled": False,
+                "dynamicLink": {"enabled": False,
                                  "controller": {"maxMcs": 5,
                                                 "radioProfile": "m8812eu2",
                                                 "droneAddr": None,
@@ -358,7 +358,7 @@ def _api_with_dl_and_probe(tmp_path):
 
 def test_enable_dynamiclink_starts_probe(tmp_path):
     api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path)
-    store.patch({"adaptiveLink": {"enabled": True}})
+    store.patch({"dynamicLink": {"enabled": True}})
     code, _ = api.handle("POST", "/apply", {}, b"")
     assert code == 200
     assert ("start", None) in ctrl.calls and probe.started is True
@@ -367,9 +367,9 @@ def test_enable_dynamiclink_starts_probe(tmp_path):
 
 def test_disable_dynamiclink_stops_probe(tmp_path):
     api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path)
-    store.patch({"adaptiveLink": {"enabled": True}})
+    store.patch({"dynamicLink": {"enabled": True}})
     api.handle("POST", "/apply", {}, b"")
-    store.patch({"adaptiveLink": {"enabled": False}})
+    store.patch({"dynamicLink": {"enabled": False}})
     code, _ = api.handle("POST", "/apply", {}, b"")
     assert code == 200
     assert probe.started is False and runner.restarts == 0
