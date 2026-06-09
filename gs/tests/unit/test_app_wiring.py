@@ -62,3 +62,26 @@ def test_app_shutdown_order_pixelpilot_before_runner():
     # pixelpilot consumes wfb's video, so it must stop before the wfb runner
     events = [name for name, event in log if event == "shutdown"]
     assert events.index("pp") < events.index("runner")
+
+
+def test_link_coordinator_has_beamforming_wired(tmp_path, monkeypatch):
+    """build_app must wire a BeamformingController + wlans_resolver into the
+    coordinator so /link/apply can arm the GS beamformee."""
+    import fpvdgs.supervisor as sup
+    from fpvdgs.beamforming import BeamformingController
+
+    monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
+    monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
+
+    # Explicit wlans so every resolve_wlans() (supervisor AND probe.config_build)
+    # short-circuits without shelling out to `wfb-nics`.
+    defaults = tmp_path / "defaults.json"
+    defaults.write_text('{"link": {"region": "US", "channel": 132, "width": 20, '
+                        '"wlans": ["wlan0"]}}')
+    overlay = tmp_path / "config.json"
+    overlay.write_text("{}")
+
+    app = sup.build_app(str(defaults), str(overlay), str(tmp_path / "out.cfg"),
+                        "127.0.0.1", 0, runner_cmd=["true"])
+    assert isinstance(app.api.link.beamforming, BeamformingController)
+    assert app.api.link.wlans_resolver is not None

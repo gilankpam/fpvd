@@ -45,12 +45,25 @@ def validate_effective(cfg: dict) -> None:
         raise SchemaError("link.region is required")
     if not link.get("channel"):
         raise SchemaError("link.channel is required")
+    bf = link.get("beamforming")
+    if bf is not None:
+        _validate_beamforming(bf)
     dl = cfg.get("dynamicLink")
     if dl is not None:
         _validate_dynamic_link(dl)
     pp = cfg.get("pixelpilot")
     if pp is not None:
         _validate_pixelpilot(pp)
+
+
+def _validate_beamforming(bf: dict) -> None:
+    if not isinstance(bf, dict):
+        raise SchemaError("link.beamforming must be an object")
+    unknown = set(bf) - {"enabled"}
+    if unknown:
+        raise SchemaError(f"unknown link.beamforming keys: {sorted(unknown)}")
+    if not isinstance(bf.get("enabled", False), bool):
+        raise SchemaError("link.beamforming.enabled must be a bool")
 
 
 def _validate_dynamic_link(dl: dict) -> None:

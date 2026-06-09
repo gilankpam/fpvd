@@ -278,3 +278,192 @@ def test_live_retune_failure_falls_back_to_bounce():
     assert res["mode"] == "bounce"
     assert res["gsApplied"] is True
     assert store.effective()["link"]["channel"] == 100
+
+
+# --- beamforming through /link/apply ----------------------------------------
+
+class FakeBf:
+    """Stub beamformee controller for coordinator tests."""
+    def __init__(self, supported=True, gs_mac="84:fc:14:6c:36:e6"):
+        self._supported = supported
+        self._gs_mac = gs_mac
+        self.calls = []          # records (enabled, iface, peer)
+        self._armed = False
+
+    def supported(self, iface):
+        return self._supported
+
+    def local_mac(self, iface):
+        return self._gs_mac
+
+    def reconcile(self, enabled, iface, peer):
+        self.calls.append((enabled, iface, peer))
+        self._armed = bool(enabled)
+        return {"state": "active" if enabled else "disabled",
+                "iface": iface, "peerMac": peer, "localMac": self._gs_mac,
+                "requested": bool(enabled), "reason": ""}
+
+    def status(self):
+        return {"state": "active" if self._armed else "disabled"}
+
+
+class BfDrone(FakeDrone):
+    """FakeDrone that also answers GET /status with a drone card MAC."""
+    def __init__(self, reachable=True, drone_mac="00:c0:ca:dd:ee:ff"):
+        super().__init__(reachable=reachable)
+        self._drone_mac = drone_mac
+
+    def get_status(self):
+        return {"beamforming": {"localMac": self._drone_mac}}
+
+
+def _bf_store():
+    return ConfigStore({"link": {"channel": 132, "width": 40, "region": "US"}})
+
+
+def _bf_coord(store, runner, drone, bf, primary="wlan0"):
+    return LinkCoordinator(store, lambda cfg: None, runner, drone,
+                           beamforming=bf, wlans_resolver=lambda cfg: [primary])
+
+
+def test_bf_enable_hard_rejects_when_unsupported():
+    store = _bf_store()
+    store.patch({"link": {"beamforming": {"enabled": True}}})
+    coord = _bf_coord(store, FakeRunner(), BfDrone(), FakeBf(supported=False))
+    with pytest.raises(schema.SchemaError):
+        coord.apply_link("both")
+    assert store.effective()["link"].get("beamforming") in (None, {})  # not committed
+
+
+def test_bf_enable_pushes_transformed_mac_and_arms_gs():
+    store = _bf_store()
+    store.patch({"link": {"beamforming": {"enabled": True}}})
+    runner = FakeRunner()
+    drone = BfDrone(drone_mac="00:c0:ca:dd:ee:ff")
+    bf = FakeBf(gs_mac="84:fc:14:6c:36:e6")
+    res = _bf_coord(store, runner, drone, bf).apply_link("both")
+    # Drone receives the GS MAC as its remoteMac (transformed, not echoed).
+    assert drone.patched == {"link": {"beamforming": {"enabled": True,
+                                                      "remoteMac": "84:fc:14:6c:36:e6"}}}
+    assert drone.applied is True
+    # GS armed to respond to the drone's MAC.
+    assert bf.calls == [(True, "wlan0", "00:c0:ca:dd:ee:ff")]
+    # BF-only change must NOT bounce the pipeline.
+    assert runner.restarts == 0
+    assert res["mode"] == "none"
+    assert res["beamforming"]["state"] == "active"
+    assert store.effective()["link"]["beamforming"]["enabled"] is True
+
+
+def test_bf_only_change_does_not_bounce_or_retune():
+    store = _bf_store()
+    store.patch({"link": {"beamforming": {"enabled": True}}})
+    runner, retune = FakeRunner(), FakeRetune(ok=True)
+    coord = LinkCoordinator(store, lambda cfg: None, runner, BfDrone(),
+                            retune=retune, beamforming=FakeBf(),
+                            wlans_resolver=lambda cfg: ["wlan0"])
+    coord.apply_link("both")
+    assert runner.restarts == 0
+    assert retune.calls == []          # no RF action for a BF-only change
+
+
+def test_bf_enable_drone_unreachable_reports_pending_still_applies_gs():
+    store = _bf_store()
+    store.patch({"link": {"beamforming": {"enabled": True}}})
+    runner, bf = FakeRunner(), FakeBf()
+    res = _bf_coord(store, runner, BfDrone(reachable=False), bf).apply_link("both")
+    assert bf.calls == []                       # can't arm without the drone MAC
+    assert res["beamforming"]["state"] == "pending"
+    assert res["droneApplied"] is False
+    assert store.effective()["link"]["beamforming"]["enabled"] is True  # intent persists
+
+
+def test_bf_disable_resets_gs():
+    store = ConfigStore({"link": {"channel": 132, "width": 40, "region": "US",
+                                  "beamforming": {"enabled": True}}})
+    store.patch({"link": {"beamforming": {"enabled": False}}})
+    runner, bf = FakeRunner(), FakeBf()
+    res = _bf_coord(store, runner, BfDrone(), bf).apply_link("both")
+    assert bf.calls == [(False, "wlan0", "")]
+    assert res["beamforming"]["state"] == "disabled"
+    assert runner.restarts == 0
+
+
+def test_channel_plus_bf_change_retunes_live_without_bf_bounce():
+    store = ConfigStore({"link": {"channel": 132, "width": 40, "region": "US"}})
+    store.patch({"link": {"channel": 100, "beamforming": {"enabled": True}}})
+    runner, retune, bf = FakeRunner(), FakeRetune(ok=True), FakeBf()
+    coord = LinkCoordinator(store, lambda cfg: None, runner, BfDrone(),
+                            retune=retune, beamforming=bf,
+                            wlans_resolver=lambda cfg: ["wlan0"])
+    res = coord.apply_link("both")
+    assert res["mode"] == "live"        # channel still live-retunes; BF doesn't force a bounce
+    assert retune.calls[0]["channel"] == 100
+    assert runner.restarts == 0
+    assert bf.calls == [(True, "wlan0", "00:c0:ca:dd:ee:ff")]
+
+
+def test_bf_enable_gs_scope_pending_no_drone_contact():
+    # apply_to="gs": the drone is never contacted, so the GS can't learn the
+    # drone MAC -> BF reports pending (NOT a hard-reject), GS still applies and
+    # the intent commits. supported() is True so the hard-reject doesn't fire.
+    store = _bf_store()
+    store.patch({"link": {"beamforming": {"enabled": True}}})
+    runner, drone, bf = FakeRunner(), BfDrone(reachable=True), FakeBf()
+    res = _bf_coord(store, runner, drone, bf).apply_link("gs")
+    assert drone.patched is None          # drone untouched on gs-scope
+    assert bf.calls == []                 # not armed (no drone MAC)
+    assert res["beamforming"]["state"] == "pending"
+    assert res["droneApplied"] is False
+    assert res["mode"] == "none"
+    assert store.effective()["link"]["beamforming"]["enabled"] is True
+
+
+class StagedBfDrone(FakeDrone):
+    """Realistic drone: /status.beamforming.localMac is empty UNTIL BF is enabled
+    via a pushed patch_config (mirrors the real drone, which only resolves its
+    card MAC when its own BF reconciles enabled)."""
+    def __init__(self, reachable=True, drone_mac="00:c0:ca:dd:ee:ff"):
+        super().__init__(reachable=reachable)
+        self._drone_mac = drone_mac
+        self._bf_enabled = False
+
+    def patch_config(self, sparse):
+        bf = sparse.get("link", {}).get("beamforming")
+        if bf is not None:
+            self._bf_enabled = bool(bf.get("enabled"))
+        return super().patch_config(sparse)
+
+    def get_status(self):
+        return {"beamforming": {"localMac": self._drone_mac if self._bf_enabled else ""}}
+
+
+def test_bf_enable_arms_gs_in_single_apply_against_staged_drone():
+    # The drone reports localMac only AFTER its BF is enabled. The coordinator
+    # must push the enable FIRST, then read localMac, so the GS arms in ONE apply.
+    store = _bf_store()
+    store.patch({"link": {"beamforming": {"enabled": True}}})
+    runner, drone, bf = FakeRunner(), StagedBfDrone(), FakeBf()
+    res = _bf_coord(store, runner, drone, bf).apply_link("both")
+    assert bf.calls == [(True, "wlan0", "00:c0:ca:dd:ee:ff")]   # armed this apply
+    assert res["beamforming"]["state"] == "active"
+
+
+def test_rollback_reconciles_bf_to_last_good():
+    class FailingRunner:
+        def __init__(self):
+            self.restarts = 0
+        def restart(self):
+            self.restarts += 1
+            return False
+    # last-good: BF off. Apply enables BF + a structural wlans change (forces a
+    # bounce), and the bounce fails -> rollback. BF must reconcile back to off.
+    store = ConfigStore({"link": {"channel": 132, "width": 40, "region": "US"}})
+    store.patch({"link": {"beamforming": {"enabled": True}, "wlans": ["wlanX"]}})
+    runner, drone, bf = FailingRunner(), BfDrone(), FakeBf()
+    coord = LinkCoordinator(store, lambda cfg: None, runner, drone,
+                            beamforming=bf, wlans_resolver=lambda cfg: ["wlan0"])
+    res = coord.apply_link("both")
+    assert res["gsApplied"] is False
+    assert bf.calls[-1] == (False, "wlan0", "")    # disarmed back to last-good
+    assert store.effective()["link"].get("beamforming") in (None, {})  # not committed

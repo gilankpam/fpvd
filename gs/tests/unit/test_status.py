@@ -92,3 +92,18 @@ def test_adapter_id_mismatch_warns_once(caplog):
     assert adapter_matches_profile("bl-m8812eu2", "m8812eu2") is True
     assert adapter_matches_profile("bl-m8731bu4", "m8812eu2") is False
     assert adapter_matches_profile(None, "m8812eu2") is True   # unknown → no warn
+
+
+def test_status_omits_beamforming_when_not_given():
+    out = build_status("1.0", _runner_state(), {}, {"reachable": True})
+    assert "beamforming" not in out
+
+
+def test_status_includes_beamforming_block():
+    bf = {"requested": True, "state": "active", "reason": "",
+          "iface": "wlan0", "localMac": "84:fc:14:6c:36:e6",
+          "peerMac": "00:c0:ca:dd:ee:ff"}
+    out = build_status("1.0", _runner_state(), {}, {"reachable": True},
+                       beamforming=bf)
+    assert out["beamforming"]["state"] == "active"
+    assert out["beamforming"]["peerMac"] == "00:c0:ca:dd:ee:ff"

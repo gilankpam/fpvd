@@ -19,6 +19,7 @@ def adapter_matches_profile(adapter_id, radio_profile) -> bool:
 
 from . import __version__, radio, render as render_mod, schema, status as status_mod
 from .api import Api, make_http_server
+from .beamforming import BeamformingController
 from .config import ConfigStore
 from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
@@ -94,6 +95,8 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         ready_timeout=1.5, ready_on_timeout=True,   # settle: alive through the window
         log_path="/tmp/pixelpilot.log")
 
+    beamforming = BeamformingController()
+
     def renderer_write(eff):
         render_mod.write_cfg(cfg_out, render_mod.render_cfg(eff))
 
@@ -103,7 +106,9 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
     # are structural (wlans, linkId, profile, …).
     link = LinkCoordinator(store, renderer_write, runner, drone,
                            validate=schema.validate_effective,
-                           retune=lambda lnk: radio.retune(wlans, lnk))
+                           retune=lambda lnk: radio.retune(wlans, lnk),
+                           beamforming=beamforming,
+                           wlans_resolver=resolve_wlans)
 
     started = time.monotonic()
 
@@ -154,7 +159,8 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
                                        uptime_ms=uptime_ms,
                                        dynamic_link=_dynamic_link_status(reachable),
                                        pixelpilot=_pixelpilot_status(),
-                                       probe=_probe_status())
+                                       probe=_probe_status(),
+                                       beamforming=beamforming.status())
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out,
