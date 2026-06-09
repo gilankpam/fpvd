@@ -338,7 +338,9 @@ def test_bf_enable_hard_rejects_when_unsupported():
 def test_bf_enable_pushes_transformed_mac_and_arms_gs():
     store = _bf_store()
     store.patch({"link": {"beamforming": {"enabled": True}}})
-    runner, drone, bf = FakeRunner(), BfDrone(drone_mac="00:c0:ca:dd:ee:ff"), FakeBf(gs_mac="84:fc:14:6c:36:e6")
+    runner = FakeRunner()
+    drone = BfDrone(drone_mac="00:c0:ca:dd:ee:ff")
+    bf = FakeBf(gs_mac="84:fc:14:6c:36:e6")
     res = _bf_coord(store, runner, drone, bf).apply_link("both")
     # Drone receives the GS MAC as its remoteMac (transformed, not echoed).
     assert drone.patched == {"link": {"beamforming": {"enabled": True,
@@ -399,3 +401,19 @@ def test_channel_plus_bf_change_retunes_live_without_bf_bounce():
     assert retune.calls[0]["channel"] == 100
     assert runner.restarts == 0
     assert bf.calls == [(True, "wlan0", "00:c0:ca:dd:ee:ff")]
+
+
+def test_bf_enable_gs_scope_pending_no_drone_contact():
+    # apply_to="gs": the drone is never contacted, so the GS can't learn the
+    # drone MAC -> BF reports pending (NOT a hard-reject), GS still applies and
+    # the intent commits. supported() is True so the hard-reject doesn't fire.
+    store = _bf_store()
+    store.patch({"link": {"beamforming": {"enabled": True}}})
+    runner, drone, bf = FakeRunner(), BfDrone(reachable=True), FakeBf()
+    res = _bf_coord(store, runner, drone, bf).apply_link("gs")
+    assert drone.patched is None          # drone untouched on gs-scope
+    assert bf.calls == []                 # not armed (no drone MAC)
+    assert res["beamforming"]["state"] == "pending"
+    assert res["droneApplied"] is False
+    assert res["mode"] == "none"
+    assert store.effective()["link"]["beamforming"]["enabled"] is True

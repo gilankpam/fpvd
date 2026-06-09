@@ -72,8 +72,7 @@ class LinkCoordinator:
             st["state"] = "pending"
             st["reason"] = "drone unreachable; peer MAC unknown"
             return st
-        return self.beamforming.reconcile(enabled, primary,
-                                          drone_mac if enabled else "")
+        return self.beamforming.reconcile(enabled, primary, drone_mac)
 
     def apply_link(self, apply_to: str = "both") -> dict:
         pending_cfg = self.store.pending()
@@ -96,9 +95,6 @@ class LinkCoordinator:
                     f"beamforming unavailable on {primary}: no bf_monitor_conf "
                     f"node (GS driver lacks CONFIG_BEAMFORMING_MONITOR)")
 
-        gs_mac = self.beamforming.local_mac(primary) if (
-            self.beamforming is not None and primary) else ""
-
         drone_applied = False
         drone_reachable = False
         drone_mac = ""
@@ -111,6 +107,7 @@ class LinkCoordinator:
                 push = {k: link[k] for k in DRONE_PUSH_KEYS
                         if k in link and link[k] != old_link.get(k)}
                 if bf_changed and self.beamforming is not None:
+                    gs_mac = self.beamforming.local_mac(primary) if primary else ""
                     push["beamforming"] = {"enabled": bf_enabled,
                                            "remoteMac": gs_mac}
                 try:
