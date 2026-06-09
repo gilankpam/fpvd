@@ -56,7 +56,7 @@ def build_status(version: str, runner_state: dict, wlans: dict,
         "link": link,
     }
     if dynamic_link is not None:
-        out["dynamicLink"] = dynamic_link
+        out["adaptiveLink"] = dynamic_link
     if pixelpilot is not None:
         out["pixelpilot"] = pixelpilot
     if probe is not None:

@@ -34,10 +34,10 @@ def daemon(tmp_path, fake_drone):
     ready_port = _free_port()
     api_port = _free_port()
     defaults.write_text(json.dumps({
-        "link": {"channel": 132, "width": 40, "region": "US", "txpower": 19,
+        "link": {"channel": 132, "width": 40, "region": "US", "rxpower": 19,
                  "linkId": 7669206, "wlans": ["wlan0"]},
         "wfb": {"profile": "gs"},
-        "drone": {"endpoint": fake_drone["endpoint"]},
+        "droneLink": {"endpoint": fake_drone["endpoint"]},
         "pixelpilot": {"enabled": False},
     }))
     fake_runner = ["python3", "-c",
@@ -115,11 +115,12 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
     defaults.write_text(json.dumps({
         "link": {"channel": 132, "width": 40, "region": "US"},
         "wfb": {"profile": "gs", "raw": {}},
-        "drone": {"endpoint": "http://127.0.0.1:1"},
-        "dynamicLink": {"enabled": False, "maxMcs": 5, "bandwidth": 20,
-                        "txpower": {"min": 18, "max": 28},
-                        "radioProfile": "m8812eu2", "droneAddr": None,
-                        "dronePort": 9999, "tuning": {}}}))
+        "droneLink": {"endpoint": "http://127.0.0.1:1"},
+        "adaptiveLink": {"enabled": False,
+                         "controller": {"maxMcs": 5,
+                                        "radioProfile": "m8812eu2",
+                                        "droneAddr": None,
+                                        "dronePort": 9999, "tuning": {}}}}))
     cfg_out = tmp_path / "wfb.cfg"
 
     app = supervisor.build_app(str(defaults), str(tmp_path / "config.json"),
@@ -127,9 +128,9 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
                                runner_cmd=["true"])
     code, body = app.api.handle("GET", "/status", {}, b"")
     assert code == 200
-    assert "dynamicLink" in body
+    assert "adaptiveLink" in body
     assert "pixelpilot" in body
-    assert body["dynamicLink"]["running"] is False
+    assert body["adaptiveLink"]["running"] is False
 
 
 def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
@@ -164,12 +165,13 @@ def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
     defaults.write_text(json.dumps({
         "link": {"channel": 132, "width": 40, "region": "US", "linkId": 7669206},
         "wfb": {"profile": "gs", "raw": {}},
-        "drone": {"endpoint": "http://127.0.0.1:1"},
+        "droneLink": {"endpoint": "http://127.0.0.1:1"},
         "pixelpilot": {"enabled": False},
-        "dynamicLink": {"enabled": True, "maxMcs": 5, "bandwidth": 20,
-                        "txpower": {"min": 18, "max": 28},
-                        "radioProfile": "m8812eu2", "dronePort": 9999,
-                        "tuning": {}}}))
+        "adaptiveLink": {"enabled": True,
+                         "controller": {"maxMcs": 5,
+                                         "radioProfile": "m8812eu2",
+                                         "dronePort": 9999,
+                                         "tuning": {}}}}))
     cfg_out = tmp_path / "wfb.cfg"
     api_port = _free_port()
     app = supervisor.build_app(str(defaults), str(tmp_path / "config.json"),

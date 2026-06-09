@@ -51,10 +51,10 @@ class App:
         if (self.pixelpilot is not None
                 and self.store.effective().get("pixelpilot", {}).get("enabled", True)):
             self.pixelpilot.start()
-        if self.store.effective().get("dynamicLink", {}).get("enabled"):
+        if self.store.effective().get("adaptiveLink", {}).get("enabled"):
             self.dynlink.start()
         if (self.probe is not None
-                and self.store.effective().get("dynamicLink", {}).get("enabled")):
+                and self.store.effective().get("adaptiveLink", {}).get("enabled")):
             self.probe.start()
 
     def serve_forever(self):
@@ -88,7 +88,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
                               wlans=wlans, ready_port=ready_port,
                               ready_timeout=ready_timeout, log_path=log_path)
 
-    drone = DroneClient(effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080"))
+    drone = DroneClient(effective.get("droneLink", {}).get("endpoint", "http://10.5.0.10:8080"))
 
     probe_ctrl = ProbeController(make_probe_snapshot(effective), spawn=probe_spawn)
 
@@ -123,7 +123,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
     _warned = {"adapter": False}
 
     def _dynamic_link_status(reachable):
-        eff_dl = store.effective().get("dynamicLink", {})
+        eff_dl = store.effective().get("adaptiveLink", {})
         st = dynlink.status()
         st["enabled"] = bool(eff_dl.get("enabled"))
         drone_active = None
@@ -134,7 +134,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
             adapter_id = ds.get("radio", {}).get("adapterId")
         except Exception:
             pass
-        prof = eff_dl.get("radioProfile", "m8812eu2")
+        prof = eff_dl.get("controller", {}).get("radioProfile", "m8812eu2")
         if not adapter_matches_profile(adapter_id, prof) and not _warned["adapter"]:
             log.warning("drone adapter_id %r does not match the configured "
                         "radioProfile %r — the learned prior is per-card, so a "
@@ -152,7 +152,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         return {"enabled": True, **pixelpilot.state()}
 
     def _probe_status():
-        if not store.effective().get("dynamicLink", {}).get("enabled"):
+        if not store.effective().get("adaptiveLink", {}).get("enabled"):
             return {"enabled": False, "running": False}
         return {"enabled": True, **probe_ctrl.status()}
 

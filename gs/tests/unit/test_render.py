@@ -8,7 +8,7 @@ EFFECTIVE = {
              "linkId": 7669206, "beamforming": {"enabled": False}, "wlans": "auto"},
     "wfb": {"profile": "gs", "mavlink": {"peer": "connect://127.0.0.1:14550"},
             "raw": {"gs_tunnel": {"ldpc": 1}}},
-    "drone": {"endpoint": "http://10.5.0.10:8080"},
+    "droneLink": {"endpoint": "http://10.5.0.10:8080"},
 }
 
 
