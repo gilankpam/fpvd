@@ -55,6 +55,16 @@ std::vector<ValidationError> validate(const Config& c) {
         errs.push_back({"link.mcs", "must be 0..7"});
     if (c.link.txpower < 0 || c.link.txpower > 30)
         errs.push_back({"link.txpower", "must be 0..30 (dBm)"});
+    if (c.link.txpowerCurve.has_value()) {
+        const auto& cv = *c.link.txpowerCurve;
+        if (cv.size() != 8)
+            errs.push_back({"link.txpowerCurve", "must have exactly 8 entries (MCS 0..7)"});
+        else for (int v : cv)
+            if (v < 0 || v > 30) {
+                errs.push_back({"link.txpowerCurve", "each entry must be 0..30 (dBm)"});
+                break;
+            }
+    }
     if (c.link.fec.k < 1 || c.link.fec.k > 32 ||
         c.link.fec.n < 1 || c.link.fec.n > 32 ||
         c.link.fec.k >= c.link.fec.n)

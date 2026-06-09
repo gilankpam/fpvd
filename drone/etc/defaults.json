@@ -13,6 +13,7 @@
     "linkId": 7669206,
     "mtu": 1500,
     "wlanAdapter": null,
+    "txpowerCurve": null,
     "beamforming": { "enabled": false, "remoteMac": "", "ackTimeout": 255, "intervalMs": 100 }
   },
   "video": {

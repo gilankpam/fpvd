@@ -5,7 +5,9 @@
 
 namespace fpvd::dynlink {
 
-DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
+DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface,
+                                const std::optional<std::string>& adapterId,
+                                const std::string& driver)
 {
     const auto& dl = c.dynamicLink;
 
@@ -54,6 +56,7 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
     s.probeCtlPort  = static_cast<uint16_t>(kProbeControlPort);
     s.probeMcsCeiling = kProbeMcsCeiling;
     s.iface         = iface;
+    s.txPowerCurve  = resolveTxpowerCurve(c.link.txpowerCurve, adapterId, driver).curve;
 
     return s;
 }

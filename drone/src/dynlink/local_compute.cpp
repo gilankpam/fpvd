@@ -28,7 +28,7 @@ void applyLocalCompute(const DlRuntimeConfig& cfg, Decision& d) {
                                        b.minBitrateKbps, b.maxBitrateKbps);
     d.depth       = kInterleaveDepth;
     d.fps         = sat8(b.fps);
-    d.txPowerDbm  = txpowerDbmForMcs(d.mcs);   // per-MCS PA-linearity backoff curve
+    d.txPowerDbm  = txpowerDbmForMcs(cfg.txPowerCurve, d.mcs);   // per-MCS PA-linearity backoff curve
 }
 
 } // namespace fpvd::dynlink

@@ -30,8 +30,4 @@ int8_t txpowerDbmForMcs(const TxPowerCurve& curve, int mcs) {
     return curve[static_cast<size_t>(mcs)];
 }
 
-int8_t txpowerDbmForMcs(int mcs) {        // legacy 1-arg — removed in a later task
-    return txpowerDbmForMcs(kCurveM8812eu2, mcs);
-}
-
 } // namespace fpvd::dynlink

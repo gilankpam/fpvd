@@ -1,6 +1,8 @@
 #pragma once
 #include "dynlink/encoder_client.hpp"   // RoiCurve
+#include "dynlink/txpower_curve.hpp"
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace fpvd { struct Config; }
@@ -46,6 +48,7 @@ struct DlRuntimeConfig {
     bool     stbc;
     bool     ldpc;
     uint8_t  linkBandwidth{20};   // radiotap 20/40 from link.width (wire no longer carries it)
+    TxPowerCurve txPowerCurve{};   // resolved per-MCS dBm curve (override or radio default)
     uint16_t probeCtlPort{0};   // probe wfb_tx -C port; 0 disables probe retune
     int      probeMcsCeiling{7};
     std::string  iface;
@@ -76,6 +79,8 @@ struct Endpoints {
     uint32_t     osdUpdateIntervalMs{1000};
 };
 
-DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface);
+DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface,
+                                const std::optional<std::string>& adapterId,
+                                const std::string& driver);
 
 } // namespace fpvd::dynlink

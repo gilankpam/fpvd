@@ -10,6 +10,7 @@ static DlRuntimeConfig cfgWithBitrate() {
     DlRuntimeConfig c{};
     c.probeMcsCeiling = 7;
     c.bitrate = BitrateEngineConfig{0.5, 2.0, 2, 50, 1000, 24000, 1500, 60};
+    c.txPowerCurve = kCurveM8812eu2;   // per-MCS PA-linearity backoff curve under test
     return c;
 }
 

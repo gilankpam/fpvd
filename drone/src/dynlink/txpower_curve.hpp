@@ -35,8 +35,4 @@ ResolvedCurve resolveTxpowerCurve(const std::optional<std::vector<int>>& overrid
 // dBm for the given MCS, clamping mcs to [0,7].
 int8_t txpowerDbmForMcs(const TxPowerCurve& curve, int mcs);
 
-// Legacy 1-arg form (uses the bl-m8812eu2 default curve). Kept so the existing
-// call sites still compile until the call sites switch; removed in a later task.
-int8_t txpowerDbmForMcs(int mcs);
-
 } // namespace fpvd::dynlink

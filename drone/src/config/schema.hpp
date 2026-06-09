@@ -55,11 +55,13 @@ struct Link {
     long linkId{7669206};
     int mtu{1500};
     std::optional<std::string> wlanAdapter{};
+    std::optional<std::vector<int>> txpowerCurve{};   // null => per-radio default
     Beamforming beamforming{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Link, channel, width, txpower,
                                                 mcs, fec, stbc, ldpc, linkId,
-                                                mtu, wlanAdapter, beamforming)
+                                                mtu, wlanAdapter, txpowerCurve,
+                                                beamforming)
 
 struct Roi {
     bool enabled{true};

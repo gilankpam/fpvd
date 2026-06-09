@@ -232,7 +232,7 @@ void DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
     }
     // Safe recovery: drive power for the (low) safe rung unconditionally, matching
     // the other safe sub-commands. Low MCS -> high power -> robust recovery.
-    if (radio_) radio_->applySafe(txpowerDbmForMcs(cfg.safe.mcs));
+    if (radio_) radio_->applySafe(txpowerDbmForMcs(cfg.txPowerCurve, cfg.safe.mcs));
 }
 
 // ---- poll loop --------------------------------------------------------------

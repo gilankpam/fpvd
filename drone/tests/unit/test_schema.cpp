@@ -9,7 +9,7 @@ TEST_CASE("schema: round-trip a minimal config through json") {
     json j = json::parse(R"({
         "link":{"channel":161,"width":20,"txpower":1,"mcs":2,
                 "fec":{"k":8,"n":12},"stbc":false,"ldpc":false,
-                "linkId":7669206,"mtu":1500,"wlanAdapter":null,
+                "linkId":7669206,"mtu":1500,"wlanAdapter":null,"txpowerCurve":null,
                 "beamforming":{"enabled":false,"remoteMac":"","ackTimeout":255,"intervalMs":100}},
         "video":{"codec":"h265","resolution":"1920x1080","fps":60,
                  "bitrate":8192,"rcMode":"cbr","gopSize":1.0,"qpDelta":-4,

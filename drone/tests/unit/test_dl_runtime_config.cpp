@@ -10,7 +10,7 @@ TEST_CASE("buildDlSnapshot maps schema + derived inputs") {
     c.link.mtu = 1400; c.video.fps = 90;
     c.link.stbc = false; c.link.ldpc = true;   // preserved through, not DL-decided
     c.dynamicLink.failsafe.mcs = 3; c.dynamicLink.healthTimeoutMs = 8000;
-    auto s = buildDlSnapshot(c, "wlan1");
+    auto s = buildDlSnapshot(c, "wlan1", std::nullopt, "8812eu");
     CHECK(s.iface == "wlan1");
     CHECK(s.stbc == false);
     CHECK(s.ldpc == true);
@@ -29,7 +29,7 @@ TEST_CASE("buildDlSnapshot maps all DynamicLink fields") {
     c.dynamicLink.osd.enabled        = false;
     c.dynamicLink.osd.debugLatency   = true;
 
-    auto s = buildDlSnapshot(c, "wlan0");
+    auto s = buildDlSnapshot(c, "wlan0", std::nullopt, "8812eu");
 
     CHECK(s.healthTimeoutMs     == 5000u);
     CHECK(s.interleavingSupported == false);
@@ -52,7 +52,7 @@ TEST_CASE("buildDlSnapshot maps safe defaults correctly") {
     c.dynamicLink.failsafe.txPowerDbm  = 15;
     c.dynamicLink.failsafe.bitrateKbps = 3000;
 
-    auto s = buildDlSnapshot(c, "wlan0");
+    auto s = buildDlSnapshot(c, "wlan0", std::nullopt, "8812eu");
 
     CHECK(s.safe.mcs         == 2u);
     CHECK(s.safe.k           == 6u);
@@ -70,7 +70,7 @@ TEST_CASE("buildDlSnapshot maps roiQp curve correctly") {
     c.dynamicLink.roiQp.floor         = -18;
     c.dynamicLink.roiQp.step          = 2;
 
-    auto s = buildDlSnapshot(c, "wlan0");
+    auto s = buildDlSnapshot(c, "wlan0", std::nullopt, "8812eu");
 
     CHECK(s.roiQp.thresholdKbps == 8000u);
     CHECK(s.roiQp.lowAnchorKbps == 3000u);
@@ -80,7 +80,7 @@ TEST_CASE("buildDlSnapshot maps roiQp curve correctly") {
 
 TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
     Config c{};
-    auto s = buildDlSnapshot(c, "wlan2");
+    auto s = buildDlSnapshot(c, "wlan2", std::nullopt, "8812eu");
 
     // DynamicLink defaults from schema
     CHECK(s.healthTimeoutMs      == 10000u);
@@ -124,7 +124,7 @@ TEST_CASE("buildDlSnapshot maps the Phase-3a bitrate-engine knobs") {
     c.dynamicLink.fec.kMin = 3;
     c.dynamicLink.fec.kMax = 40;
 
-    auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0", std::nullopt, "8812eu");
 
     CHECK(s.bitrate.mtuBytes == 1400);
     CHECK(s.bitrate.fps == 90);
@@ -139,13 +139,23 @@ TEST_CASE("buildDlSnapshot maps the Phase-3a bitrate-engine knobs") {
 TEST_CASE("buildDlSnapshot maps link.width to linkBandwidth (radiotap value)") {
     fpvd::Config c{};
     c.link.width = 20;
-    auto s20 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    auto s20 = fpvd::dynlink::buildDlSnapshot(c, "wlan0", std::nullopt, "8812eu");
     CHECK(s20.linkBandwidth == 20);
     c.link.width = 40;
-    auto s40 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    auto s40 = fpvd::dynlink::buildDlSnapshot(c, "wlan0", std::nullopt, "8812eu");
     CHECK(s40.linkBandwidth == 40);
     // modulationWidth maps HT40-as-20 (width=10) to the 20 MHz radiotap value
     c.link.width = 10;
-    auto s10 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    auto s10 = fpvd::dynlink::buildDlSnapshot(c, "wlan0", std::nullopt, "8812eu");
     CHECK(s10.linkBandwidth == 20);
+}
+
+TEST_CASE("buildDlSnapshot resolves the txpower curve from radio + override") {
+    fpvd::Config c{};
+    auto s1 = fpvd::dynlink::buildDlSnapshot(c, "wlan0", std::string("bl-m8812eu2"), "8812eu");
+    CHECK(s1.txPowerCurve == fpvd::dynlink::TxPowerCurve{29,28,25,23,19,19,19,19});
+
+    c.link.txpowerCurve = std::vector<int>{10,10,10,10,10,10,10,10};
+    auto s2 = fpvd::dynlink::buildDlSnapshot(c, "wlan0", std::string("bl-m8812eu2"), "8812eu");
+    CHECK(s2.txPowerCurve[0] == 10);
 }

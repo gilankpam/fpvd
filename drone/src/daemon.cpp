@@ -241,7 +241,8 @@ void Daemon::rewriteWaybeamJson() {
 void Daemon::startController() {
     // Builds a fresh snapshot from the current effective_ config + detected iface,
     // and starts the in-process control loop.
-    dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface));
+    dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface,
+                                       radio_.adapterId, radio_.driver));
 }
 
 void Daemon::addProbeStream() {
@@ -420,7 +421,8 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             // A stbc/ldpc retune is the only videoRadiotap change reachable under
             // DL (mcs/width/fec are locked), so refresh the controller snapshot;
             // the loop restates the radio with its current mcs (see reconcile).
-            dl_.setConfig(dynlink::buildDlSnapshot(effective_, radio_.iface));
+            dl_.setConfig(dynlink::buildDlSnapshot(effective_, radio_.iface,
+                                                   radio_.adapterId, radio_.driver));
 
         // DL isn't feeding the OSD — (re)assert the system-stats base line so a
         // just-restarted msposd, or an on->off toggle, shows CPU/temp/bitrate

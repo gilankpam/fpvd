@@ -28,6 +28,20 @@ TEST_CASE("validate: fec.k must be less than fec.n") {
     CHECK(errs[0].path == "link.fec");
 }
 
+TEST_CASE("link.txpowerCurve override must be 8 entries within 0..30 dBm") {
+    fpvd::Config c{};
+    c.link.txpowerCurve = std::vector<int>{29,28,25,23,19,19,19,19};
+    CHECK(fpvd::validate(c).empty());
+
+    c.link.txpowerCurve = std::vector<int>{29,28,25};            // too short
+    CHECK(!fpvd::validate(c).empty());
+
+    c.link.txpowerCurve = std::vector<int>{0,0,0,0,0,0,0,99};    // out of range
+    auto errs = fpvd::validate(c);
+    CHECK(std::any_of(errs.begin(), errs.end(),
+        [](const fpvd::ValidationError& e){ return e.path == "link.txpowerCurve"; }));
+}
+
 TEST_CASE("validate: video.fps must be in (0, 120]") {
     Config c{}; c.video.fps = 0;
     auto errs = validate(c);
