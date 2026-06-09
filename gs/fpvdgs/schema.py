@@ -1,37 +1,13 @@
-"""Validation rules. Link/overlap params are mutated ONLY via /link."""
+"""Validation rules for the unified config tree (validated at /apply time)."""
 
 from pathlib import Path
 
-LINK_KEYS = {"channel", "width", "rxpower", "region", "linkId", "beamforming", "wlans"}
-CONFIG_TOP_KEYS = {"wfb", "droneLink", "dynamicLink", "pixelpilot"}   # link is excluded on purpose
 DL_PROFILES_DIR = Path(__file__).resolve().parent / "dynlink" / "profiles"
-ALL_TOP_KEYS = {"link"} | CONFIG_TOP_KEYS
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
 class SchemaError(ValueError):
     pass
-
-
-def validate_config_patch(sparse: dict) -> None:
-    """A /config PATCH: any top-level key except `link`."""
-    if "link" in sparse:
-        raise SchemaError("link.* is read-only via /config; use /link")
-    unknown = set(sparse) - CONFIG_TOP_KEYS
-    if unknown:
-        raise SchemaError(f"unknown config keys: {sorted(unknown)}")
-
-
-def validate_link_patch(sparse: dict) -> None:
-    """A /link PATCH: only `link.*`, only known link keys."""
-    if set(sparse) - {"link"}:
-        raise SchemaError("only link.* allowed via /link")
-    link = sparse.get("link", {})
-    if not isinstance(link, dict) or not link:
-        raise SchemaError("link patch must be a non-empty object")
-    unknown = set(link) - LINK_KEYS
-    if unknown:
-        raise SchemaError(f"unknown link keys: {sorted(unknown)}")
 
 
 def validate_effective(cfg: dict) -> None:

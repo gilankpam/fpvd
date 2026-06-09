@@ -1,5 +1,6 @@
-"""Single front-door HTTP API: /config /apply /reset /defaults /status /healthz,
-opaque /air/* drone proxy, and /link coordinator. Transport-free `handle()`."""
+"""Single front-door HTTP API: /config /apply /reset /defaults /status /healthz.
+Unified tree over the GS store + drone (via the LinkCoordinator and DroneClient
+used internally by /apply and the facade). Transport-free `handle()`."""
 
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -37,8 +38,6 @@ class Api:
 
     def handle(self, method, path, query, body):
         try:
-            if path.startswith("/air/"):
-                return self._proxy(method, path, body)
             key = (method, path)
             if key == ("GET", "/healthz"):
                 return 200, {"ok": True}
@@ -61,16 +60,6 @@ class Api:
                 return 200, {"reset": True}
             if key == ("GET", "/status"):
                 return 200, self.status_fn()
-            if key == ("GET", "/link"):
-                return 200, self._link_view()
-            if key == ("PATCH", "/link"):
-                sparse = self._json(body)
-                self.schema.validate_link_patch(sparse)
-                self.store.patch(sparse)
-                return 200, self.store.pending().get("link", {})
-            if key == ("POST", "/link/apply"):
-                apply_to = self._json(body).get("applyTo", "both")
-                return 200, self.link.apply_link(apply_to)
             return 404, {"error": "not found"}
         except SchemaError as e:
             return 400, {"error": str(e)}
@@ -226,24 +215,6 @@ class Api:
                 self.pixelpilot.start()
         elif was and not now:
             self.pixelpilot.stop()
-
-    def _link_view(self):
-        link = dict(self.store.effective().get("link", {}))
-        reachable = self.drone.healthz()
-        link["droneReachable"] = reachable
-        return link
-
-    def _proxy(self, method, path, body):
-        sub = path[len("/air"):]  # "/config", "/apply", "/status"
-        endpoint_method = {"GET": "GET", "PATCH": "PATCH", "POST": "POST"}.get(method)
-        if endpoint_method is None:
-            return 405, {"error": "method not allowed"}
-        try:
-            code, raw = self.drone._request(endpoint_method, sub,
-                                            self._json(body) if body else None)
-            return code, json.loads(raw or b"{}")
-        except Exception as e:
-            return 502, {"error": f"drone unreachable: {e}"}
 
 
 def make_http_server(api, host, port):

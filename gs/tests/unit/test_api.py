@@ -44,11 +44,6 @@ class FakeDrone:
     def get_status(self):
         return {}
 
-    # opaque proxy hook (Api._proxy calls drone._request)
-    def _request(self, method, path, body=None):
-        self.calls.append((method, path, body))
-        return 200, json.dumps({"proxied": path}).encode()
-
 
 class _FakeDroneCache:
     """Returns a fixed (drone_cfg, meta) pair for GET /config rendering.
@@ -253,33 +248,6 @@ def test_apply_shared_link_change_unreachable_soft_degrades():
     assert obj["sharedLink"]["gsApplied"] is True
     assert obj["sharedLink"]["droneApplied"] is False
     assert store.effective()["link"]["channel"] == 100
-
-
-def test_link_apply_both_renders_and_pushes():
-    api, store, drone, cfg_out = _api()
-    api.handle("PATCH", "/link", {}, json.dumps({"link": {"channel": 100}}).encode())
-    code, obj = api.handle("POST", "/link/apply", {},
-                           json.dumps({"applyTo": "both"}).encode())
-    assert code == 200
-    assert obj["gsApplied"] is True
-    assert obj["droneApplied"] is True
-    assert store.effective()["link"]["channel"] == 100
-    assert "wifi_channel = 100" in open(cfg_out).read()
-
-
-def test_air_config_is_proxied_opaquely():
-    api, _, drone, _ = _api()
-    code, raw = api.handle("PATCH", "/air/config", {}, b'{"video":{"bitrate":9000}}')
-    assert code == 200
-    assert any(c[0] == "PATCH" and c[1] == "/config" for c in drone.calls)
-
-
-def test_link_apply_rejects_bad_width():
-    api, store, _, _ = _api()
-    api.handle("PATCH", "/link", {}, json.dumps({"link": {"width": 80}}).encode())
-    code, obj = api.handle("POST", "/link/apply", {},
-                           json.dumps({"applyTo": "gs"}).encode())
-    assert code == 400
 
 
 def test_apply_rolls_back_on_runner_failure(tmp_path):

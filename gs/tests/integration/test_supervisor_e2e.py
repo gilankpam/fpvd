@@ -83,22 +83,6 @@ def test_cfg_rendered_on_boot(daemon):
     assert "wifi_channel = 132" in text
 
 
-def test_link_apply_pushes_drone_and_rerenders(daemon):
-    base, cfg_out, fake_drone = daemon
-    _req(base, "PATCH", "/link", {"link": {"channel": 100}})
-    code, obj = _req(base, "POST", "/link/apply", {"applyTo": "both"})
-    assert code == 200 and obj["droneApplied"] is True
-    assert "wifi_channel = 100" in cfg_out.read_text()
-    assert any(m == "PATCH" and p == "/config" for (m, p, _b) in fake_drone["calls"])
-
-
-def test_air_proxy_roundtrip(daemon):
-    base, _, fake_drone = daemon
-    code, _ = _req(base, "PATCH", "/air/config", {"video": {"bitrate": 9000}})
-    assert code == 200
-    assert any(p == "/config" for (_m, p, _b) in fake_drone["calls"])
-
-
 def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkeypatch):
     """build_app constructs a controller; status_fn merges its state.
     Uses a stub controller via monkeypatch so no sockets/threads are needed."""

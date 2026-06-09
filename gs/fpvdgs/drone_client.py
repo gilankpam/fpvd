@@ -1,4 +1,5 @@
-"""HTTP client to the drone fpvd. Used by /air proxy and /link coordination."""
+"""HTTP client to the drone fpvd. Used by the unified /config + /apply lanes
+(the facade read-merge and the LinkCoordinator's drone push)."""
 
 import json
 import urllib.error

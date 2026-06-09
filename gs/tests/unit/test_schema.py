@@ -3,36 +3,8 @@ import pytest
 from fpvdgs import schema
 from fpvdgs.schema import (
     SchemaError,
-    validate_config_patch,
-    validate_link_patch,
     validate_effective,
 )
-
-
-def test_config_patch_rejects_link_keys():
-    with pytest.raises(SchemaError) as e:
-        validate_config_patch({"link": {"channel": 100}})
-    assert "link" in str(e.value)
-
-
-def test_config_patch_allows_non_link():
-    validate_config_patch({"wfb": {"mavlink": {"peer": "connect://127.0.0.1:14550"}}})
-
-
-def test_config_patch_rejects_unknown_top_level():
-    with pytest.raises(SchemaError):
-        validate_config_patch({"bogus": 1})
-
-
-def test_link_patch_allows_only_link():
-    validate_link_patch({"link": {"channel": 100, "width": 20}})
-    with pytest.raises(SchemaError):
-        validate_link_patch({"wfb": {"profile": "gs"}})
-
-
-def test_link_patch_rejects_unknown_link_key():
-    with pytest.raises(SchemaError):
-        validate_link_patch({"link": {"mcs": 5}})
 
 
 def test_validate_effective_checks_width_domain():
@@ -65,10 +37,6 @@ def _eff(**ctl):
     return base
 
 
-def test_config_patch_allows_dynamiclink():
-    schema.validate_config_patch({"dynamicLink": {"enabled": True}})  # no raise
-
-
 def test_effective_accepts_valid_dynamiclink():
     schema.validate_effective(_eff())  # no raise
 
@@ -92,29 +60,6 @@ def test_effective_rejects_bad_drone_port():
         schema.validate_effective(_eff(dronePort=70000))
 
 
-def test_config_patch_accepts_dynamiclink_and_dronelink():
-    from fpvdgs import schema
-    schema.validate_config_patch({"dynamicLink": {"enabled": True}})
-    schema.validate_config_patch({"droneLink": {"endpoint": "http://x:8080"}})
-
-
-def test_config_patch_rejects_old_keys():
-    import pytest
-    from fpvdgs import schema
-    with pytest.raises(schema.SchemaError):
-        schema.validate_config_patch({"adaptiveLink": {"enabled": True}})
-    with pytest.raises(schema.SchemaError):
-        schema.validate_config_patch({"drone": {"endpoint": "x"}})
-
-
-def test_link_patch_accepts_rxpower_not_txpower():
-    import pytest
-    from fpvdgs import schema
-    schema.validate_link_patch({"link": {"rxpower": 20}})
-    with pytest.raises(schema.SchemaError):
-        schema.validate_link_patch({"link": {"txpower": 20}})
-
-
 def test_validate_dynamiclink_controller():
     import pytest
     from fpvdgs import schema
@@ -129,11 +74,6 @@ def test_validate_dynamiclink_controller():
             "link": {"channel": 132, "region": "US", "width": 40},
             "dynamicLink": {"controller": {"maxMcs": 9}},   # out of 0..7
         })
-
-
-def test_config_patch_accepts_pixelpilot():
-    # should not raise
-    schema.validate_config_patch({"pixelpilot": {"screenMode": "1280x720@60"}})
 
 
 def test_validate_effective_accepts_pixelpilot_block():
