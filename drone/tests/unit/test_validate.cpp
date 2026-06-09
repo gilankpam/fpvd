@@ -162,18 +162,6 @@ TEST_CASE("validate: dynamicLink.failsafe.bandwidth must be 10, 20, or 40") {
     CHECK(validate(ok).empty());
 }
 
-TEST_CASE("validate: dynamicLink.failsafe.txPowerDbm in [-10,30]") {
-    Config c{}; c.dynamicLink.failsafe.txPowerDbm = 31;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.failsafe.txPowerDbm");
-
-    Config c2{}; c2.dynamicLink.failsafe.txPowerDbm = -11;
-    auto errs2 = validate(c2);
-    REQUIRE(errs2.size() == 1);
-    CHECK(errs2[0].path == "dynamicLink.failsafe.txPowerDbm");
-}
-
 TEST_CASE("validate: dynamicLink.failsafe.bitrateKbps > 0") {
     Config c{}; c.dynamicLink.failsafe.bitrateKbps = 0;
     auto errs = validate(c);

@@ -111,7 +111,7 @@ curl http://127.0.0.1:8080/defaults
     "osd": {"enabled": true, "debugLatency": false},
     "roiQp": {"thresholdKbps": 6000, "lowAnchorKbps": 2000, "floor": -24, "step": 3},
     "failsafe": {"mcs": 1, "k": 8, "n": 12, "depth": 1,
-                 "bandwidth": 20, "txPowerDbm": 20, "bitrateKbps": 2000}
+                 "bandwidth": 20, "bitrateKbps": 2000}
   },
   "services": {}
 }
@@ -553,7 +553,6 @@ Controls the on-drone `dl-applier` process from the `wfbng-dynamic-link` project
     "n": 12,            // integer, 2..32 — maximum FEC n shard count (n > k, n ≤ 32)
     "depth": 1,         // integer, 1..8 — wfb-ng block depth
     "bandwidth": 20,    // integer, 20 or 40 — maximum channel width in MHz
-    "txPowerDbm": 20,   // integer, -10..30 — maximum TX power in dBm
     "bitrateKbps": 2000 // integer, > 0 — maximum video bitrate in kbps
   }
 }
@@ -579,7 +578,6 @@ Controls the on-drone `dl-applier` process from the `wfbng-dynamic-link` project
 | `failsafe.n` | integer | `12` | 2 – 32, must be > `failsafe.k` |
 | `failsafe.depth` | integer | `1` | 1 – 8 |
 | `failsafe.bandwidth` | integer | `20` | `20` or `40` |
-| `failsafe.txPowerDbm` | integer | `20` | -10 – 30 |
 | `failsafe.bitrateKbps` | integer | `2000` | > 0 |
 
 ### `services` — user-defined services
@@ -874,8 +872,7 @@ curl -X PATCH http://127.0.0.1:8080/config \
       "enabled": true,
       "failsafe": {
         "mcs": 2,
-        "bitrateKbps": 6000,
-        "txPowerDbm": 25
+        "bitrateKbps": 6000
       }
     }
   }'

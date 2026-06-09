@@ -35,7 +35,6 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface,
         static_cast<uint8_t> (dl.failsafe.n),
         static_cast<uint8_t> (dl.failsafe.depth),
         static_cast<uint8_t> (dl.failsafe.bandwidth),
-        static_cast<int8_t>  (dl.failsafe.txPowerDbm),
         static_cast<uint16_t>(dl.failsafe.bitrateKbps),
     };
 

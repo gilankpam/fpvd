@@ -15,7 +15,6 @@ struct SafeDefaults {
     uint8_t  n;
     uint8_t  depth;
     uint8_t  bandwidth;
-    int8_t   txPowerDbm;
     uint16_t bitrateKbps;
 };
 

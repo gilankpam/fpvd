@@ -49,7 +49,6 @@ TEST_CASE("buildDlSnapshot maps safe defaults correctly") {
     c.dynamicLink.failsafe.n           = 10;
     c.dynamicLink.failsafe.depth       = 2;
     c.dynamicLink.failsafe.bandwidth   = 40;
-    c.dynamicLink.failsafe.txPowerDbm  = 15;
     c.dynamicLink.failsafe.bitrateKbps = 3000;
 
     auto s = buildDlSnapshot(c, "wlan0", std::nullopt, "8812eu");
@@ -59,7 +58,6 @@ TEST_CASE("buildDlSnapshot maps safe defaults correctly") {
     CHECK(s.safe.n           == 10u);
     CHECK(s.safe.depth       == 2u);
     CHECK(s.safe.bandwidth   == 40u);
-    CHECK(s.safe.txPowerDbm  == 15);
     CHECK(s.safe.bitrateKbps == 3000u);
 }
 
@@ -109,7 +107,6 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
     CHECK(s.safe.n           == 12u);
     CHECK(s.safe.depth       == 1u);
     CHECK(s.safe.bandwidth   == 20u);
-    CHECK(s.safe.txPowerDbm  == 20);
     CHECK(s.safe.bitrateKbps == 2000u);
 }
 

@@ -73,7 +73,6 @@
       "n": 12,
       "depth": 1,
       "bandwidth": 20,
-      "txPowerDbm": 20,
       "bitrateKbps": 2000
     }
   },

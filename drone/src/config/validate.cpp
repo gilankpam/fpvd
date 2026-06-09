@@ -137,8 +137,6 @@ std::vector<ValidationError> validate(const Config& c) {
         if (dl.failsafe.bandwidth != 10 && dl.failsafe.bandwidth != 20 &&
             dl.failsafe.bandwidth != 40)
             errs.push_back({"dynamicLink.failsafe.bandwidth", "must be 10, 20, or 40"});
-        if (dl.failsafe.txPowerDbm < -10 || dl.failsafe.txPowerDbm > 30)
-            errs.push_back({"dynamicLink.failsafe.txPowerDbm", "must be -10..30"});
         if (dl.failsafe.bitrateKbps <= 0)
             errs.push_back({"dynamicLink.failsafe.bitrateKbps", "must be > 0"});
 

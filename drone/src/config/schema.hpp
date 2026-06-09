@@ -112,11 +112,10 @@ struct DynamicLinkSafe {
     int n{12};
     int depth{1};
     int bandwidth{20};
-    int txPowerDbm{20};
     int bitrateKbps{2000};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkSafe, mcs, k, n,
-                                               depth, bandwidth, txPowerDbm,
+                                               depth, bandwidth,
                                                bitrateKbps)
 
 struct DynamicLinkOsd {

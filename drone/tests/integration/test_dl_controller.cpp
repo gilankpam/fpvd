@@ -243,7 +243,7 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     snap.iface                 = "wlan-test-nonexistent";  // iw will fail, not hang
     snap.safe = SafeDefaults{
         /*mcs=*/1, /*k=*/8, /*n=*/12, /*depth=*/0,
-        /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
+        /*bandwidth=*/20, /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -325,7 +325,7 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{1, 8, 12, 0, 20, 5, 2000};
+    snap.safe = SafeDefaults{1, 8, 12, 0, 20, 2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -416,7 +416,7 @@ TEST_CASE("controller IDR: datagram -> requestIdr; second immediate datagram is 
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{1, 8, 12, 0, 20, 5, 2000};
+    snap.safe = SafeDefaults{1, 8, 12, 0, 20, 2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -484,7 +484,7 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     snap.iface                 = "wlan-test-nonexistent";
     snap.safe = SafeDefaults{
         /*mcs=*/1, /*k=*/8, /*n=*/12, /*depth=*/0,
-        /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
+        /*bandwidth=*/20, /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
