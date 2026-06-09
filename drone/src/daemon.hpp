@@ -94,6 +94,8 @@ private:
     void addProbeStream();
     void removeProbeStream();
     void reconcileBeamforming(bool force = false);
+    // 0 = BF off/disabled, 1 = armed but no report, 2 = working (cbr_rssi != 0).
+    int bfOsdCode() const;
     void rewriteWaybeamJson();
     void startController();
     // Rebuild the msposd OSD spec from effective_ and (re)start it, so it picks

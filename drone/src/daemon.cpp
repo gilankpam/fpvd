@@ -64,6 +64,7 @@ void Daemon::bootstrap(bool startProcesses) {
         seedOrchestrator();
         orch_.startAll();
         reconcileBeamforming(true);
+        dl_.setBfCodeProvider([this] { return bfOsdCode(); });
         if (effective_.dynamicLink.enabled) {
             startController();
         } else {
@@ -223,6 +224,12 @@ void Daemon::reconcileBeamforming(bool force) {
     p.ackTimeout = bfc.ackTimeout;
     p.intervalMs = bfc.intervalMs;
     bf_.reconcile(bfc.enabled, p, force);
+}
+
+int Daemon::bfOsdCode() const {
+    auto bf = bf_.status();
+    if (bf.state != BfState::Active) return 0;
+    return bf.cbrRssi != 0 ? 2 : 1;
 }
 
 void Daemon::rewriteWaybeamJson() {

@@ -9,6 +9,7 @@
 #include "dynlink/wire.hpp"
 #include "translate/wfb_control.hpp"
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -28,6 +29,10 @@ public:
     bool running() const { return running_.load(); }
     void setConfig(const DlRuntimeConfig& snap);  // hot reload (stub for now; Task 17 fills it)
     DlStatus status() const;                       // snapshot of published status
+
+    // Set once before start(): supplies the BF OSD code (0/1/2) for the status
+    // line. Invoked on the control thread; must be set while stopped.
+    void setBfCodeProvider(std::function<int()> f) { bfCodeProvider_ = std::move(f); }
 
     // Probe rung selector: the observe-only probe rides one rung above the video
     // MCS, clamped to the hardware ceiling. Static + header-inline so it is unit
@@ -87,6 +92,7 @@ private:
     Decision lastEnc_{};
     Decision lastApplied_{};   // for OSD display only
     uint64_t lastDecisionMs_{0};
+    std::function<int()> bfCodeProvider_;   // 0 if unset
 };
 
 } // namespace fpvd::dynlink

@@ -30,3 +30,14 @@ TEST_CASE("osd: writeStatus renders the BF token by code") {
     CHECK(slurp(msg).find(" B+") != std::string::npos);  // working
     fs::remove(msg);
 }
+
+TEST_CASE("osd: provider code reaches the rendered line") {
+    auto msg = fs::temp_directory_path() / "fpvd-osd-prov.msg";
+    fs::remove(msg);
+    Decision d{}; d.mcs = 3;
+    OsdWriter w(msg.string(), true, 1000, false);
+    int code = 2;                                  // stand-in for bfCodeProvider_()
+    w.writeStatus(d, 0, code);
+    CHECK(slurp(msg).find(" B+") != std::string::npos);
+    fs::remove(msg);
+}
