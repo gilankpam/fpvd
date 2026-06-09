@@ -1,7 +1,6 @@
 #pragma once
 #include "dynlink/dedup.hpp"
 #include "dynlink/encoder_client.hpp"
-#include "dynlink/hello.hpp"
 #include "dynlink/idr_listen.hpp"
 #include "dynlink/osd.hpp"
 #include "dynlink/radio_txpower.hpp"
@@ -10,6 +9,7 @@
 #include "dynlink/wire.hpp"
 #include "translate/wfb_control.hpp"
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -24,11 +24,22 @@ public:
     DynamicLinkController(const DynamicLinkController&) = delete;
     DynamicLinkController& operator=(const DynamicLinkController&) = delete;
 
-    void start(const DlRuntimeConfig& snap, uint32_t generationId);
+    void start(const DlRuntimeConfig& snap);
     void stop();                                  // idempotent; joins the thread
     bool running() const { return running_.load(); }
     void setConfig(const DlRuntimeConfig& snap);  // hot reload (stub for now; Task 17 fills it)
     DlStatus status() const;                       // snapshot of published status
+
+    // Set once before start(): supplies the BF OSD code (0/1/2) for the status
+    // line. Invoked on the control thread; must be set while stopped.
+    void setBfCodeProvider(std::function<int()> f) { bfCodeProvider_ = std::move(f); }
+
+    // Probe rung selector: the observe-only probe rides one rung above the video
+    // MCS, clamped to the hardware ceiling. Static + header-inline so it is unit
+    // testable without constructing the controller (which binds sockets/threads).
+    static int probeRungFor(int mcs, int ceiling) {
+        return mcs + 1 < ceiling ? mcs + 1 : ceiling;
+    }
 
 private:
     void run(int evfd);                            // the poll(2) loop (Tasks 14-17); evfd passed from start()
@@ -45,7 +56,6 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> stopFlag_{false};
     std::atomic<int> eventFd_{-1};                 // reload/stop wake
-    std::atomic<uint32_t> generationId_{0};
     std::mutex lifetimeMu_;                          // serializes start/stop/setConfig lifecycle transitions
     mutable std::mutex cfgMu_;
     std::shared_ptr<const DlRuntimeConfig> cfg_;   // guarded by cfgMu_
@@ -57,11 +67,12 @@ private:
     // control thread), so they need no locking. Held by unique_ptr/optional
     // because their ctors take args and they are (re)constructed per start().
     std::unique_ptr<WfbControlClient> wfb_;
+    std::unique_ptr<WfbControlClient> probeWfb_;   // probe tx retune (nullptr if disabled)
+    int lastProbeMcs_{-1};                          // last rung pushed to the probe
     std::optional<EncoderClient>      enc_;
     std::optional<RadioTxpower>       radio_;
     std::optional<OsdWriter>          osd_;
     std::optional<Watchdog>           watchdog_;
-    std::optional<HelloSm>            hello_;      // constructed in start(); used only from run()
     std::optional<IdrListener>        idr_;        // constructed in start(); fd owned by IdrListener
     Dedup                             dedup_;
 
@@ -81,6 +92,7 @@ private:
     Decision lastEnc_{};
     Decision lastApplied_{};   // for OSD display only
     uint64_t lastDecisionMs_{0};
+    std::function<int()> bfCodeProvider_;   // 0 if unset
 };
 
 } // namespace fpvd::dynlink

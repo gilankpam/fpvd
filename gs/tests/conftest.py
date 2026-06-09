@@ -22,7 +22,7 @@ def free_port():
 @pytest.fixture
 def fake_drone():
     """A stub drone fpvd. .calls records (method, path, body). .fail toggles 500s."""
-    state = {"calls": [], "fail": False, "config": {"link": {"channel": 132}}}
+    state = {"calls": [], "fail": False, "reject": None, "config": {"link": {"channel": 132}}}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -52,6 +52,10 @@ def fake_drone():
                 self._send(404, {"error": "nf"})
 
         def do_PATCH(self):
+            if state.get("reject") is not None:
+                code, body = state["reject"]
+                self._send(code, body)
+                return
             body = self._body()
             state["calls"].append(("PATCH", self.path, body))
             if state["fail"]:

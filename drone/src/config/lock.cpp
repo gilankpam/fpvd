@@ -7,15 +7,14 @@ namespace fpvd {
 // `link.fec` covers k, n, and a wholesale subtree overwrite alike.
 static const std::vector<std::vector<std::string>> kLockedPaths = {
     {"link", "mcs"},
-    {"link", "txpower"},
     {"link", "fec"},
     {"link", "width"},
+    {"link", "txpower"},
     // NOTE: link.stbc / link.ldpc are deliberately NOT locked. They are static
-    // link parameters, not DL decisions — the GS controller never sends stbc/ldpc
-    // (see dl_wire.h: the decision carries only mcs/bandwidth/depth/k/n). The
-    // in-process controller *preserves* them on every CMD_SET_RADIO (sourced from
-    // the config snapshot, not hardcoded), so an operator may retune them while
-    // DL is enabled without the loop ever overriding the choice.
+    // link parameters the controller preserves on every CMD_SET_RADIO from the
+    // config snapshot — the GS decision never carries them — so an operator may
+    // retune them while DL is enabled. link.txpower IS locked: the per-MCS power
+    // curve drives tx power per decision, so a manual value would be overridden.
     {"video", "bitrate"},
     {"video", "qpDelta"},
     {"video", "roi"},

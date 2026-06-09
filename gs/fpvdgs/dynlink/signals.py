@@ -14,6 +14,31 @@ from .stats_client import RxEvent, SessionInfo
 WINDOW_S = 0.1  # design cadence: log_interval = 100 ms (§3)
 
 
+@dataclass(frozen=True)
+class RssiNormConfig:
+    """EIRP-normalization of the video-link RSSI by the drone's per-MCS TX
+    power. `tx_power_dbm_by_mcs` MIRRORS the drone's kTxPowerDbmByMcs curve
+    (drone/src/dynlink/txpower_curve.hpp) — both are static calibration
+    constants and MUST stay in sync. When `enabled` is False, normalization
+    is identity (raw RSSI), for rollback / back-compat."""
+    enabled: bool = True
+    p_ref_dbm: int = 29
+    tx_power_dbm_by_mcs: tuple[int, ...] = (29, 28, 25, 23, 19, 19, 19, 19)
+
+
+def normalize_rssi(
+    rssi_raw: float | None, mcs: int | None, cfg: RssiNormConfig
+) -> float | None:
+    """EIRP-normalize one RSSI reading: rssi_raw + (P_ref − curve[mcs]).
+    Clamps mcs into the curve's index range. None-safe (returns rssi_raw
+    when disabled, or when rssi_raw / mcs is None)."""
+    if not cfg.enabled or rssi_raw is None or mcs is None:
+        return rssi_raw
+    n = len(cfg.tx_power_dbm_by_mcs)
+    m = max(0, min(n - 1, int(mcs)))
+    return rssi_raw + (cfg.p_ref_dbm - cfg.tx_power_dbm_by_mcs[m])
+
+
 @dataclass
 class Signals:
     """One tick's view of the controller inputs.
@@ -25,9 +50,7 @@ class Signals:
     rssi_min_w: float | None = None       # min across antennas of rssi_min
     rssi_avg_w: float | None = None       # diversity-combined estimate
     rssi_max_w: float | None = None       # max(rssi_avg) — best-antenna operating point
-    snr_min_w: float | None = None
-    snr_avg_w: float | None = None
-    snr_max_w: float | None = None        # max(snr_avg) — best-antenna SNR
+    mcs_w: int | None = None              # received MCS of the best antenna this window
     residual_loss_w: float = 0.0          # used raw — no smoothing (§3)
     fec_work_rate_w: float = 0.0
     packet_rate_w: float = 0.0            # fragments / sec
@@ -41,8 +64,7 @@ class Signals:
 
     # EWMA-smoothed controller inputs
     rssi: float | None = None
-    snr: float | None = None
-    snr_slope: float = 0.0    # EMA of per-tick Δs.snr (dB/tick); + = rising
+    rssi_raw: float | None = None         # EWMA of the un-normalized RSSI (observability)
     fec_work: float = 0.0
     burst_rate: float = 0.0
     holdoff_rate: float = 0.0
@@ -72,19 +94,15 @@ class SignalAggregator:
     ewma_alpha_rssi: float = 0.2
     ewma_alpha_fec: float = 0.2
     ewma_alpha_burst: float = 0.1
-    # SNR-slope EMA: smooths the per-tick Δsnr so the dual-gate
-    # selector can extrapolate trend. Higher α = faster trend
-    # tracking, more chatter under noise.
-    ewma_alpha_snr_slope: float = 0.3
     # link_starved_w threshold: data fragments/sec below this counts as
     # starved. Compared per-window against packet_rate_w. Default 50 pps
     # is well below an FPV video stream's nominal ~700-1500 pps but well
     # above background noise from a stalled stream.
     starvation_threshold_pps: float = 50.0
 
+    rssi_norm: RssiNormConfig = field(default_factory=RssiNormConfig)
+
     signals: Signals = field(default_factory=Signals)
-    # Last s.snr observed; used to compute Δsnr for the slope EMA.
-    _prev_snr: float | None = field(default=None, repr=False)
 
     def update_session(self, session: SessionInfo) -> None:
         self.signals.session = session
@@ -123,14 +141,11 @@ class SignalAggregator:
         if ev.rx_ant_stats:
             rssi_mins = [a.rssi_min for a in ev.rx_ant_stats]
             rssi_avgs = [a.rssi_avg for a in ev.rx_ant_stats]
-            snr_mins = [a.snr_min for a in ev.rx_ant_stats]
-            snr_avgs = [a.snr_avg for a in ev.rx_ant_stats]
             s.rssi_min_w = float(min(rssi_mins))
             s.rssi_avg_w = float(sum(rssi_avgs) / len(rssi_avgs))
-            s.rssi_max_w = float(max(rssi_avgs))
-            s.snr_min_w = float(min(snr_mins))
-            s.snr_avg_w = float(sum(snr_avgs) / len(snr_avgs))
-            s.snr_max_w = float(max(snr_avgs))
+            best_ant = max(ev.rx_ant_stats, key=lambda a: a.rssi_avg)
+            s.rssi_max_w = float(best_ant.rssi_avg)
+            s.mcs_w = int(best_ant.mcs)
             s.ant_count = len(ev.rx_ant_stats)
         # If no antenna lines this window, keep prior values — don't
         # reset; the RSSI operating point doesn't vanish just because
@@ -139,7 +154,7 @@ class SignalAggregator:
         # --- Starvation flag (post-blackout detection) -----------------
         # Only meaningful once we've seen a session — otherwise we'd
         # flag every pre-link tick. Bypasses the survivor-bias trap of
-        # rssi/snr because it watches packet_rate, not signal quality.
+        # rssi because it watches packet_rate, not signal quality.
         s.link_starved_w = (
             s.session is not None
             and s.packet_rate_w < self.starvation_threshold_pps
@@ -147,27 +162,16 @@ class SignalAggregator:
 
         # --- EWMA smoothing (§3) ---------------------------------------
         # Smoothed inputs feed the leading loop. Use best-antenna
-        # aggregations: max(rssi_avg) / max(snr_avg) match what the
-        # diversity receiver actually decodes against (and what the OSD
-        # shows). min(rssi_min) tracks the weakest antenna and misses
+        # aggregation: max(rssi_avg) matches what the diversity receiver
+        # actually decodes against (and what the OSD shows).
+        # min(rssi_min) tracks the weakest antenna and misses
         # best-antenna degradation entirely.
         if s.rssi_max_w is not None:
-            s.rssi = _ewma(s.rssi, s.rssi_max_w, self.ewma_alpha_rssi)
-        if s.snr_max_w is not None:
-            s.snr = _ewma(s.snr, s.snr_max_w, self.ewma_alpha_rssi)
-
-        # SNR slope: EMA of Δs.snr per tick. First sample yields 0
-        # (no prior to diff against). Used by the dual-gate selector
-        # to predict whether margin will hold across the next horizon.
-        if s.snr is not None:
-            if self._prev_snr is None:
-                s.snr_slope = 0.0
-            else:
-                delta = s.snr - self._prev_snr
-                s.snr_slope = _ewma(
-                    s.snr_slope, delta, self.ewma_alpha_snr_slope
-                )
-            self._prev_snr = s.snr
+            # Normalize per-window by the received MCS BEFORE smoothing, so a
+            # promote's power drop never enters the EWMA as a fake fade.
+            rssi_norm_w = normalize_rssi(s.rssi_max_w, s.mcs_w, self.rssi_norm)
+            s.rssi = _ewma(s.rssi, rssi_norm_w, self.ewma_alpha_rssi)
+            s.rssi_raw = _ewma(s.rssi_raw, s.rssi_max_w, self.ewma_alpha_rssi)
 
         s.fec_work = _ewma(s.fec_work, s.fec_work_rate_w, self.ewma_alpha_fec)
         s.burst_rate = _ewma(s.burst_rate, s.burst_rate_w, self.ewma_alpha_burst)

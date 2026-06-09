@@ -8,11 +8,13 @@
 #include "translate/wfb.hpp"
 #include "translate/wfb_control.hpp"
 #include "link_width.hpp"
+#include "probe/probe_specs.hpp"
+#include "probe/probe_constants.hpp"
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <fstream>
 #include <filesystem>
-#include <random>
 #include <thread>
 
 namespace fpvd {
@@ -28,7 +30,6 @@ Daemon::Daemon(DaemonPaths paths)
     : paths_(std::move(paths)),
       waybeam_(paths_.dlEndpoints.encHost, paths_.dlEndpoints.encPort),
       dl_(paths_.dlEndpoints),
-      dlGenerationId_(std::random_device{}()),
       startedAt_(std::chrono::steady_clock::now()) {
 }
 
@@ -62,7 +63,8 @@ void Daemon::bootstrap(bool startProcesses) {
         radio_ = {rr.driver, rr.iface, rr.adapterId};
         seedOrchestrator();
         orch_.startAll();
-        reconcileBeamforming();
+        reconcileBeamforming(true);
+        dl_.setBfCodeProvider([this] { return bfOsdCode(); });
         if (effective_.dynamicLink.enabled) {
             startController();
         } else {
@@ -131,6 +133,17 @@ void Daemon::seedOrchestrator() {
                      : RestartPolicy::Never;
         orch_.add(std::move(spec));
     }
+
+    // Observe-only probe link: ONE FEC-off wfb_tx tracking current+1, owned by
+    // the dynamic-link lifecycle. Seeded only when dynamicLink is enabled; the
+    // controller retunes it live on each {mcs} (see DynamicLinkController).
+    if (effective_.dynamicLink.enabled) {
+        static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
+        const int probeMcs = std::min(effective_.dynamicLink.safe.mcs + 1,
+                                      kProbeMcsCeiling);
+        for (auto& s : buildProbeSpecs(effective_, iface, key, kProbeFeeder, probeMcs))
+            orch_.add(std::move(s));
+    }
 }
 
 void Daemon::restartOsd() {
@@ -182,7 +195,9 @@ void Daemon::writeOsdBaseLine() {
     {
         std::ofstream f(tmp, std::ios::trunc);
         if (!f) return;
-        f << "&L50&F30 &B  T&T  W&W  CPU&C\n";
+        const int bfc = bfOsdCode();
+        const char* bf = bfc == 2 ? " B+" : bfc == 1 ? " B-" : "";
+        f << "&L50&F30 &B  T&T  W&W  CPU&C" << bf << "\n";
     }
     std::error_code ec;
     std::filesystem::rename(tmp, path, ec);
@@ -201,7 +216,7 @@ void Daemon::osdHeartbeat() {
     }
 }
 
-void Daemon::reconcileBeamforming() {
+void Daemon::reconcileBeamforming(bool force) {
     const auto& bfc = effective_.link.beamforming;
     BfParams p;
     p.iface      = radio_.iface.empty() ? "wlan0" : radio_.iface;
@@ -210,7 +225,13 @@ void Daemon::reconcileBeamforming() {
     p.width      = effective_.link.width;
     p.ackTimeout = bfc.ackTimeout;
     p.intervalMs = bfc.intervalMs;
-    bf_.reconcile(bfc.enabled, p);
+    bf_.reconcile(bfc.enabled, p, force);
+}
+
+int Daemon::bfOsdCode() const {
+    auto bf = bf_.status();
+    if (bf.state != BfState::Active) return 0;
+    return (bf.cbrRssi != 0 && bf.cbrFresh) ? 2 : 1;
 }
 
 void Daemon::rewriteWaybeamJson() {
@@ -220,7 +241,25 @@ void Daemon::rewriteWaybeamJson() {
 void Daemon::startController() {
     // Builds a fresh snapshot from the current effective_ config + detected iface,
     // and starts the in-process control loop.
-    dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface), dlGenerationId_);
+    dl_.start(dynlink::buildDlSnapshot(effective_, radio_.iface));
+}
+
+void Daemon::addProbeStream() {
+    const std::string iface = radio_.iface.empty() ? "wlan0" : radio_.iface;
+    static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
+    const int probeMcs = std::min(effective_.dynamicLink.safe.mcs + 1,
+                                  kProbeMcsCeiling);
+    for (auto& s : buildProbeSpecs(effective_, iface, "/etc/drone.key",
+                                   kProbeFeeder, probeMcs)) {
+        const std::string name = s.name;
+        orch_.add(std::move(s));
+        orch_.restart(name);   // add() registers; restart() starts a not-running spec
+    }
+}
+
+void Daemon::removeProbeStream() {
+    orch_.remove("probe-feed");   // remove feeder first (it startAfter the tx)
+    orch_.remove("probe-tx");
 }
 
 PatchResult Daemon::patchPending(const nlohmann::json& patch) {
@@ -335,7 +374,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         }
         seedOrchestrator();
         orch_.startAll();
-        reconcileBeamforming();
+        reconcileBeamforming(true);
         // Start AFTER radio_ is refreshed so the snapshot's iface is fresh.
         if (enabledNew)
             startController();
@@ -368,10 +407,13 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // runs regardless of which hot return is taken below (the deferred
         // nicChannel return detaches a worker and returns early). start() binds
         // sockets + launches the thread; setConfig() hot-reloads; stop() joins.
-        if (!enabledOld && enabledNew)
+        if (!enabledOld && enabledNew) {
+            addProbeStream();      // targeted orch_.add + start (no video bounce)
             startController();
+        }
         else if (enabledOld && !enabledNew) {
             dl_.stop();
+            removeProbeStream();   // targeted orch_.remove (no video bounce)
             restateStaticLink();   // revert radio + encoder to the static config
         }
         else if (enabledOld && enabledNew && (subs.dynamicLink || link.videoRadiotap))
@@ -435,6 +477,11 @@ ApplyResult Daemon::apply(bool reallyRestart) {
                 return {false, {}, restarted, rr.error, version_};
             }
         }
+
+        // Beamforming is reconciled here (not via the radio subsystem). Force a
+        // re-arm when the radio was touched this apply (a stbc/radiotap retune
+        // can reset the bf_monitor registers), otherwise reconcile normally.
+        reconcileBeamforming(subs.radio);
 
         // (B) Link-dropping change (channel and/or width) — defer ~200ms so the
         // HTTP response flushes before the air link (and wfb_tun session) drops.

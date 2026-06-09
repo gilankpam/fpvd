@@ -8,6 +8,11 @@
 
 namespace fpvd {
 
+// Consecutive same-token ticks before a report is considered stale (no fresh
+// CBR). ~1s at the default 100ms interval — responsive enough for the OSD to
+// flag a silent ground station, while tolerating a few dropped CBRs.
+static constexpr int kCbrStaleTicks = 10;
+
 static std::string extractMac(const std::string& text) {
     // Find the first aa:bb:cc:dd:ee:ff token.
     for (size_t i = 0; i + 17 <= text.size(); ++i) {
@@ -44,6 +49,27 @@ std::string resolveLocalMac(const std::string& procBase,
     return "";
 }
 
+int parseCbrToken(const std::string& rfinfo) {
+    size_t colon = rfinfo.find(':');
+    std::string tok = rfinfo.substr(0, colon);   // colon==npos -> whole string
+    try { return std::stoi(tok); } catch (...) { return -1; }
+}
+
+int parseCbrRssi(const std::string& rfinfo) {
+    int field = 0;
+    size_t start = 0;
+    while (field < 3) {                       // skip token, ndp0, ndp1
+        size_t colon = rfinfo.find(':', start);
+        if (colon == std::string::npos) return 0;
+        start = colon + 1;
+        ++field;
+    }
+    size_t end = rfinfo.find(':', start);
+    std::string tok = rfinfo.substr(start, end == std::string::npos
+                                            ? std::string::npos : end - start);
+    try { return std::stoi(tok); } catch (...) { return 0; }
+}
+
 BeamformingController::BeamformingController(std::string procBase,
                                              std::string sysBase)
     : procBase_(std::move(procBase)), sysBase_(std::move(sysBase)) {}
@@ -74,7 +100,7 @@ std::string BeamformingController::readNode(const std::string& iface,
     return ss.str();
 }
 
-void BeamformingController::reconcile(bool enabled, const BfParams& p) {
+void BeamformingController::reconcile(bool enabled, const BfParams& p, bool force) {
     if (!enabled) {
         stop();
         std::lock_guard<std::mutex> g(mu_);
@@ -83,13 +109,14 @@ void BeamformingController::reconcile(bool enabled, const BfParams& p) {
         return;
     }
 
-    // Already running with identical params => no-op.
-    {
+    // Already running with identical params => no-op, UNLESS force (e.g. a radio
+    // reset wiped the registers and we must re-write the conf node).
+    if (!force) {
         std::lock_guard<std::mutex> g(mu_);
         if (running_ && params_ == p && status_.state == BfState::Active)
             return;
     }
-    // Any change while running => restart cleanly.
+    // Any change (or forced re-arm) while running => restart cleanly.
     stop();
 
     BfStatus s;
@@ -134,6 +161,10 @@ void BeamformingController::startLoop() {
 
 void BeamformingController::loop() {
     int token = 0;
+    // Per-loop (reset on every reconcile/restart). lastCbrToken=-1 makes the
+    // first rfinfo read count as "changed", so startup never spuriously stales.
+    int lastCbrToken = -1;
+    int cbrStaleTicks = 0;
     BfParams p;
     { std::lock_guard<std::mutex> g(mu_); p = params_; }
     const int bw = modulationWidth(p.width);
@@ -142,23 +173,38 @@ void BeamformingController::loop() {
         std::string trig = resolveLocalMac(procBase_, sysBase_, p.iface);
         trig += " " + p.remoteMac + " 0 0 " + std::to_string(token) +
                 " " + std::to_string(bw);
-        if (!writeNode(p.iface, "bf_monitor_trig", trig)) {
+        bool ok = writeNode(p.iface, "bf_monitor_trig", trig);
+        if (!ok) {
+            // Transient write failure: record it but KEEP the loop alive so it
+            // self-heals on the next tick. A single failure must not kill BF.
             std::lock_guard<std::mutex> g(mu_);
             status_.state = BfState::Error;
             status_.reason = "bf_monitor_trig write failed";
-            return;
-        }
-        token = (token + 1) % 64;
-        std::string cbr = readNode(p.iface, "bf_monitor_trig");
-        {
+        } else {
+            token = (token + 1) % 64;
+            std::string cbr = readNode(p.iface, "bf_monitor_trig");
+            std::string rf = readNode(p.iface, "bf_monitor_rfinfo");
+            int cbrRssi = parseCbrRssi(rf);
+            int cbrTok = parseCbrToken(rf);
+            // The rfinfo token advances only on a NEW CBR; if it stops moving the
+            // GS has gone silent. Mark stale after kCbrStaleTicks unchanged ticks.
+            if (cbrTok != lastCbrToken) { lastCbrToken = cbrTok; cbrStaleTicks = 0; }
+            else if (cbrStaleTicks < kCbrStaleTicks) { ++cbrStaleTicks; }
+            const bool fresh = (cbrTok >= 0) && (cbrStaleTicks < kCbrStaleTicks);
             std::lock_guard<std::mutex> g(mu_);
             status_.soundingCount++;
+            status_.cbrRssi = cbrRssi;
+            status_.cbrFresh = fresh;
             status_.lastCbr = cbr.empty() ? std::nullopt
                                           : std::optional<std::string>(cbr);
+            if (status_.state == BfState::Error) {   // recovered from a transient failure
+                status_.state = BfState::Active;
+                status_.reason.clear();
+            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(p.intervalMs));
         if (stopFlag_.load()) break;
-        writeNode(p.iface, "bf_monitor_en", "1");
+        if (ok) writeNode(p.iface, "bf_monitor_en", "1");
     }
 }
 

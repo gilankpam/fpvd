@@ -5,6 +5,7 @@
            "beamforming": {"enabled": false, "remoteMac": "", "ackTimeout": 255, "intervalMs": 100}},
   "video": {"codec": "h265", "resolution": "1920x1080", "fps": 60,
             "bitrate": 8192, "rcMode": "cbr", "gopSize": 1.0, "qpDelta": -4,
+            "sensorBin": "",
             "roi": {"enabled": true, "qp": 0, "center": 0.4, "steps": 2}},
   "image": {"mirror": false, "flip": false, "rotate": 0},
   "telemetry": {"router": "msposd", "serial": "ttyS2", "osdFps": 20, "baud": 115200},
@@ -19,7 +20,11 @@
     "applySubPaceMs": 5,
     "osd": {"enabled": true, "debugLatency": false},
     "roiQp": {"thresholdKbps": 6000, "lowAnchorKbps": 2000, "floor": -24, "step": 3},
-    "safe": {"mcs": 1, "k": 8, "n": 12, "depth": 1, "bandwidth": 20, "txPowerDbm": 20, "bitrateKbps": 2000}
+    "safe": {"mcs": 1, "k": 8, "n": 12, "depth": 1, "bandwidth": 20, "txPowerDbm": 20, "bitrateKbps": 2000},
+    "bitrate": {"minBitrateKbps": 1000, "maxBitrateKbps": 24000},
+    "fec": {"baseRedundancyRatio": 0.5, "blocksPerFrame": 2.0, "kMin": 2, "kMax": 50}
   },
-  "services": {}
+  "services": {},
+  "probe": {"enabled": false, "mcsList": [], "pps": 25, "packetBytes": 1400,
+            "basePort": 50, "baseFeedPort": 6700}
 }

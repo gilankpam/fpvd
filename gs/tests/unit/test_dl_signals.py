@@ -15,6 +15,7 @@ def _rx(
     bursts_rec: int = 0,
     holdoff: int = 0,
     late_deadline: int = 0,
+    mcs: int = 0,
     ants: list[tuple[int, int, int, int]] | None = None,
 ) -> RxEvent:
     """Build a minimal RxEvent for tests. ants = [(rssi_min, rssi_avg, snr_min, snr_avg), ...]"""
@@ -22,7 +23,7 @@ def _rx(
         ants = [(-60, -58, 20, 22)]
     ant_stats = [
         RxAnt(
-            ant=i, freq=5765, mcs=7, bw=20, pkt_recv=100,
+            ant=i, freq=5765, mcs=mcs, bw=20, pkt_recv=100,
             rssi_min=a[0], rssi_avg=a[1], rssi_max=a[1] + 2,
             snr_min=a[2], snr_avg=a[3], snr_max=a[3] + 2,
         )
@@ -122,14 +123,6 @@ def test_rssi_max_is_max_of_avgs_across_antennas():
     assert s.rssi_max_w == -55.0  # best antenna's avg
 
 
-def test_snr_max_is_max_of_avgs_across_antennas():
-    agg = SignalAggregator()
-    s = agg.consume(_rx(0.1, ants=[(-55, -55, 20, 22),
-                                   (-72, -70, 15, 17),
-                                   (-60, -58, 18, 30)]))
-    assert s.snr_max_w == 30.0  # best antenna's snr_avg
-
-
 def test_ewma_smoothes_rssi_max_not_min():
     """Smoothed s.rssi must track best-antenna avg (max-of-avgs), not
     the worst-antenna min — that was the survivor-bias bug."""
@@ -137,7 +130,6 @@ def test_ewma_smoothes_rssi_max_not_min():
     s = agg.consume(_rx(0.1, ants=[(-55, -50, 25, 30),
                                    (-72, -70, 15, 17)]))
     assert s.rssi == -50.0   # max(rssi_avg) — the best antenna
-    assert s.snr == 30.0     # max(snr_avg)
 
 
 def test_link_starved_w_when_packet_rate_below_threshold():
@@ -167,39 +159,64 @@ def test_link_starved_false_when_packet_rate_high():
     assert s.link_starved_w is False
 
 
-def test_snr_slope_initialises_zero_on_first_window():
-    agg = SignalAggregator()
-    s = agg.consume(_rx(0.1, ants=[(-55, -55, 25, 25)]))
-    # First sample — no prior to diff against.
-    assert s.snr_slope == 0.0
+def test_signals_has_no_snr_fields():
+    from fpvdgs.dynlink.signals import Signals
+    s = Signals()
+    assert not hasattr(s, "snr") and not hasattr(s, "snr_slope")
+    assert not hasattr(s, "snr_max_w")
 
 
-def test_snr_slope_tracks_per_tick_delta_with_alpha():
-    agg = SignalAggregator(ewma_alpha_rssi=1.0,         # no smoothing on s.snr
-                           ewma_alpha_snr_slope=1.0)    # no smoothing on slope
-    # Two windows with snr 20 → 25. Δ = +5.
-    s = agg.consume(_rx(0.1, ants=[(-50, -50, 20, 20)]))
-    assert s.snr == 20.0
-    s = agg.consume(_rx(0.2, ants=[(-50, -50, 25, 25)]))
-    # alpha=1.0 → slope = delta = 5.0
-    assert abs(s.snr_slope - 5.0) < 1e-9
+def test_rssi_normalized_by_received_mcs():
+    """A window at MCS5 (curve 19, P_ref 29) raises signals.rssi by +10
+    vs the raw value; rssi_raw keeps the measured value."""
+    agg = SignalAggregator(ewma_alpha_rssi=1.0)  # no smoothing → see one window
+    s = agg.consume(_rx(0.1, mcs=5, ants=[(-70, -70, 10, 10)]))
+    assert s.rssi == -60.0       # -70 + (29 - 19)
+    assert s.rssi_raw == -70.0   # measured, un-normalized
+    assert s.rssi_max_w == -70.0
 
 
-def test_snr_slope_stable_under_constant_snr():
-    agg = SignalAggregator(ewma_alpha_rssi=1.0,
-                           ewma_alpha_snr_slope=0.5)
-    # Repeated identical windows — slope should converge to 0.
-    for _ in range(10):
-        s = agg.consume(_rx(0.1, ants=[(-50, -50, 25, 25)]))
-    assert abs(s.snr_slope) < 1e-9
+def test_rssi_norm_disabled_is_identity():
+    from fpvdgs.dynlink.signals import RssiNormConfig
+    agg = SignalAggregator(
+        ewma_alpha_rssi=1.0, rssi_norm=RssiNormConfig(enabled=False)
+    )
+    s = agg.consume(_rx(0.1, mcs=5, ants=[(-70, -70, 10, 10)]))
+    assert s.rssi == -70.0       # raw, unchanged
+    assert s.rssi_raw == -70.0
 
 
-def test_snr_slope_tracks_negative_trend():
-    agg = SignalAggregator(ewma_alpha_rssi=1.0,
-                           ewma_alpha_snr_slope=1.0)
-    # Falling SNR: 30 → 25 → 20 → 15.
-    agg.consume(_rx(0.1, ants=[(-50, -50, 30, 30)]))
-    s = agg.consume(_rx(0.2, ants=[(-50, -50, 25, 25)]))
-    assert s.snr_slope == -5.0
-    s = agg.consume(_rx(0.3, ants=[(-50, -50, 20, 20)]))
-    assert s.snr_slope == -5.0
+def test_rssi_ewma_removes_power_step_across_mcs_climb():
+    """Fixed distance, promote MCS0→MCS5: drone power drops 29→19 so the
+    measured RSSI drops ~10 dB. Normalized signals.rssi stays flat (the
+    power step is removed before the EWMA); rssi_raw shows the step down."""
+    agg = SignalAggregator(ewma_alpha_rssi=0.2)
+    # Window 1: MCS0 @ raw -60  → normalized -60.
+    s = agg.consume(_rx(0.1, mcs=0, ants=[(-60, -60, 20, 20)]))
+    assert s.rssi == -60.0
+    assert s.rssi_raw == -60.0
+    # Window 2: MCS5 @ raw -70 (power dropped 10) → normalized -60.
+    s = agg.consume(_rx(0.2, mcs=5, ants=[(-70, -70, 12, 12)]))
+    assert s.rssi == -60.0            # flat — power step removed
+    assert s.rssi_raw < -60.0         # raw EWMA steps down toward -70
+
+
+def test_rssi_norm_uses_best_antenna_mcs():
+    """The window's MCS comes from the best (max rssi_avg) antenna, not any
+    other. Best antenna: rssi_avg -55 @ MCS5 (offset +10); worst: rssi_avg
+    -70 @ MCS0 (offset 0). Normalized rssi must use the best antenna's MCS5
+    → -45, NOT the worst antenna's MCS0 → -55."""
+    agg = SignalAggregator(ewma_alpha_rssi=1.0)
+    ev = _rx(0.1)
+    ev.rx_ant_stats = [
+        RxAnt(ant=0, freq=5765, mcs=5, bw=20, pkt_recv=100,
+              rssi_min=-57, rssi_avg=-55, rssi_max=-53,
+              snr_min=20, snr_avg=22, snr_max=24),
+        RxAnt(ant=1, freq=5765, mcs=0, bw=20, pkt_recv=100,
+              rssi_min=-72, rssi_avg=-70, rssi_max=-68,
+              snr_min=10, snr_avg=12, snr_max=14),
+    ]
+    s = agg.consume(ev)
+    assert s.rssi_max_w == -55.0   # best antenna's rssi_avg
+    assert s.mcs_w == 5            # best antenna's MCS, not the worst's 0
+    assert s.rssi == -45.0         # -55 + (29 - curve[5]=19), best-antenna MCS5

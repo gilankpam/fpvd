@@ -13,15 +13,14 @@ import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .flightlog import FlightLogConfig
+from .learned_prior import LearnedPriorConfig
 from .policy import (
-    CooldownConfig, FECBounds, GateConfig, LeadingLoopConfig,
-    PolicyConfig, ProfileSelectionConfig, SafeDefaults,
+    GateConfig, LeadingLoopConfig,
+    PolicyConfig, ProfileSelectionConfig,
 )
-from .bitrate import BitrateConfig
-from .dynamic_fec import DynamicFecConfig
-from .predictor import PredictorConfig
 from .profile import RadioProfile, load_profile
-from .signals import SignalAggregator
+from .signals import RssiNormConfig, SignalAggregator
 
 log = logging.getLogger("fpvdgs.dynlink")
 
@@ -83,15 +82,40 @@ _DEPRECATED_LEADING_KEYS = {
     "tx_power_step_max_db", "tx_power_gain_up_db", "tx_power_gain_down_db",
 }
 
+_DEPRECATED_GATE_KEYS = {
+    "snr_ema_alpha", "snr_slope_alpha", "snr_predict_horizon_ticks",
+    "snr_safety_margin", "loss_margin_weight", "fec_margin_weight",
+    "hysteresis_up_db", "hysteresis_down_db",
+}
+
+_DEPRECATED_PHASE3A_KEYS = {
+    # bitrate/FEC/predictor knobs moved to the drone in Phase 3a.
+    "utilization_factor", "min_bitrate_kbps", "max_bitrate_kbps",
+    "base_redundancy_ratio", "max_redundancy_ratio", "blocks_per_frame",
+    "depth_max", "n_loss_threshold", "n_loss_windows", "n_loss_step",
+    "n_recover_windows", "n_recover_step", "max_n_escalation",
+    "per_packet_airtime_us", "max_latency_ms",
+}
+
 
 def _build_policy_config(raw: dict) -> PolicyConfig:
     leading_raw = raw.get("leading_loop", {})
     gate_raw = raw.get("gate", {})
     selection_raw = raw.get("profile_selection", {})
-    cooldown_raw = raw.get("cooldown", {})
+
+    bitrate_raw = raw.get("policy", {}).get("bitrate", {})
     fec_raw = raw.get("fec", {})
-    safe_raw = raw.get("safe_defaults", {})
     video_raw = raw.get("video", {})
+    retired_present = sorted(
+        {k for raw_sub in (bitrate_raw, fec_raw, video_raw)
+         for k in _DEPRECATED_PHASE3A_KEYS
+         if k in (raw_sub or {})}
+    )
+    if retired_present:
+        log.warning(
+            "bitrate/FEC/predictor knobs are now drone-local (Phase 3a) and "
+            "ignored on the GS: %s", ", ".join(retired_present)
+        )
 
     deprecated_present = sorted(
         k for k in _DEPRECATED_LEADING_KEYS if k in leading_raw
@@ -140,17 +164,18 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
         ),
     )
 
+    dep_gate = sorted(k for k in _DEPRECATED_GATE_KEYS if k in gate_raw)
+    if dep_gate:
+        log.warning(
+            "gate has deprecated SNR knobs (ignored): %s. "
+            "MCS is now probe-driven.", ", ".join(dep_gate)
+        )
+
     gate = GateConfig(
-        snr_ema_alpha=float(gate_raw.get("snr_ema_alpha", 0.3)),
-        snr_slope_alpha=float(gate_raw.get("snr_slope_alpha", 0.3)),
-        snr_predict_horizon_ticks=float(
-            gate_raw.get("snr_predict_horizon_ticks", 3.0)
-        ),
-        snr_safety_margin=float(gate_raw.get("snr_safety_margin", 3.0)),
-        loss_margin_weight=float(gate_raw.get("loss_margin_weight", 20.0)),
-        fec_margin_weight=float(gate_raw.get("fec_margin_weight", 5.0)),
-        hysteresis_up_db=float(gate_raw.get("hysteresis_up_db", 2.5)),
-        hysteresis_down_db=float(gate_raw.get("hysteresis_down_db", 1.0)),
+        probe_viable_threshold=float(gate_raw.get("probe_viable_threshold", 0.99)),
+        probe_freshness_ms=float(gate_raw.get("probe_freshness_ms", 500.0)),
+        promote_debounce_windows=int(gate_raw.get("promote_debounce_windows", 3)),
+        video_demote_per=float(gate_raw.get("video_demote_per", 0.05)),
         emergency_loss_rate=float(gate_raw.get("emergency_loss_rate", 0.05)),
         emergency_fec_pressure=float(
             gate_raw.get("emergency_fec_pressure", 0.80)
@@ -179,129 +204,62 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
             selection_raw.get("upward_confidence_loops", 4)
         ),
     )
-    cooldown = CooldownConfig(
-        min_change_interval_ms_fec=float(
-            cooldown_raw.get("min_change_interval_ms_fec", 200.0)
-        ),
-        min_change_interval_ms_depth=float(
-            cooldown_raw.get("min_change_interval_ms_depth", 200.0)
-        ),
-        min_change_interval_ms_radio=float(
-            cooldown_raw.get("min_change_interval_ms_radio", 500.0)
-        ),
-        min_change_interval_ms_cross=float(
-            cooldown_raw.get("min_change_interval_ms_cross", 50.0)
-        ),
-    )
-    fec = FECBounds(
-        depth_max=int(fec_raw.get("depth_max", 3)),
-    )
 
-    fec_kbounds_raw = fec_raw.get("k_bounds", {})
-    max_red = float(fec_raw.get("max_redundancy_ratio", 1.0))
-    hard_bpf = 1.0 + max_red
-    bpf = float(fec_raw.get("blocks_per_frame", hard_bpf))
-    if bpf < hard_bpf:
-        log.warning(
-            "config: fec.blocks_per_frame=%.2f is below "
-            "1 + max_redundancy_ratio (%.2f) — block_fill will exceed "
-            "one frame period under sustained loss. Set blocks_per_frame "
-            ">= %.2f for the hard latency bound.",
-            bpf, hard_bpf, hard_bpf,
-        )
-    dynamic_fec = DynamicFecConfig(
-        k_min=int(fec_kbounds_raw.get("min", 4)),
-        k_max=int(fec_kbounds_raw.get("max", 16)),
-        base_redundancy_ratio=float(fec_raw.get("base_redundancy_ratio", 0.5)),
-        max_redundancy_ratio=max_red,
-        blocks_per_frame=bpf,
-        n_loss_threshold=float(fec_raw.get("n_loss_threshold", 0.02)),
-        n_loss_windows=int(fec_raw.get("n_loss_windows", 3)),
-        n_loss_step=int(fec_raw.get("n_loss_step", 1)),
-        n_recover_windows=int(fec_raw.get("n_recover_windows", 10)),
-        n_recover_step=int(fec_raw.get("n_recover_step", 1)),
-        max_n_escalation=int(fec_raw.get("max_n_escalation", 4)),
-    )
-
-    # Legacy fec.* keys: present in old gs.yaml configs but no longer
-    # wired. Log a warning so the operator cleans them up.
-    _legacy_fec_keys = (
-        "mtu_bytes",                    # now drone-reported via DLHE (P4a)
-        "fec_block_fill_ms_target",     # removed during the static-table era
-        "n_min", "n_preempt_step",      # removed during the static-table era
-    )
-    _legacy_fec_reasons = {
-        "mtu_bytes": "MTU is now reported by the drone at runtime",
-        "fec_block_fill_ms_target": "block-fill is now bounded by k_bounds.max",
-        "n_min": "absorbed into k_bounds.min",
-        "n_preempt_step": "preemptive escalation removed",
-    }
-    for k in _legacy_fec_keys:
-        if k in fec_raw:
-            log.warning(
-                "config: ignoring legacy fec.%s — %s", k,
-                _legacy_fec_reasons.get(k, "deprecated"),
-            )
-
-    # Legacy encoder keys: encoder.fps moved drone-side.
-    encoder_raw = raw.get("encoder", {})
-    if "fps" in encoder_raw:
-        log.warning(
-            "config: ignoring legacy encoder.fps — FPS is now reported "
-            "by the drone via DLHE (P4a)"
-        )
-    safe_video = safe_raw.get("video", {})
-    safe = SafeDefaults(
-        k=int(safe_video.get("k", 8)),
-        n=int(safe_video.get("n", 12)),
-        depth=int(safe_raw.get("depth", 1)),
-        mcs=int(safe_raw.get("mcs", 1)),
-    )
-    predictor = PredictorConfig(
-        per_packet_airtime_us=float(video_raw.get("per_packet_airtime_us", 80.0)),
-    )
     policy_raw = raw.get("policy", {})
-    bitrate_raw = policy_raw.get("bitrate", {})
-    if "base_redundancy_ratio" in bitrate_raw:
-        log.warning(
-            "policy.bitrate.base_redundancy_ratio is deprecated and "
-            "ignored; fec.base_redundancy_ratio is now authoritative "
-            "(bitrate is derived from live (k, n) per the bitrate-aware "
-            "FEC design)."
-        )
-    try:
-        bitrate = BitrateConfig(
-            utilization_factor=float(bitrate_raw.get("utilization_factor", 0.8)),
-            min_bitrate_kbps=int(bitrate_raw.get("min_bitrate_kbps", 1000)),
-            max_bitrate_kbps=int(bitrate_raw.get("max_bitrate_kbps", 24000)),
-        )
-    except ValueError as e:
-        raise ValueError(f"policy.bitrate.{e}") from e
+
+    lp_raw = raw.get("learned_prior", {}) or {}
+    fl_raw = lp_raw.get("flightlog", {}) or {}
+    learned_prior = LearnedPriorConfig(
+        enabled=bool(lp_raw.get("enabled", True)),
+        bin_width_db=float(lp_raw.get("bin_width_db", 2.0)),
+        rssi_min=float(lp_raw.get("rssi_min", -90.0)),
+        rssi_max=float(lp_raw.get("rssi_max", -30.0)),
+        ewma_alpha=float(lp_raw.get("ewma_alpha", 0.1)),
+        viable_threshold=float(lp_raw.get("viable_threshold", 0.99)),
+        min_samples_warmstart=int(lp_raw.get("min_samples_warmstart", 20)),
+        min_samples_predictive=int(lp_raw.get("min_samples_predictive", 40)),
+        warmstart_margin=int(lp_raw.get("warmstart_margin", 0)),
+        predictive_horizon_ticks=int(lp_raw.get("predictive_horizon_ticks", 3)),
+        predictive_debounce_windows=int(lp_raw.get("predictive_debounce_windows", 3)),
+        flush_interval_observations=int(lp_raw.get("flush_interval_observations", 50)),
+        persist_dir=str(lp_raw.get("persist_dir", "/etc/fpvd/learned")),
+    )
+    flightlog = FlightLogConfig(
+        enabled=bool(fl_raw.get("enabled", True)),
+        dir=str(fl_raw.get("dir", "/media/dvr/log/dynamic-link/")),
+        max_files=int(fl_raw.get("max_files", 8)),
+        max_mb=float(fl_raw.get("max_mb", 4.0)),
+        flight_gap_s=float(fl_raw.get("flight_gap_s", 15.0)),
+    )
+
     return PolicyConfig(
         leading=leading,
         gate=gate,
         selection=selection,
-        cooldown=cooldown,
-        fec=fec,
-        safe=safe,
-        bitrate=bitrate,
-        dynamic_fec=dynamic_fec,
-        predictor=predictor,
-        max_latency_ms=float(video_raw.get("max_latency_ms", 50.0)),
         starvation_windows=int(policy_raw.get("starvation_windows", 5)),
+        learned_prior=learned_prior,
+        flightlog=flightlog,
     )
 
 
 def _build_aggregator(raw: dict) -> SignalAggregator:
     s = raw.get("smoothing", {})
-    gate = raw.get("gate", {})
     starv = s.get("starvation_threshold_pps", 50.0)
-    # snr_slope alpha lives under [gate] so operators can tune it
-    # alongside the other gate knobs; aggregator just consumes it.
+    rn = raw.get("rssi_norm", {}) or {}
+    # Defer to the dataclass for default values so the drone-mirror curve
+    # lives in exactly one place (signals.RssiNormConfig).
+    d = RssiNormConfig()
+    rssi_norm = RssiNormConfig(
+        enabled=bool(rn.get("enabled", d.enabled)),
+        p_ref_dbm=int(rn.get("p_ref_dbm", d.p_ref_dbm)),
+        tx_power_dbm_by_mcs=tuple(
+            int(x) for x in rn.get("tx_power_dbm_by_mcs", d.tx_power_dbm_by_mcs)
+        ),
+    )
     return SignalAggregator(
         ewma_alpha_rssi=float(s.get("ewma_alpha_rssi", 0.2)),
         ewma_alpha_fec=float(s.get("ewma_alpha_fec", 0.2)),
         ewma_alpha_burst=float(s.get("ewma_alpha_burst", 0.1)),
-        ewma_alpha_snr_slope=float(gate.get("snr_slope_alpha", 0.3)),
         starvation_threshold_pps=float(starv),
+        rssi_norm=rssi_norm,
     )

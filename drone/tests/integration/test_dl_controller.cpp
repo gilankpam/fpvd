@@ -31,12 +31,12 @@ TEST_CASE("controller starts and stops cleanly") {
     DlRuntimeConfig snap{};                 // zero-ish; fields not exercised here
     snap.healthTimeoutMs = 10000; snap.iface = "wlan0";
     DynamicLinkController c(ephemeral());
-    c.start(snap, /*generationId=*/0x1234);
+    c.start(snap);
     CHECK(c.status().running == true);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     c.stop();
     CHECK(c.status().running == false);
-    c.start(snap, 0x1234);                  // restartable
+    c.start(snap);                           // restartable
     CHECK(c.status().running == true);
     c.stop();
 }
@@ -239,23 +239,28 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.stbc                  = true;      // preserved on every setRadio (incl. safe)
     snap.ldpc                  = true;
+    snap.linkBandwidth         = 40;        // A1: bandwidth from config, not wire
     snap.iface                 = "wlan-test-nonexistent";  // iw will fail, not hang
     snap.safe = SafeDefaults{
         /*mcs=*/1, /*k=*/8, /*n=*/12, /*depth=*/0,
         /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
-    c.start(snap, /*generationId=*/0x1234);
+    c.start(snap);
     CHECK(c.status().running == true);
 
-    // 1) Inject one decision. mcs=7, bw=40, k=4, n=6, bitrate=6000, fps=60.
+    // 1) Inject one decision. mcs=7, bw=40. The GS-sent k/n/bitrate are now
+    //    IGNORED (Phase 3a): the drone recomputes them from {mcs,bandwidth} via
+    //    applyLocalCompute. For mcs=7/bw=40 the drone engine yields k=29, n=44,
+    //    bitrate=24000 (clamped at maxBitrateKbps). The wire values below are
+    //    deliberately set to different numbers to prove they are overridden.
     Decision d{};
     d.magic       = kWireMagic;
     d.version     = kWireVersion;
     d.sequence    = 100;
     d.timestampMs = 1;
     d.mcs         = 7;
-    d.bandwidth   = 40;
+    d.bandwidth   = 20;   // wire says 20; config (linkBandwidth=40) must win
     d.txPowerDbm  = 10;
     d.k           = 4;
     d.n           = 6;
@@ -268,11 +273,11 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     // so the dedup drops all but the first accepted copy.
     bool gotFec = waitFor([&] {
         sendDecision(ep.listenPort, d);
-        return wfb.sawFec(4, 6);
+        return wfb.sawFec(29, 44);   // drone-computed k/n (NOT the wire 4/6)
     }, 1000);
     CHECK(gotFec);
-    CHECK(waitFor([&] { return wfb.sawRadio(7, 40); }, 1000));
-    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=6000"); }, 1000));
+    CHECK(waitFor([&] { return wfb.sawRadio(7, 40); }, 1000));  // bw comes from config (40), not the wire (20)
+    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=24000"); }, 1000));
     // Decision push preserved the configured radiotap flags (not hardcoded 0/false).
     CHECK(wfb.sawRadioFlags(/*stbc=*/1, /*ldpc=*/true));
 
@@ -323,7 +328,7 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
     snap.safe = SafeDefaults{1, 8, 12, 0, 20, 5, 2000};
 
     DynamicLinkController c(ep);
-    c.start(snap, 0x2222);
+    c.start(snap);
 
     auto mkDecision = [](uint32_t seq, uint8_t mcs, uint16_t br) {
         Decision d{};
@@ -335,19 +340,24 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
         return d;
     };
 
-    // 1) First decision (seq 1) — first => Equal => single shot. bitrate 4000.
+    // The wire bitrate carried by each decision is now IGNORED (Phase 3a): the
+    // drone recomputes it from {mcs,bandwidth}. mcs=3/bw=20 -> 8739 kbps;
+    // mcs=5/bw=20 -> 18501 kbps. 18501 > 8739, so seq-2 is still an UP step and
+    // the staggered gap path is exercised exactly as before.
+
+    // 1) First decision (seq 1) — first => Equal => single shot. drone bitrate 8739.
     Decision d1 = mkDecision(1, /*mcs=*/3, /*br=*/4000);
     bool got1 = waitFor([&] { sendDecision(ep.listenPort, d1); return wfb.sawRadio(3, 20); }, 1000);
     CHECK(got1);
-    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=4000"); }, 1000));
+    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=8739"); }, 1000));
 
-    // 2) Second decision (seq 2) — higher bitrate => UP. tx+radio apply now;
+    // 2) Second decision (seq 2) — higher drone bitrate => UP. radio applies now;
     //    encoder bitrate expands only after the ~120 ms gap timer.
     Decision d2 = mkDecision(2, /*mcs=*/5, /*br=*/6000);
     bool gotRadio = waitFor([&] { sendDecision(ep.listenPort, d2); return wfb.sawRadio(5, 20); }, 1000);
     CHECK(gotRadio);
-    // Encoder bitrate=6000 must eventually arrive (phase 2 over the gap timer).
-    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=6000"); }, 1000));
+    // Drone bitrate=18501 must eventually arrive (phase 2 over the gap timer).
+    CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=18501"); }, 1000));
 
     c.stop();
     CHECK(c.status().running == false);
@@ -409,7 +419,7 @@ TEST_CASE("controller IDR: datagram -> requestIdr; second immediate datagram is 
     snap.safe = SafeDefaults{1, 8, 12, 0, 20, 5, 2000};
 
     DynamicLinkController c(ep);
-    c.start(snap, /*generationId=*/0x5555);
+    c.start(snap);
     CHECK(c.status().running == true);
 
     // 1) Send an IDR token; assert the controller forwards it to the encoder.
@@ -438,116 +448,6 @@ TEST_CASE("controller IDR: datagram -> requestIdr; second immediate datagram is 
 
     c.stop();
     CHECK(c.status().running == false);
-}
-
-// ---------------------------------------------------------------------------
-// HELLO announce/keepalive + GS-tunnel socket
-// ---------------------------------------------------------------------------
-
-TEST_CASE("controller HELLO: sends DLHE to gs-tunnel sink and transitions to Keepalive on ACK") {
-    FakeWfbTx wfb;
-    FakeEnc enc;
-
-    // GS-tunnel sink: bind an ephemeral UDP socket on loopback to receive DLHE
-    // datagrams that the controller sends via the gs-tunnel socket.
-    int sinkFd = ::socket(AF_INET, SOCK_DGRAM, 0);
-    REQUIRE(sinkFd >= 0);
-    sockaddr_in sinkAddr{};
-    sinkAddr.sin_family = AF_INET;
-    sinkAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    sinkAddr.sin_port = 0;  // let the kernel assign
-    REQUIRE(::bind(sinkFd, reinterpret_cast<sockaddr*>(&sinkAddr), sizeof(sinkAddr)) == 0);
-    socklen_t sinkLen = sizeof(sinkAddr);
-    REQUIRE(::getsockname(sinkFd, reinterpret_cast<sockaddr*>(&sinkAddr), &sinkLen) == 0);
-    uint16_t sinkPort = ntohs(sinkAddr.sin_port);
-    // 500 ms recv timeout so the sink thread can poll.
-    timeval tv{0, 500'000};
-    ::setsockopt(sinkFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    // Collect received DLHE packets in a thread.
-    std::atomic<int> helloCount{0};
-    std::atomic<bool> sinkStop{false};
-    std::thread sinkThread([&] {
-        while (!sinkStop.load()) {
-            uint8_t buf[64];
-            ssize_t n = ::recv(sinkFd, buf, sizeof(buf), 0);
-            if (n <= 0) continue;
-            if (peekKind(buf, static_cast<size_t>(n)) == PacketKind::Hello) {
-                helloCount.fetch_add(1);
-            }
-        }
-    });
-
-    Endpoints ep;
-    ep.listenAddr       = "127.0.0.1";
-    ep.listenPort       = 45803;
-    ep.wfbCtlAddr       = "127.0.0.1";
-    ep.wfbCtlPort       = wfb.port;
-    ep.encHost          = "127.0.0.1";
-    ep.encPort          = static_cast<uint16_t>(enc.port);
-    ep.idrPort          = 0;
-    ep.gsTunnelAddr     = "127.0.0.1";
-    ep.gsTunnelPort     = sinkPort;
-    ep.osdMsgPath       = "/tmp/fpvd_test_osd3.msg";
-    ep.osdUpdateIntervalMs = 1000;
-
-    const uint32_t genId = 0xDEADBEEF;
-
-    DlRuntimeConfig snap{};
-    snap.healthTimeoutMs       = 10000;   // won't trip during test
-    snap.minIdrIntervalMs      = 500;
-    snap.applyStaggerMs        = 0;
-    snap.applySubPaceMs        = 0;
-    snap.interleavingSupported = false;
-    snap.osdEnabled            = false;
-    snap.osdDebugLatency       = false;
-    snap.debug                 = false;
-    snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
-    snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{1, 8, 12, 0, 20, 5, 2000};
-    snap.helloMtuBytes         = 1400;    // non-zero -> HelloSm enters ANNOUNCING
-    snap.helloFps              = 60;
-
-    DynamicLinkController c(ep);
-    c.start(snap, genId);
-    CHECK(c.status().running == true);
-
-    // 1) Assert at least one DLHE arrives at the sink within 2 s.
-    bool gotHello = waitFor([&] { return helloCount.load() >= 1; }, 2000);
-    CHECK(gotHello);
-
-    // 2) Send a matching HelloAck back into the controller's listen port.
-    HelloAck ack{};
-    ack.magic             = kHelloAckMagic;
-    ack.version           = kWireVersion;
-    ack.generationIdEcho  = genId;
-    uint8_t ackBuf[64];
-    size_t ackLen = encodeHelloAck(ack, ackBuf, sizeof(ackBuf));
-    REQUIRE(ackLen > 0);
-
-    int s2 = ::socket(AF_INET, SOCK_DGRAM, 0);
-    REQUIRE(s2 >= 0);
-    sockaddr_in dst{};
-    dst.sin_family = AF_INET;
-    dst.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    dst.sin_port = htons(ep.listenPort);
-    ssize_t w = ::sendto(s2, ackBuf, ackLen, 0,
-                         reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
-    CHECK(w == static_cast<ssize_t>(ackLen));
-    ::close(s2);
-
-    // 3) Assert status().hello becomes Keepalive.
-    bool gotKeepalive = waitFor([&] {
-        return c.status().hello == HelloPub::Keepalive;
-    }, 2000);
-    CHECK(gotKeepalive);
-
-    c.stop();
-    CHECK(c.status().running == false);
-
-    sinkStop.store(true);
-    sinkThread.join();
-    ::close(sinkFd);
 }
 
 // ---------------------------------------------------------------------------
@@ -587,7 +487,7 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
         /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
-    c.start(snap, /*generationId=*/0x6666);
+    c.start(snap);
     CHECK(c.status().running == true);
 
     // Inject one decision so the watchdog's everSeen_ becomes true. We must
@@ -599,9 +499,10 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
         d.mcs = 3; d.bandwidth = 20; d.txPowerDbm = 10;
         d.k = 4; d.n = 6; d.depth = 0;
         d.bitrateKbps = 4000; d.fps = 60;
+        // Wire k/n ignored (Phase 3a): mcs=3/bw=20 -> drone k=6, n=9.
         bool gotFec = waitFor([&] {
             sendDecision(ep.listenPort, d);
-            return wfb.sawFec(4, 6);
+            return wfb.sawFec(6, 9);
         }, 1000);
         CHECK(gotFec);  // decision was accepted; watchdog.everSeen_ = true
     }

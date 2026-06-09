@@ -88,7 +88,14 @@ public:
 
 private:
     void seedOrchestrator();
-    void reconcileBeamforming();
+    // Targeted add/remove of the observe-only probe pair (probe-tx + probe-feed)
+    // on the live dynamicLink on<->off transition — never bounces wfb/video.
+    // add() registers the spec; restart() starts the not-yet-running process.
+    void addProbeStream();
+    void removeProbeStream();
+    void reconcileBeamforming(bool force = false);
+    // 0 = BF off/disabled, 1 = armed but no report, 2 = working (cbr_rssi != 0).
+    int bfOsdCode() const;
     void rewriteWaybeamJson();
     void startController();
     // Rebuild the msposd OSD spec from effective_ and (re)start it, so it picks
@@ -120,7 +127,6 @@ private:
     Orchestrator orch_;
     BeamformingController bf_;
     dynlink::DynamicLinkController dl_;
-    uint32_t dlGenerationId_;
     std::chrono::steady_clock::time_point startedAt_;
     std::mutex mu_;
     std::thread osdThread_;

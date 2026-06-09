@@ -99,12 +99,18 @@ nlohmann::json buildStatus(Daemon& d) {
             {"remoteMac", bf.remoteMac},
             {"bw", bf.bw},
             {"soundingCount", bf.soundingCount},
+            {"cbrRssi", bf.cbrRssi},
+            {"cbrFresh", bf.cbrFresh},
             {"lastCbr", bf.lastCbr.has_value()
                          ? nlohmann::json(bf.lastCbr.value())
                          : nlohmann::json(nullptr)}
         }},
         {"processes", procs},
-        {"dynamicLink", dlj}
+        {"dynamicLink", dlj},
+        {"probe", {
+            {"enabled", d.effective().dynamicLink.enabled},
+            {"running", d.orchestrator().get("probe-tx") != nullptr}
+        }}
     };
 }
 

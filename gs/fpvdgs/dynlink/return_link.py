@@ -1,5 +1,4 @@
-"""Phase 2 — UDP writer that puts encoded decision packets onto the
-wfb-ng tunnel stream.
+"""UDP writer that puts encoded decision packets onto the wfb-ng tunnel stream.
 
 Nothing tunnel-specific in the code: wfb-ng's `tunnel` profile
 terminates on a TUN interface (`gs-wfb` at 10.5.0.1 on the GS,
@@ -48,17 +47,6 @@ class ReturnLink:
             else:
                 log.debug("return_link: sendto: %s", e)
             return False
-
-    def send_ping(self, packet: bytes) -> bool:
-        """Send a Phase-3 PING packet to the same drone endpoint.
-        Reuses the same UDP socket; identical error semantics as
-        :meth:`send` (counted into the same totals)."""
-        return self.send(packet)
-
-    def send_hello_ack(self, packet: bytes) -> bool:
-        """Send a P4a HELLO-ACK (DLHA) to the drone. Reuses the same
-        UDP socket; identical error semantics as :meth:`send`."""
-        return self.send(packet)
 
     def close(self) -> None:
         try:

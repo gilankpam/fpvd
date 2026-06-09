@@ -37,3 +37,12 @@ TEST_CASE("translate.waybeam: changes propagate") {
     CHECK(out["video0"]["size"] == "1280x720");
     CHECK(out["image"]["rotate"] == 180);
 }
+
+TEST_CASE("translate.waybeam: video.sensorBin maps to isp.sensorBin") {
+    fpvd::Config c{};
+    // Default is empty.
+    CHECK(fpvd::toWaybeamJson(c)["isp"]["sensorBin"] == "");
+
+    c.video.sensorBin = "2x2";
+    CHECK(fpvd::toWaybeamJson(c)["isp"]["sensorBin"] == "2x2");
+}

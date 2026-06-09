@@ -8,11 +8,12 @@ from urllib.parse import urlparse, parse_qs
 from .schema import SchemaError
 from .dynlink.config_build import make_dl_snapshot
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
+from .probe.config_build import make_probe_snapshot
 
 
 class Api:
     def __init__(self, store, schema, render_mod, runner, drone, link,
-                 status_fn, cfg_out, dynlink=None, pixelpilot=None):
+                 status_fn, cfg_out, dynlink=None, pixelpilot=None, probe=None):
         self.store = store
         self.schema = schema
         self.render_mod = render_mod
@@ -23,6 +24,7 @@ class Api:
         self.cfg_out = cfg_out
         self.dynlink = dynlink
         self.pixelpilot = pixelpilot
+        self.probe = probe
 
     def _json(self, body: bytes) -> dict:
         return json.loads(body or b"{}")
@@ -82,7 +84,8 @@ class Api:
             return 409, {"error": "link changed; use POST /link/apply"}
         self.schema.validate_effective(pending)
 
-        # Anything outside dynamicLink/pixelpilot (link already equal) needs the runner.
+        # Anything outside dynamicLink/pixelpilot (link already equal) needs the
+        # runner. (probe carries no config now; its lifecycle rides dynamicLink.)
         wfb_changed = (self._without(pending, "dynamicLink", "pixelpilot")
                        != self._without(effective, "dynamicLink", "pixelpilot"))
         if wfb_changed:
@@ -102,18 +105,25 @@ class Api:
         return 200, {"applied": True}
 
     def _route_dynamic_link(self, dl_old, dl_new, pending):
-        """Start/stop/reconfigure the in-process controller. Never bounces
-        the wfb runner."""
+        """Start/stop/reconfigure the in-process controller AND the observe-only
+        probe (they share a lifecycle). Never bounces the wfb runner."""
         if self.dynlink is None:
             return
         was, now = bool(dl_old.get("enabled")), bool(dl_new.get("enabled"))
         if not was and now:
             self.dynlink.set_config(make_dl_snapshot(pending))
             self.dynlink.start()
+            if self.probe is not None:
+                self.probe.set_config(make_probe_snapshot(pending))
+                self.probe.start()
         elif was and not now:
             self.dynlink.stop()
+            if self.probe is not None:
+                self.probe.stop()
         elif was and now and dl_old != dl_new:
             self.dynlink.set_config(make_dl_snapshot(pending))
+            if self.probe is not None:
+                self.probe.set_config(make_probe_snapshot(pending))
 
     def _route_pixelpilot(self, pp_old, pp_new, pending):
         """Start/stop/restart the PixelPilot child. Never bounces the wfb

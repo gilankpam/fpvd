@@ -1,6 +1,8 @@
 #include "dynlink/controller.hpp"
 
 #include "dynlink/apply_direction.hpp"
+#include "dynlink/local_compute.hpp"
+#include "dynlink/txpower_curve.hpp"
 
 #include <cassert>
 #include <cstring>
@@ -68,26 +70,6 @@ static int openTickTimer(uint32_t intervalMs) {
     return fd;
 }
 
-// Open an unconnected UDP socket for drone→GS tunnel traffic.
-// Resolves gsTunnelAddr:gsTunnelPort into *outDst. Returns -1 on failure
-// (non-fatal; HELLO is silently dropped when fd == -1).
-// Why no connect(): connect() on UDP triggers an immediate route lookup.
-// The applier may start before wfb-ng's TUN interface is up; sendto() per
-// packet lets the route self-heal once the tunnel comes up.
-static int openGsTunnelSocket(const std::string& addr, uint16_t port,
-                               struct sockaddr_in* outDst) {
-    int fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    if (fd < 0) return -1;
-    std::memset(outDst, 0, sizeof(*outDst));
-    outDst->sin_family = AF_INET;
-    outDst->sin_port   = htons(port);
-    if (inet_pton(AF_INET, addr.c_str(), &outDst->sin_addr) != 1) {
-        close(fd);
-        return -1;
-    }
-    return fd;
-}
-
 static int armGap(int gapFd, uint32_t ms) {
     struct itimerspec ts{};
     ts.it_value.tv_sec = ms / 1000;
@@ -110,23 +92,26 @@ DynamicLinkController::~DynamicLinkController() {
     stop();
 }
 
-void DynamicLinkController::start(const DlRuntimeConfig& snap, uint32_t generationId) {
+void DynamicLinkController::start(const DlRuntimeConfig& snap) {
     std::lock_guard<std::mutex> lk(lifetimeMu_);
     if (running_.load()) stopLocked();  // NOT stop() — avoid re-locking lifetimeMu_
 
     { std::lock_guard<std::mutex> cg(cfgMu_); cfg_ = std::make_shared<const DlRuntimeConfig>(snap); }
-    generationId_.store(generationId);
     stopFlag_.store(false);
 
     // Construct backend clients fresh from the snapshot + endpoints. They are
     // used only from the run() thread, so no locking is needed on them.
     wfb_      = std::make_unique<WfbControlClient>(ep_.wfbCtlAddr, ep_.wfbCtlPort);
+    // Probe retune client: built only when a control port is configured; a fresh
+    // unique_ptr per start() (reset first) so a stop()+start() cycle rebuilds it,
+    // mirroring wfb_. Held nullptr when the probe is disabled.
+    probeWfb_.reset();
+    if (snap.probeCtlPort != 0)
+        probeWfb_ = std::make_unique<WfbControlClient>("127.0.0.1", snap.probeCtlPort);
     enc_.emplace(wb_, snap.minIdrIntervalMs, snap.roiQp);
     radio_.emplace(snap.iface);
     osd_.emplace(ep_.osdMsgPath, snap.osdEnabled, ep_.osdUpdateIntervalMs, snap.osdDebugLatency);
     watchdog_.emplace(snap.healthTimeoutMs);
-    hello_.emplace(generationId, snap.helloMtuBytes, snap.helloFps, HelloCadence{});
-    hello_->setVanilla(!snap.interleavingSupported);
     // IdrListener: port==0 self-disables (fd()==-1); (re)constructed on every start()
     // so it is reset before emplace to ensure proper close/reopen across start/stop/start.
     idr_.reset();
@@ -135,9 +120,10 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap, uint32_t generati
 
     // Reset diff baselines to "first/invalid" so the first decision re-emits all.
     lastTx_ = Decision{};
-    lastRadio_ = Decision{};
+    lastRadio_ = Decision{};   // vestigial — radio_/lastRadio_ removed in Phase 3b
     lastEnc_ = Decision{};
     lastApplied_ = Decision{};
+    lastProbeMcs_ = -1;            // force the probe to re-tune on the first decision
     lastDecisionMs_ = 0;
 
     int efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -197,6 +183,25 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
                        /*ldpc=*/cfg.ldpc, /*shortGi=*/false,
                        /*bandwidth=*/d.bandwidth, /*mcs=*/d.mcs,
                        /*vhtMode=*/false, /*vhtNss=*/1);
+        // Retune the observe-only probe to current+1 (clamped), mirroring the
+        // video PHY flags. Best-effort: a soft failure (probe not yet up) is
+        // retried on the next decision. The probe rides its own radio_port, so
+        // this never touches the video stream.
+        if (probeWfb_) {
+            int rung = probeRungFor(d.mcs, cfg.probeMcsCeiling);
+            if (rung != lastProbeMcs_) {
+                probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0),
+                                    cfg.ldpc, /*shortGi=*/false,
+                                    /*bandwidth=*/d.bandwidth,
+                                    /*mcs=*/static_cast<uint8_t>(rung),
+                                    /*vhtMode=*/false, /*vhtNss=*/1);
+                lastProbeMcs_ = rung;
+            }
+        }
+        // Per-MCS tx power (operating-rung coupling): back off on the high-PAPR
+        // 64-QAM rungs to keep the PA linear, full power at low MCS for range.
+        // RadioTxpower::apply is diff-based, so iw only runs when the value changes.
+        if (radio_) radio_->apply(d.txPowerDbm);
     }
     lastTx_ = d;
 }
@@ -217,6 +222,17 @@ void DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
                    /*ldpc=*/cfg.ldpc, /*shortGi=*/false,
                    /*bandwidth=*/cfg.safe.bandwidth, /*mcs=*/cfg.safe.mcs,
                    /*vhtMode=*/false, /*vhtNss=*/1);
+    // Move the probe down with the video on a watchdog safe-recovery so it never
+    // sits above the (now reduced) video rung. Best-effort, like dispatchTxApply.
+    if (probeWfb_) {
+        int rung = probeRungFor(cfg.safe.mcs, cfg.probeMcsCeiling);
+        probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc, false,
+                            cfg.safe.bandwidth, static_cast<uint8_t>(rung), false, 1);
+        lastProbeMcs_ = rung;
+    }
+    // Safe recovery: drive power for the (low) safe rung unconditionally, matching
+    // the other safe sub-commands. Low MCS -> high power -> robust recovery.
+    if (radio_) radio_->applySafe(txpowerDbmForMcs(cfg.safe.mcs));
 }
 
 // ---- poll loop --------------------------------------------------------------
@@ -254,55 +270,18 @@ void DynamicLinkController::run(int evfd) {
     // Gap timer (single-shot, armed on demand for staggered apply).
     int gapFd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
 
-    // Hello timer: fires ASAP (1 ms) to emit the first DLHE, then re-armed
-    // via nextDelayMs() after each fire. Owned + closed by run().
-    int helloTimerFd = -1;
-    if (hello_ && hello_->state() != HelloState::Disabled) {
-        helloTimerFd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-        if (helloTimerFd >= 0) {
-            struct itimerspec t{};
-            t.it_value.tv_nsec = 1 * 1000 * 1000;  // 1 ms — fire ASAP
-            timerfd_settime(helloTimerFd, 0, &t, nullptr);
-        }
-    }
-
-    // GS-tunnel socket: unconnected UDP, sendto per packet so the route
-    // self-heals once wfb-ng's tunnel comes up. -1 = non-fatal, HELLO dropped.
-    int gsTunnelFd = -1;
-    struct sockaddr_in gsTunnelDst{};
-    if (ep_.gsTunnelPort != 0) {
-        gsTunnelFd = openGsTunnelSocket(ep_.gsTunnelAddr, ep_.gsTunnelPort,
-                                         &gsTunnelDst);
-    }
-
-    // Build pollfd array: [listenFd?, tickFd?, gapFd?, helloTimerFd?, idrFd?, evfd?].
+    // Build pollfd array: [listenFd?, tickFd?, gapFd?, idrFd?, evfd?].
     // idr_ fd is owned by the IdrListener object — do NOT ::close it in run()'s cleanup.
-    struct pollfd pfds[6];
+    struct pollfd pfds[5];
     int nfds = 0;
-    int listenIdx = -1, tickIdx = -1, gapIdx = -1, helloIdx = -1, idrIdx = -1, eventIdx = -1;
+    int listenIdx = -1, tickIdx = -1, gapIdx = -1, idrIdx = -1, eventIdx = -1;
 
     if (listenFd    >= 0) { pfds[nfds].fd = listenFd;    pfds[nfds].events = POLLIN; listenIdx = nfds++; }
     if (tickFd      >= 0) { pfds[nfds].fd = tickFd;      pfds[nfds].events = POLLIN; tickIdx   = nfds++; }
     if (gapFd       >= 0) { pfds[nfds].fd = gapFd;       pfds[nfds].events = POLLIN; gapIdx    = nfds++; }
-    if (helloTimerFd >= 0){ pfds[nfds].fd = helloTimerFd;pfds[nfds].events = POLLIN; helloIdx  = nfds++; }
     // IDR listener: add to poll set only when enabled (fd >= 0). Port 0 disables.
     if (idr_ && idr_->fd() >= 0) { pfds[nfds].fd = idr_->fd(); pfds[nfds].events = POLLIN; idrIdx = nfds++; }
     if (evfd        >= 0) { pfds[nfds].fd = evfd;        pfds[nfds].events = POLLIN; eventIdx  = nfds++; }
-
-    // Helper: map HelloSm state -> HelloPub for status publication.
-    auto helloStateToPub = [](HelloState s) -> HelloPub {
-        switch (s) {
-            case HelloState::Announcing: return HelloPub::Announcing;
-            case HelloState::Keepalive:  return HelloPub::Keepalive;
-            default:                     return HelloPub::Disabled;
-        }
-    };
-
-    // Publish initial hello status from the state already set in start().
-    if (hello_) {
-        std::lock_guard<std::mutex> sg(statusMu_);
-        status_.hello = helloStateToPub(hello_->state());
-    }
 
     ApplyState applyState = ApplyState::Idle;
     Decision   applyPending{};
@@ -362,12 +341,6 @@ void DynamicLinkController::run(int evfd) {
                 // OSD: update enabled flag.
                 if (osd_) osd_->setEnabled(newCfg.osdEnabled);
 
-                // HelloSm: update mtu/fps (silent) and vanilla bit (re-announces if changed).
-                if (hello_) {
-                    hello_->setMtuFps(newCfg.helloMtuBytes, newCfg.helloFps);
-                    hello_->setVanilla(!newCfg.interleavingSupported);
-                }
-
                 // stbc/ldpc are preserved, not decided — but a hot change to
                 // them still has to reach the radio. dispatchTxApply only
                 // re-emits CMD_SET_RADIO on an mcs/bandwidth change, so when
@@ -406,15 +379,7 @@ void DynamicLinkController::run(int evfd) {
                 // EAGAIN/EINTR: nothing to do.
             } else {
                 PacketKind kind = peekKind(buf, static_cast<size_t>(got));
-                if (kind == PacketKind::HelloAck && hello_) {
-                    // HELLO ACK: decode and hand to the state machine.
-                    HelloAck ack{};
-                    if (decodeHelloAck(buf, static_cast<size_t>(got), ack) == DecodeResult::Ok) {
-                        hello_->onAck(ack);
-                        std::lock_guard<std::mutex> sg(statusMu_);
-                        status_.hello = helloStateToPub(hello_->state());
-                    }
-                } else if (kind == PacketKind::Decision) {
+                if (kind == PacketKind::Decision) {
                     Decision d{};
                     DecodeResult dr = decodeDecision(buf, static_cast<size_t>(got), d);
                     if (dr != DecodeResult::Ok) {
@@ -429,12 +394,18 @@ void DynamicLinkController::run(int evfd) {
                             applyState = ApplyState::Idle;
                         }
 
+                        // v3 wire carries only {mcs}; bandwidth is static config.
+                        d.bandwidth = cfg.linkBandwidth;
+
+                        // Phase 3a: the drone computes its own bitrate/k/n
+                        // (and a constant depth/fps) from {mcs,bandwidth};
+                        // the GS-sent values on the wire are ignored.
+                        applyLocalCompute(cfg, d);
+
                         uint64_t now = nowMonotonicMs();
                         bool first = (lastEnc_.magic != kWireMagic);
                         ApplyDir dir = applyDirection(lastEnc_.bitrateKbps,
                                                       d.bitrateKbps, first);
-                        useconds_t subPaceUs =
-                            static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
 
                         // canStagger: staggered dispatch requires both a non-zero
                         // gap interval AND a live gap timerfd. If the fd failed to
@@ -445,16 +416,12 @@ void DynamicLinkController::run(int evfd) {
                         if (!canStagger || dir == ApplyDir::Equal) {
                             // Single shot: all backends fire now.
                             dispatchTxApply(cfg, d);
-                            radio_->apply(d.txPowerDbm);
                             enc_->apply(d.bitrateKbps, d.fps);
-                            lastRadio_ = d;
                             lastEnc_ = d;
                         } else if (dir == ApplyDir::Up) {
-                            // Power up BEFORE MCS up. radio -> (sub-pace) -> tx;
-                            // encoder bitrate expands after the outer gap.
-                            radio_->apply(d.txPowerDbm);
-                            lastRadio_ = d;
-                            if (subPaceUs > 0) usleep(subPaceUs);
+                            // Raise capacity (mcs) now; the encoder bitrate
+                            // expands after the outer gap. dispatchTxApply also
+                            // steps tx power with the mcs (per-MCS curve).
                             dispatchTxApply(cfg, d);
                             applyPending = d;
                             applyState = ApplyState::UpGap;
@@ -469,7 +436,8 @@ void DynamicLinkController::run(int evfd) {
                         }
 
                         lastApplied_ = d;
-                        osd_->writeStatus(lastApplied_, 0);
+                        osd_->writeStatus(lastApplied_, 0,
+                                          bfCodeProvider_ ? bfCodeProvider_() : 0);
                         watchdog_->notifyDecision(now);
                         lastDecisionMs_ = now;
                         {
@@ -495,7 +463,6 @@ void DynamicLinkController::run(int evfd) {
                     applyState = ApplyState::Idle;
                 }
                 dispatchTxSafe(cfg);
-                radio_->applySafe(cfg.safe.txPowerDbm);
                 enc_->applySafe(cfg.safe.bitrateKbps);
                 osd_->eventWatchdog();
                 // Invalidate last-states so the next fresh decision emits
@@ -536,12 +503,12 @@ void DynamicLinkController::run(int evfd) {
                 enc_->apply(applyPending.bitrateKbps, applyPending.fps);
                 lastEnc_ = applyPending;
             } else if (applyState == ApplyState::DownGap) {
+                // Phase 2 of a Down: narrow tx capacity (mcs/fec)
+                // now that the encoder already throttled in phase 1.
+                // No lastEnc_ update here — it was set in phase 1
+                // (the decision branch). dispatchTxApply also steps
+                // tx power with the mcs (per-MCS curve).
                 dispatchTxApply(cfg, applyPending);
-                if (cfg.applySubPaceMs > 0) {
-                    usleep(static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u);
-                }
-                radio_->apply(applyPending.txPowerDbm);
-                lastRadio_ = applyPending;
             }
             // Idle here means a stale expiration the kernel queued before
             // disarm landed — drained, ignore.
@@ -549,7 +516,7 @@ void DynamicLinkController::run(int evfd) {
         }
 
         // ---- IDR token listener: drain -> osd bump + encoder IDR request ----
-        // Port of dl_applier.c pfds[4] branch. IdrListener owns its fd;
+        // Port of dl_applier.c IDR-listen branch. IdrListener owns its fd;
         // do NOT ::close it here.
         if (idrIdx >= 0 && (pfds[idrIdx].revents & POLLIN)) {
             size_t got = idr_->drain();
@@ -559,57 +526,11 @@ void DynamicLinkController::run(int evfd) {
                 enc_->requestIdr(nowMs);
             }
         }
-
-        // ---- hello timer: build + send DLHE, re-arm -------------------------
-        if (helloIdx >= 0 && (pfds[helloIdx].revents & POLLIN)) {
-            uint64_t expirations;
-            ssize_t r = read(helloTimerFd, &expirations, sizeof(expirations));
-            (void)r;  // drain; count ignored
-
-            if (hello_) {
-                // If in KEEPALIVE, tick the miss counter (may drop to ANNOUNCING).
-                if (hello_->state() == HelloState::Keepalive) {
-                    hello_->onKeepaliveTick();
-                }
-
-                // Send a HELLO announcement if not DISABLED and gs-tunnel is up.
-                if (hello_->state() != HelloState::Disabled && gsTunnelFd >= 0) {
-                    uint8_t out[kHelloOnWire];
-                    size_t nOut = hello_->buildAnnounce(out, sizeof(out));
-                    if (nOut > 0) {
-                        ssize_t s = sendto(gsTunnelFd, out, nOut, 0,
-                                           reinterpret_cast<struct sockaddr*>(&gsTunnelDst),
-                                           sizeof(gsTunnelDst));
-                        (void)s;  // non-fatal; route may not be ready yet
-                    }
-                }
-
-                // Re-arm. timerfd_settime with all-zero it_value disarms the
-                // timer, so coerce a 0-ms delay to 1 ms when we still want to
-                // fire. DISABLED -> leave it_value zero -> timer stays parked.
-                uint32_t delayMs = hello_->nextDelayMs();
-                struct itimerspec t{};
-                t.it_value.tv_sec  = delayMs / 1000;
-                t.it_value.tv_nsec = static_cast<long>(delayMs % 1000) * 1000000L;
-                if (delayMs == 0 && hello_->state() != HelloState::Disabled) {
-                    t.it_value.tv_nsec = 1 * 1000 * 1000;  // 1 ms
-                }
-                timerfd_settime(helloTimerFd, 0, &t, nullptr);
-
-                // Publish updated hello state (may have changed on keepalive tick).
-                {
-                    std::lock_guard<std::mutex> sg(statusMu_);
-                    status_.hello = helloStateToPub(hello_->state());
-                }
-            }
-        }
     }
 
     if (listenFd    >= 0) ::close(listenFd);
     if (tickFd      >= 0) ::close(tickFd);
     if (gapFd       >= 0) ::close(gapFd);
-    if (helloTimerFd >= 0) ::close(helloTimerFd);
-    if (gsTunnelFd  >= 0) ::close(gsTunnelFd);
     // do NOT close evfd/eventFd_ here — stop() owns the close after join()
 }
 

@@ -74,6 +74,46 @@ TEST_CASE("daemon: PATCH then apply updates effective and overlay file") {
     fs::remove_all(tmp);
 }
 
+TEST_CASE("daemon: PATCH video.sensorBin applies end-to-end (overlay + waybeam + encoder)") {
+    auto tmp = fs::temp_directory_path() / "fpvd-test-sensorbin";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+    CHECK(d.effective().video.sensorBin == "");
+
+    REQUIRE(d.patchPending({{"video", {{"sensorBin", "2x2"}}}}).ok);
+    auto ar = d.apply(false);  // don't actually restart processes
+    REQUIRE(ar.ok);
+    CHECK(d.effective().video.sensorBin == "2x2");
+
+    // Overlay is sparse: only the changed field (proves defaults carry "").
+    std::ifstream f(paths.overlayPath);
+    nlohmann::json saved; f >> saved;
+    CHECK(saved == nlohmann::json{{"video", {{"sensorBin", "2x2"}}}});
+
+    // waybeam.json carries the value under isp.sensorBin.
+    std::ifstream wf(paths.waybeamJsonPath);
+    nlohmann::json wj; wf >> wj;
+    CHECK(wj["isp"]["sensorBin"] == "2x2");
+
+    // It is a restart-class encoder change.
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder")
+          != ar.restarted.end());
+
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("daemon: reset clears overlay") {
     auto tmp = fs::temp_directory_path() / "fpvd-test-reset";
     fs::remove_all(tmp);
@@ -312,6 +352,36 @@ TEST_CASE("daemon: txpower change takes hot path (tuneRadio, no rebuild)") {
     fs::remove_all(tmp);
 }
 
+TEST_CASE("daemon: txpower is rejected while DL is enabled (curve owns power)") {
+    auto tmp = fs::temp_directory_path() / "fpvd-dl-txpower";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // Enable DL and commit so effective.dynamicLink.enabled = true.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/false).ok);
+
+    // A txpower change is rejected under DL — the per-MCS power curve owns
+    // tx power and would silently override a manual value.
+    auto pr = d.patchPending(nlohmann::json::parse(
+        R"({"link":{"txpower":20}})"));
+    CHECK_FALSE(pr.ok);
+
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("daemon: width change defers channel retune via tune script") {
     auto tmp = fs::temp_directory_path() / "fpvd-hot-width";
     fs::remove_all(tmp);
@@ -430,19 +500,31 @@ TEST_CASE("apply: enabled false->true starts controller; true->false stops it") 
     CHECK_FALSE(d.dynamicLinkStatus().running);
     auto namesBefore = d.orchestrator().names();
 
-    // false -> true: starts the controller, no full rebuild needed for this alone.
+    // false -> true: starts the controller, no full rebuild. The only orchestrator
+    // delta is the targeted probe pair add (probe-tx + probe-feed) — every other
+    // supervised process keeps its identity (no stopAll/startAll).
     REQUIRE(d.patchPending(nlohmann::json::parse(
         R"({"dynamicLink":{"enabled":true}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     CHECK(d.dynamicLinkStatus().running);
-    CHECK(d.orchestrator().names() == namesBefore);  // no rebuild
+    {
+        auto namesAfter = d.orchestrator().names();
+        std::vector<std::string> added;
+        for (auto& n : namesAfter)
+            if (std::find(namesBefore.begin(), namesBefore.end(), n) ==
+                namesBefore.end())
+                added.push_back(n);
+        std::sort(added.begin(), added.end());
+        CHECK(added == std::vector<std::string>{"probe-feed", "probe-tx"});
+    }
 
-    // true -> false: stops the controller.
+    // true -> false: stops the controller AND removes the probe pair — names back
+    // to the pre-toggle set (still no rebuild).
     REQUIRE(d.patchPending(nlohmann::json::parse(
         R"({"dynamicLink":{"enabled":false}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     CHECK_FALSE(d.dynamicLinkStatus().running);
-    CHECK(d.orchestrator().names() == namesBefore);  // still no rebuild
+    CHECK(d.orchestrator().names() == namesBefore);  // probe removed, no rebuild
 
     fs::remove_all(tmp);
 }
@@ -459,11 +541,17 @@ TEST_CASE("apply: restart-class encoder change bounces waybeam + msposd, leaves 
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     REQUIRE(d.dynamicLinkStatus().running);
 
+    // Enabling DL auto-started the probe pair (probe-tx/probe-feed). This test
+    // seeds its own fakes and calls startAll(); drop the already-running probe
+    // supervisors first so startAll() doesn't double-start them.
+    auto& orch = d.orchestrator();
+    orch.remove("probe-feed");
+    orch.remove("probe-tx");
+
     // Seed the orchestrator with fakes so the bounce is observable: a real full
     // rebuild would wipe/replace these; a hot apply preserves them. The restart-
     // class path bounces "waybeam" AND "msposd" (the OSD renderer, which draws
     // onto waybeam's pipeline), but leaves wfb untouched.
-    auto& orch = d.orchestrator();
     orch.add({"wfb_video_tx", {"/bin/sh", "-c", "sleep 30"}, {},
               fpvd::RestartPolicy::Always, {}});
     orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {},
@@ -665,6 +753,97 @@ TEST_CASE("apply: disabling dynamic-link restates the static encoder bitrate") {
     const std::string want =
         "video0.bitrate=" + std::to_string(d.effective().video.bitrate);
     CHECK(wb.last().find(want) != std::string::npos);   // == the configured value
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("daemon: probe stream seeded only when dynamicLink is enabled") {
+    auto tmp = fs::temp_directory_path() / "fpvd-probe-dl-seed";
+    auto paths = makeRoutingPaths(tmp, 46850);
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // dynamicLink disabled by default -> no probe specs.
+    CHECK(d.orchestrator().get("probe-tx") == nullptr);
+    CHECK(d.orchestrator().get("probe-feed") == nullptr);
+
+    // Enabling dynamicLink adds the probe pair WITHOUT a full rebuild: the video
+    // tx keeps its identity (no stopAll/startAll).
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":true}})")).ok);
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);
+    CHECK(d.orchestrator().get("probe-tx")   != nullptr);
+    CHECK(d.orchestrator().get("probe-feed") != nullptr);
+
+    // Disabling removes them again.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":false}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+    CHECK(d.orchestrator().get("probe-tx") == nullptr);
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("status: probe summary reflects dynamicLink + running tx") {
+    auto tmp = fs::temp_directory_path() / "fpvd-probe-status";
+    auto paths = makeRoutingPaths(tmp, 46851);
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    auto j0 = fpvd::buildStatus(d);
+    REQUIRE(j0.contains("probe"));
+    CHECK(j0["probe"]["enabled"] == false);   // dynamicLink off
+
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+    auto j1 = fpvd::buildStatus(d);
+    CHECK(j1["probe"]["enabled"] == true);
+    CHECK(j1["probe"]["running"] == true);              // probe tx running
+    CHECK(d.orchestrator().get("probe-tx") != nullptr); // ...and seeded into the orchestrator
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("apply: hot-path reconcileBeamforming fires when beamforming enabled") {
+    // Verify that a hot /apply (reallyRestart=true, no full rebuild) actually
+    // drives reconcileBeamforming() for a beamforming-only config change.  On a
+    // test host with no real wireless NIC the controller will land in Unsupported
+    // (no bf_monitor proc node), NOT Disabled — which is the observable proof that
+    // reconcile() ran and processed the request.
+    auto tmp = fs::temp_directory_path() / "fpvd-bf-hot-apply";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fs::copy_file("tests/fixtures/defaults.json",
+                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+
+    fpvd::DaemonPaths paths{
+        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string(),
+        "tests/fixtures/fake_radio_tune.sh"
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    // Confirm initial state is Disabled (bf never driven).
+    CHECK(d.beamformingStatus().state == fpvd::BfState::Disabled);
+
+    // Enable beamforming (stbc=false is the default, so no extra patch needed).
+    auto pr = d.patchPending(nlohmann::json::parse(
+        R"({"link":{"beamforming":{"enabled":true,"remoteMac":"00:c0:ca:dd:ee:ff"}}})"));
+    REQUIRE(pr.ok);
+
+    auto ar = d.apply(/*reallyRestart=*/true);
+    REQUIRE(ar.ok);
+
+    // reconcile() ran: on a test host without a bf_monitor proc node the
+    // controller lands in Unsupported, not Disabled.  Either way it must NOT
+    // be Disabled (which would mean reconcile was never called).
+    CHECK(d.beamformingStatus().state != fpvd::BfState::Disabled);
 
     fs::remove_all(tmp);
 }

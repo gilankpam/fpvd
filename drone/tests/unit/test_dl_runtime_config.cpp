@@ -12,8 +12,6 @@ TEST_CASE("buildDlSnapshot maps schema + derived inputs") {
     c.dynamicLink.safe.mcs = 3; c.dynamicLink.healthTimeoutMs = 8000;
     auto s = buildDlSnapshot(c, "wlan1");
     CHECK(s.iface == "wlan1");
-    CHECK(s.helloMtuBytes == 1400);
-    CHECK(s.helloFps == 90);
     CHECK(s.stbc == false);
     CHECK(s.ldpc == true);
     CHECK(s.safe.mcs == 3);
@@ -95,8 +93,6 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
     CHECK(s.debug                == false);
 
     // Link/video defaults
-    CHECK(s.helloMtuBytes == 1500u);
-    CHECK(s.helloFps      == 60u);
     CHECK(s.stbc          == true);   // link defaults now enable stbc/ldpc
     CHECK(s.ldpc          == true);
     CHECK(s.iface         == "wlan2");
@@ -115,4 +111,41 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
     CHECK(s.safe.bandwidth   == 20u);
     CHECK(s.safe.txPowerDbm  == 20);
     CHECK(s.safe.bitrateKbps == 2000u);
+}
+
+TEST_CASE("buildDlSnapshot maps the Phase-3a bitrate-engine knobs") {
+    fpvd::Config c{};
+    c.link.mtu  = 1400;
+    c.video.fps = 90;
+    c.dynamicLink.bitrate.minBitrateKbps = 1500;
+    c.dynamicLink.bitrate.maxBitrateKbps = 20000;
+    c.dynamicLink.fec.baseRedundancyRatio = 0.5;
+    c.dynamicLink.fec.blocksPerFrame      = 2.0;
+    c.dynamicLink.fec.kMin = 3;
+    c.dynamicLink.fec.kMax = 40;
+
+    auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+
+    CHECK(s.bitrate.mtuBytes == 1400);
+    CHECK(s.bitrate.fps == 90);
+    CHECK(s.bitrate.minBitrateKbps == 1500);
+    CHECK(s.bitrate.maxBitrateKbps == 20000);
+    CHECK(s.bitrate.baseRedundancyRatio == doctest::Approx(0.5));
+    CHECK(s.bitrate.blocksPerFrame == doctest::Approx(2.0));
+    CHECK(s.bitrate.kMin == 3);
+    CHECK(s.bitrate.kMax == 40);
+}
+
+TEST_CASE("buildDlSnapshot maps link.width to linkBandwidth (radiotap value)") {
+    fpvd::Config c{};
+    c.link.width = 20;
+    auto s20 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    CHECK(s20.linkBandwidth == 20);
+    c.link.width = 40;
+    auto s40 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    CHECK(s40.linkBandwidth == 40);
+    // modulationWidth maps HT40-as-20 (width=10) to the 20 MHz radiotap value
+    c.link.width = 10;
+    auto s10 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    CHECK(s10.linkBandwidth == 20);
 }

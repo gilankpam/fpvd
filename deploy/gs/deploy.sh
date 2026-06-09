@@ -30,11 +30,14 @@ remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 # import without any sys.path/PYTHONPATH hacks.
 SITE="$(remote 'python3 -c "import site; print(site.getsitepackages()[0])"')"
 echo "[push] fpvdgs -> $TARGET:$SITE/fpvdgs  (+ init + defaults)"
-remote "mkdir -p /etc/fpvd '$SITE/fpvdgs' '$SITE/fpvdgs/dynlink/profiles'"
+remote "mkdir -p /etc/fpvd '$SITE/fpvdgs' '$SITE/fpvdgs/dynlink/profiles' '$SITE/fpvdgs/probe'"
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs"/*.py "$TARGET:$SITE/fpvdgs/"
 # dynlink subpackage (in-process GS dynamic-link controller) + JSON radio profiles
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/dynlink"/*.py "$TARGET:$SITE/fpvdgs/dynlink/"
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/dynlink/profiles"/*.json "$TARGET:$SITE/fpvdgs/dynlink/profiles/"
+# probe subpackage (in-process GS probe-link measurement: spawns FEC-off wfb_rx
+# per probe radio_port, parses stdout for per-MCS PER/RSSI — observe-only)
+scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/probe"/*.py "$TARGET:$SITE/fpvdgs/probe/"
 # defaults (do not clobber an existing user overlay /etc/fpvd/config.json)
 scp -O "${SSH_OPTS[@]}" "$GS/etc/defaults.json" "$TARGET:/etc/fpvd/defaults.json"
 scp -O "${SSH_OPTS[@]}" "$GS/scripts/S99fpvd"  "$TARGET:/etc/init.d/S99fpvd"
@@ -90,7 +93,16 @@ remote '
     killall -q pixelpilot pixelpilot.sh 2>/dev/null || true
     sleep 1
     : > /tmp/fpvd.log
-    /etc/init.d/S99fpvd restart   # restart: reloads code on re-deploy; starts on first install
+    # Explicit stop + settle + clear stale pidfile, then start — NOT `restart`.
+    # `restart` is stop;sleep 1;start: the 1s settle is too short, so the new fpvd
+    # races the old one for its ports and dies just after "Starting fpvd: OK",
+    # leaving a stale /var/run/fpvd.pid (the documented restart race — observed
+    # live 2026-06-07 deploying the probe-driven selector: video dropped until a
+    # manual `rm pidfile; S99fpvd start`). Mirrors the drone deploy fix (935424d).
+    /etc/init.d/S99fpvd stop >/dev/null 2>&1 || true
+    sleep 2
+    rm -f /var/run/fpvd.pid
+    /etc/init.d/S99fpvd start
 '
 
 echo "[verify]"

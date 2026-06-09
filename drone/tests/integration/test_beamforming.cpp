@@ -101,3 +101,89 @@ TEST_CASE("beamforming: reconcile is idempotent and disables on enabled=false") 
     CHECK(bf.status().state == fpvd::BfState::Disabled);
     fs::remove_all(tmp);
 }
+
+TEST_CASE("beamforming: parseCbrRssi extracts the 4th rfinfo field") {
+    // token:ndp0:ndp1:cbrrssi0:cbrrssi1:cbrsnr0:cbrsnr1
+    CHECK(fpvd::parseCbrRssi("0:29:13:-48:-67:21:23") == -48);
+    CHECK(fpvd::parseCbrRssi("0:22:22:0:0:0:0") == 0);
+    CHECK(fpvd::parseCbrRssi("") == 0);
+    CHECK(fpvd::parseCbrRssi("garbage") == 0);
+}
+
+TEST_CASE("beamforming: force re-writes conf even when params unchanged") {
+    auto tmp = fs::temp_directory_path() / "fpvd-bf-force";
+    fs::remove_all(tmp);
+    auto ifd = makeIface(tmp / "proc", "wlan0", /*withBfNode=*/true);
+    fpvd::BeamformingController bf((tmp / "proc").string(), (tmp / "sys").string());
+    fpvd::BfParams p; p.iface = "wlan0"; p.driver = "8812eu";
+    p.remoteMac = "00:c0:ca:dd:ee:ff"; p.intervalMs = 5;
+    bf.reconcile(true, p);
+    CHECK(bf.status().state == fpvd::BfState::Active);
+
+    // Simulate a radio reset wiping the conf node, then a same-params reconcile.
+    std::ofstream(ifd / "bf_monitor_conf", std::ios::trunc) << "WIPED";
+    bf.reconcile(true, p, /*force=*/false);          // idempotent => NOT rewritten
+    CHECK(readFile(ifd / "bf_monitor_conf") == "WIPED");
+    bf.reconcile(true, p, /*force=*/true);           // force => rewritten
+    CHECK(readFile(ifd / "bf_monitor_conf") == "1 00:c0:ca:dd:ee:ff 0 0");
+    bf.stop();
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("beamforming: parseCbrToken extracts the 1st rfinfo field") {
+    CHECK(fpvd::parseCbrToken("4:30:15:-48:-67:21:23") == 4);
+    CHECK(fpvd::parseCbrToken("63:0:0:0:0:0:0") == 63);
+    CHECK(fpvd::parseCbrToken("") == -1);
+    CHECK(fpvd::parseCbrToken("garbage") == -1);
+}
+
+TEST_CASE("beamforming: cbrFresh drops false when the rfinfo token stops advancing") {
+    auto tmp = fs::temp_directory_path() / "fpvd-bf-fresh";
+    fs::remove_all(tmp);
+    auto ifd = makeIface(tmp / "proc", "wlan0", /*withBfNode=*/true);
+    // Frozen rfinfo: token never changes -> stale.
+    std::ofstream(ifd / "bf_monitor_rfinfo", std::ios::trunc) << "4:30:15:-48:-67:21:23";
+
+    fpvd::BeamformingController bf((tmp / "proc").string(), (tmp / "sys").string());
+    fpvd::BfParams p; p.iface = "wlan0"; p.driver = "8812eu";
+    p.remoteMac = "00:c0:ca:dd:ee:ff"; p.intervalMs = 5;
+    bf.reconcile(true, p);
+
+    std::this_thread::sleep_for(120ms);          // many ticks of a frozen token
+    CHECK(bf.status().cbrFresh == false);         // detected stale
+
+    // Advance the token -> fresh again (check within a few ticks of the change,
+    // so this does not depend on the exact kCbrStaleTicks value).
+    { std::ofstream f(ifd / "bf_monitor_rfinfo", std::ios::trunc);
+      f << "9:30:15:-48:-67:21:23"; }
+    std::this_thread::sleep_for(15ms);
+    CHECK(bf.status().cbrFresh == true);          // recovered
+    bf.stop();
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("beamforming: loop survives a transient trig write failure and self-heals") {
+    auto tmp = fs::temp_directory_path() / "fpvd-bf-resilient";
+    fs::remove_all(tmp);
+    auto ifd = makeIface(tmp / "proc", "wlan0", /*withBfNode=*/true);
+    // Make bf_monitor_trig a DIRECTORY so the loop's trig writes fail.
+    fs::create_directory(ifd / "bf_monitor_trig");
+
+    fpvd::BeamformingController bf((tmp / "proc").string(), (tmp / "sys").string());
+    fpvd::BfParams p; p.iface = "wlan0"; p.driver = "8812eu";
+    p.remoteMac = "00:c0:ca:dd:ee:ff"; p.intervalMs = 5;
+    bf.reconcile(true, p);                       // arms (conf write ok); loop starts
+
+    std::this_thread::sleep_for(60ms);           // loop has tried trig writes (all fail)
+    CHECK(bf.status().state == fpvd::BfState::Error);   // in error...
+    CHECK(bf.status().soundingCount == 0);              // ...no successful soundings
+
+    // The loop must still be ALIVE: clear the failure and confirm it recovers.
+    fs::remove(ifd / "bf_monitor_trig");         // remove the dir; writes now create a file
+    std::this_thread::sleep_for(60ms);
+    auto s = bf.status();
+    CHECK(s.state == fpvd::BfState::Active);      // recovered (loop did NOT die)
+    CHECK(s.soundingCount > 0);                   // sounding again
+    bf.stop();
+    fs::remove_all(tmp);
+}

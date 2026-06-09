@@ -85,7 +85,7 @@ TEST_CASE("lock: body enables DL and writes locked key → rejected") {
 
 TEST_CASE("lock: multiple locked paths reported together") {
     auto body = nlohmann::json::parse(
-        R"({"link":{"mcs":5,"txpower":10},"video":{"bitrate":1000}})");
+        R"({"link":{"mcs":5,"width":40},"video":{"bitrate":1000}})");
     auto r = checkDynamicLinkLock(body, dlOn());
     CHECK_FALSE(r.ok);
     CHECK(r.lockedPaths.size() == 3);
@@ -152,4 +152,14 @@ TEST_CASE("lock: DL off + body writes link.ldpc → allowed") {
     auto r = checkDynamicLinkLock(body, off);
     CHECK(r.ok);
     CHECK(r.lockedPaths.empty());
+}
+
+TEST_CASE("lock: DL on + body writes link.txpower → rejected (curve owns power)") {
+    // With the per-MCS power curve, the controller drives tx power per decision.
+    // A manual value would be silently overridden, so it is locked like link.mcs.
+    auto body = nlohmann::json::parse(R"({"link":{"txpower":20}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK_FALSE(r.ok);
+    REQUIRE(r.lockedPaths.size() == 1);
+    CHECK(r.lockedPaths[0] == "link.txpower");
 }

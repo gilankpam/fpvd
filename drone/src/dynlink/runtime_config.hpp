@@ -17,6 +17,17 @@ struct SafeDefaults {
     uint16_t bitrateKbps;
 };
 
+struct BitrateEngineConfig {
+    double baseRedundancyRatio{0.5};
+    double blocksPerFrame{2.0};
+    int    kMin{2};
+    int    kMax{50};
+    int    minBitrateKbps{1000};
+    int    maxBitrateKbps{24000};
+    int    mtuBytes{1500};   // from link.mtu
+    int    fps{60};          // from video.fps
+};
+
 struct DlRuntimeConfig {
     uint32_t healthTimeoutMs;
     uint32_t minIdrIntervalMs;
@@ -28,13 +39,15 @@ struct DlRuntimeConfig {
     bool     debug;
     RoiCurve     roiQp;
     SafeDefaults safe;
-    uint16_t helloMtuBytes;
-    uint16_t helloFps;
+    BitrateEngineConfig bitrate;
     // Static link radiotap flags the controller PRESERVES (never decides). The
     // GS never sends stbc/ldpc, so every CMD_SET_RADIO the loop emits carries
     // these config values through unchanged rather than the old hardcoded 0/false.
     bool     stbc;
     bool     ldpc;
+    uint8_t  linkBandwidth{20};   // radiotap 20/40 from link.width (wire no longer carries it)
+    uint16_t probeCtlPort{0};   // probe wfb_tx -C port; 0 disables probe retune
+    int      probeMcsCeiling{7};
     std::string  iface;
 };
 
@@ -44,7 +57,7 @@ struct DlStatus {                         // published by the loop, read by HTTP
     bool     running{false};
     bool     watchdogTripped{false};
     long     lastDecisionAgeMs{-1};       // -1 => none yet
-    HelloPub hello{HelloPub::Disabled};
+    HelloPub hello{HelloPub::Disabled};   // always Disabled post-3b; kept because status.cpp reads it for /status
 };
 
 // Pinned production endpoints; overridable in tests.

@@ -1,25 +1,29 @@
-"""Wire-format contract: the GS DLK1 v2 encoder must produce bytes that the
-drone's dynlink/wire.cpp decoder accepts. Goldens were captured from the
-authoritative C encoder (dynamic-link `dl-inject --dry-run`); fpvd's C++
-decoder is a port of the same dl_wire.c. Do not regenerate these from the
-Python encoder — that would make the test circular."""
+"""Wire-format contract: the GS DLK1 v3 encoder must produce bytes that the
+drone's dynlink/wire.cpp decoder accepts. Goldens were computed from the
+authoritative v3 wire layout (15 bytes: 11 payload + 4 CRC32); the struct
+layout is `struct.pack(">IBBIB", MAGIC, 3, flags, seq, mcs)` + crc32 BE u32.
+Do not regenerate these from the Python encoder — that would make the test
+circular. Recompute by hand from the layout spec."""
 from fpvdgs.dynlink.decision import Decision
-from fpvdgs.dynlink.wire import (
-    Hello, HelloAck, encode, encode_hello, encode_hello_ack,
-)
+from fpvdgs.dynlink.wire import encode
 
-# Decisions are 31 bytes (62 hex); HELLO / HELLO-ACK are 32 bytes (64 hex).
-GOLDEN_DECISION_1 = "444c4b31020000000000000100000001051412080e022ee0000000a34fec51"
-GOLDEN_DECISION_NEG = "444c4b310200000000000007000000070014f602040107d000000086b0d80c"
-GOLDEN_DECISION_MAX = "444c4b3102000000ffffffffffffffff07281e081003fde8000000a092ca14"
-GOLDEN_HELLO = "444c484502000000cafebabe0f9a003cdeadbeef0000000000000000b193a0b1"
-GOLDEN_HELLO_ACK = "444c48410200000012345678000000000000000000000000000000005286d325"
+# Decisions are 15 bytes (30 hex) in v3.
+# Goldens computed from: struct.pack(">IBBIB", 0x444C4B31, 3, 0, seq, mcs) + crc32 BE.
+GOLDEN_DECISION_1   = "444c4b3103000000000105c4a92dc5"   # seq=1,  mcs=5
+GOLDEN_DECISION_MCS0 = "444c4b3103000000000700e2997ecc"   # seq=7,  mcs=0
+GOLDEN_DECISION_MAX = "444c4b310300ffffffff070a61754a"   # seq=0xFFFFFFFF, mcs=7
+
+
+# Fields that existed on the fat v2 Decision but were dropped in v3 — the
+# encoder never read them, so callers passing them are simply ignored.
+_DROPPED_FIELDS = {"bandwidth", "tx_power_dBm", "k", "n", "depth", "bitrate_kbps"}
 
 
 def _decision(**overrides) -> Decision:
-    base = Decision(timestamp=0.0, mcs=5, bandwidth=20, tx_power_dBm=18,
-                    k=8, n=14, depth=2, bitrate_kbps=12000)
+    base = Decision(timestamp=0.0, mcs=5)
     for k, v in overrides.items():
+        if k in _DROPPED_FIELDS:
+            continue
         setattr(base, k, v)
     return base
 
@@ -28,14 +32,15 @@ def test_decision_golden():
     assert encode(_decision(), sequence=1).hex() == GOLDEN_DECISION_1
 
 
-def test_decision_signed_tx_power():
+def test_decision_mcs_zero():
+    """mcs=0 at seq=7 matches the neg golden (only mcs matters in v3)."""
     pkt = encode(_decision(mcs=0, tx_power_dBm=-10, k=2, n=4, depth=1,
                            bitrate_kbps=2000), sequence=7)
-    assert pkt.hex() == GOLDEN_DECISION_NEG
-    assert pkt[18] == 0xF6   # two's-complement -10
+    assert pkt.hex() == GOLDEN_DECISION_MCS0
 
 
 def test_decision_max_values():
+    """mcs=7 at seq=0xFFFFFFFF matches the max golden."""
     pkt = encode(_decision(mcs=7, bandwidth=40, tx_power_dBm=30, k=8, n=16,
                            depth=3, bitrate_kbps=65000), sequence=0xFFFFFFFF)
     assert pkt.hex() == GOLDEN_DECISION_MAX
@@ -44,15 +49,4 @@ def test_decision_max_values():
 def test_decision_magic_and_version():
     pkt = encode(_decision(), sequence=1)
     assert pkt[:4] == b"DLK1"
-    assert pkt[4] == 2
-
-
-def test_hello_golden():
-    pkt = encode_hello(Hello(generation_id=0xCAFEBABE, mtu_bytes=3994,
-                             fps=60, applier_build_sha=0xDEADBEEF))
-    assert pkt.hex() == GOLDEN_HELLO
-
-
-def test_hello_ack_golden():
-    pkt = encode_hello_ack(HelloAck(generation_id_echo=0x12345678))
-    assert pkt.hex() == GOLDEN_HELLO_ACK
+    assert pkt[4] == 3

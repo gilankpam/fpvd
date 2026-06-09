@@ -1,5 +1,7 @@
 #include "dynlink/runtime_config.hpp"
 #include "config/schema.hpp"
+#include "probe/probe_constants.hpp"
+#include "link_width.hpp"
 
 namespace fpvd::dynlink {
 
@@ -35,10 +37,22 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
         static_cast<uint16_t>(dl.safe.bitrateKbps),
     };
 
-    s.helloMtuBytes = static_cast<uint16_t>(c.link.mtu);
-    s.helloFps      = static_cast<uint16_t>(c.video.fps);
+    s.bitrate = BitrateEngineConfig{
+        dl.fec.baseRedundancyRatio,    // baseRedundancyRatio
+        dl.fec.blocksPerFrame,         // blocksPerFrame
+        dl.fec.kMin,                   // kMin
+        dl.fec.kMax,                   // kMax
+        dl.bitrate.minBitrateKbps,     // minBitrateKbps
+        dl.bitrate.maxBitrateKbps,     // maxBitrateKbps
+        c.link.mtu,                    // mtuBytes (from link.mtu)
+        c.video.fps,                   // fps (from video.fps)
+    };
+
     s.stbc          = c.link.stbc;
     s.ldpc          = c.link.ldpc;
+    s.linkBandwidth = static_cast<uint8_t>(modulationWidth(c.link.width));
+    s.probeCtlPort  = static_cast<uint16_t>(kProbeControlPort);
+    s.probeMcsCeiling = kProbeMcsCeiling;
     s.iface         = iface;
 
     return s;

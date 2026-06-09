@@ -149,3 +149,26 @@ def test_shipped_defaults_include_pixelpilot_and_validate():
     assert "pixelpilot" in cfg
     assert cfg["pixelpilot"]["enabled"] is True
     schema.validate_effective(cfg)  # no raise
+
+
+def test_beamforming_enabled_bool_ok():
+    from fpvdgs import schema
+    cfg = {"link": {"region": "US", "channel": 132,
+                    "beamforming": {"enabled": True}}}
+    schema.validate_effective(cfg)   # must not raise
+
+
+def test_beamforming_enabled_must_be_bool():
+    from fpvdgs import schema
+    cfg = {"link": {"region": "US", "channel": 132,
+                    "beamforming": {"enabled": "yes"}}}
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(cfg)
+
+
+def test_beamforming_rejects_unknown_subkey():
+    from fpvdgs import schema
+    cfg = {"link": {"region": "US", "channel": 132,
+                    "beamforming": {"enabled": True, "remoteMac": "x"}}}
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(cfg)

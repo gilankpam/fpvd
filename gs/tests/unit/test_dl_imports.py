@@ -6,9 +6,10 @@ import importlib
 import pytest
 
 MODULES = [
-    "decision", "predictor", "dynamic_fec", "bitrate", "stats_client",
-    "signals", "return_link", "wire", "drone_config", "tunnel_listener",
-    "policy",
+    "decision", "stats_client",
+    "signals", "return_link", "wire",
+    "policy", "controller", "config_build",
+    "learned_prior", "flightlog",
 ]
 
 

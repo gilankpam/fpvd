@@ -33,7 +33,9 @@ def build_status(version: str, runner_state: dict, wlans: dict,
                  drone_probe: dict, link_stats: dict | None = None,
                  uptime_ms: int | None = None,
                  dynamic_link: dict | None = None,
-                 pixelpilot: dict | None = None) -> dict:
+                 pixelpilot: dict | None = None,
+                 probe: dict | None = None,
+                 beamforming: dict | None = None) -> dict:
     radio = []
     for wlan, info in wlans.items():
         radio.append({"wlan": wlan, **info})
@@ -57,4 +59,8 @@ def build_status(version: str, runner_state: dict, wlans: dict,
         out["dynamicLink"] = dynamic_link
     if pixelpilot is not None:
         out["pixelpilot"] = pixelpilot
+    if probe is not None:
+        out["probe"] = probe
+    if beamforming is not None:
+        out["beamforming"] = beamforming
     return out

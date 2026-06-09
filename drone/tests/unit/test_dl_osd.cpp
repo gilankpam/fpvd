@@ -28,7 +28,7 @@ TEST_CASE("osd: status includes IDR counter") {
     d.txPowerDbm   = 18;
 
     /* Zero counter is rendered as I0. */
-    osd.writeStatus(d, /*rssiDbm=*/-50);
+    osd.writeStatus(d, /*rssiDbm=*/-50, 0);
     std::string buf = readFile(path);
     CHECK(buf.find(" I0 |") != std::string::npos);
 
@@ -36,7 +36,7 @@ TEST_CASE("osd: status includes IDR counter") {
     osd.bumpIdr();
     osd.bumpIdr();
     osd.bumpIdr();
-    osd.writeStatus(d, -50);
+    osd.writeStatus(d, -50, 0);
     buf = readFile(path);
     CHECK(buf.find(" I3 |") != std::string::npos);
 
@@ -55,7 +55,7 @@ TEST_CASE("osd: status line contains expected fields") {
     d.depth       = 1;
     d.txPowerDbm  = 20;
 
-    osd.writeStatus(d, -60);
+    osd.writeStatus(d, -60, 0);
     std::string buf = readFile(path);
 
     /* Prefix present */
@@ -88,7 +88,7 @@ TEST_CASE("osd: disabled writes nothing") {
     Decision d{};
     d.mcs = 3; d.bitrateKbps = 3000;
 
-    osd.writeStatus(d, -70);
+    osd.writeStatus(d, -70, 0);
     osd.writeEvent("test");
     osd.bumpIdr();
 
@@ -124,7 +124,7 @@ TEST_CASE("osd: writeStatus clears stale event line") {
     /* writeStatus should clear the event line. */
     Decision d{};
     d.mcs = 2; d.bitrateKbps = 4000; d.k = 4; d.n = 8;
-    osd.writeStatus(d, -55);
+    osd.writeStatus(d, -55, 0);
     {
         std::string buf = readFile(path);
         /* Event toast must be gone — writeStatus clears event_line. */

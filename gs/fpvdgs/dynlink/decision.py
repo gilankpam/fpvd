@@ -9,25 +9,13 @@ from typing import Any
 class Decision:
     """What the controller *would* apply if the wire were connected.
 
-    Phase 0: logged only. Phase 2: serialised to a wire packet.
-
-    `reason` is a short human-readable trigger string used heavily in
-    Phase 0 for pilot-vs-controller correlation.
-    `knobs_changed` lists the specific knob names that moved this tick;
-    empty on steady-state ticks.
+    Phase 3b: the wire carries `{mcs}` only — the drone computes its own
+    bitrate / FEC / depth / tx_power locally. `reason` and
+    `signals_snapshot` are kept for telemetry / status, not the wire.
     """
     timestamp: float
     mcs: int
-    bandwidth: int
-    tx_power_dBm: int
-    k: int
-    n: int
-    depth: int
-    bitrate_kbps: int
     reason: str = ""
-    knobs_changed: list[str] = field(default_factory=list)
-    # Informational — the controller's internal state when this
-    # decision was emitted. Kept out of the Phase 2 wire packet.
     signals_snapshot: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:

@@ -13,6 +13,12 @@ namespace fpvd::dynlink {
  * (huge font, "TopMoving" marquee-scroll). */
 static constexpr const char* kOsdPrefix = "&L50&F30 ";
 
+/* BF OSD token: 0 off (nothing), 1 armed-no-report, 2 working. ASCII so the
+ * msposd font always renders it. */
+static const char* bfToken(int bfCode) {
+    return bfCode == 2 ? " B+" : bfCode == 1 ? " B-" : "";
+}
+
 OsdWriter::OsdWriter(std::string msgPath, bool enabled,
                      uint32_t updateIntervalMs, bool debugLatency)
     : msgPath_(std::move(msgPath))
@@ -44,13 +50,13 @@ void OsdWriter::flush() {
     }
 }
 
-void OsdWriter::writeStatus(const Decision& d, int rssiDbm) {
+void OsdWriter::writeStatus(const Decision& d, int rssiDbm, int bfCode) {
     if (!enabled_) return;
 
     /* &T/&W/&B/&C are msposd placeholders (board temp, wifi-module temp,
      * video bitrate+fps, cpu%); msposd substitutes at render time. */
     std::snprintf(statusLine_, sizeof(statusLine_),
-                  "%sMCS%u %uM (%u,%u)d%u TX%d R%d I%u | &B T&T W&W CPU&C",
+                  "%sMCS%u %uM (%u,%u)d%u TX%d R%d I%u%s | &B T&T W&W CPU&C",
                   kOsdPrefix,
                   static_cast<unsigned>(d.mcs),
                   static_cast<unsigned>((d.bitrateKbps + 500) / 1000),
@@ -59,7 +65,8 @@ void OsdWriter::writeStatus(const Decision& d, int rssiDbm) {
                   static_cast<unsigned>(d.depth),
                   static_cast<int>(d.txPowerDbm),
                   rssiDbm,
-                  static_cast<unsigned>(idrCount_));
+                  static_cast<unsigned>(idrCount_),
+                  bfToken(bfCode));
 
     /* Fresh status = the link recovered (or never tripped).  Clear any
      * stale event line so a past WATCHDOG/REJECT toast doesn't sit on the

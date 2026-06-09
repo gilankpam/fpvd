@@ -69,8 +69,7 @@ def _free_udp_port():
 
 def test_start_sets_running_then_stop_joins():
     c = DynamicLinkController(_snapshot(40000),
-                              stats_client_factory=_IdleStatsClient,
-                              gs_listen_port=0)
+                              stats_client_factory=_IdleStatsClient)
     c.start()
     try:
         assert c.status()["running"] is True
@@ -83,8 +82,7 @@ def test_emits_decision_packet_to_drone():
     sock, port = _free_udp_port()
     sock.settimeout(2.0)
     c = DynamicLinkController(_snapshot(port),
-                              stats_client_factory=_OneShotStatsClient,
-                              gs_listen_port=0)
+                              stats_client_factory=_OneShotStatsClient)
     c.start()
     try:
         data, _ = sock.recvfrom(64)
@@ -92,7 +90,8 @@ def test_emits_decision_packet_to_drone():
         c.stop()
         sock.close()
     assert data[:4] == b"DLK1"
-    assert len(data) == 31
+    assert len(data) == 15
+    assert data[4] == 3   # version == 3
     st = c.status()
     assert st["decision"]["mcs"] is not None
     assert st["emitSeq"] >= 1
@@ -103,8 +102,7 @@ def test_set_config_while_running_rebuilds_with_new_drone_port():
     sock_b, port_b = _free_udp_port()
     sock_b.settimeout(2.0)
     c = DynamicLinkController(_snapshot(port_a),
-                              stats_client_factory=_OneShotStatsClient,
-                              gs_listen_port=0)
+                              stats_client_factory=_OneShotStatsClient)
     c.start()
     try:
         c.set_config(_snapshot(port_b))
@@ -122,8 +120,7 @@ def test_concurrent_set_config_no_hang():
 
     sock, port = _free_udp_port()
     c = DynamicLinkController(_snapshot(port),
-                              stats_client_factory=_IdleStatsClient,
-                              gs_listen_port=0)
+                              stats_client_factory=_IdleStatsClient)
     c.start()
     errors = []
 
@@ -171,8 +168,7 @@ def test_non_video_streams_are_ignored():
         def stop(self):
             self._stop = True
 
-    c = DynamicLinkController(_snapshot(port), stats_client_factory=_MixedStats,
-                              gs_listen_port=0)
+    c = DynamicLinkController(_snapshot(port), stats_client_factory=_MixedStats)
     c.start()
     try:
         data, _ = sock.recvfrom(64)
@@ -182,6 +178,47 @@ def test_non_video_streams_are_ignored():
     finally:
         c.stop()
         sock.close()
+
+
+class _RepeatStatsClient:
+    """Emits a video RxEvent every ~20 ms until stopped."""
+    def __init__(self, endpoint, on_event):
+        self._on_event = on_event
+        self._stop = False
+
+    async def run(self):
+        import asyncio
+        while not self._stop:
+            self._on_event(_rx_event())
+            await asyncio.sleep(0.02)
+
+    def stop(self):
+        self._stop = True
+
+
+def test_controller_forwards_probe_snapshot_to_policy():
+    # The controller must pull the probe snapshot each policy tick (so the
+    # selector can promote). With the sync-gate gone, Policy.tick() runs from
+    # the first stats event — no HELLO handshake required.
+    seen = {}
+
+    def fake_probe_status():
+        seen["called"] = seen.get("called", 0) + 1
+        return {"running": True, "streams": 1, "mcs": {}}
+
+    drone_sock, drone_port = _free_udp_port()
+    c = DynamicLinkController(_snapshot(drone_port),
+                              stats_client_factory=_RepeatStatsClient,
+                              probe_status=fake_probe_status)
+    c.start()
+    try:
+        deadline = time.monotonic() + 1.5
+        while seen.get("called", 0) < 1 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert seen.get("called", 0) >= 1   # tick loop pulled the probe snapshot
+    finally:
+        c.stop()
+        drone_sock.close()
 
 
 def test_idr_relay_binds_inaddr_any_so_it_can_forward_off_loopback():
@@ -201,7 +238,7 @@ def test_idr_relay_binds_inaddr_any_so_it_can_forward_off_loopback():
 
     c = DynamicLinkController(
         _snapshot(40010, droneAddr="10.255.255.1", idrForward=True, idrPort=idr_port),
-        stats_client_factory=_IdleStatsClient, gs_listen_port=0)
+        stats_client_factory=_IdleStatsClient)
     c.start()
     try:
         assert c.status()["idrListen"] == "0.0.0.0:%d" % idr_port

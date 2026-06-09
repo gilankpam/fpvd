@@ -29,10 +29,13 @@ target_sources(fpvd_core PRIVATE
     src/dynlink/dedup.cpp
     src/dynlink/encoder_client.cpp
     src/dynlink/radio_txpower.cpp
+    src/dynlink/txpower_curve.cpp
     src/dynlink/roi_qp.cpp
+    src/dynlink/bitrate.cpp
+    src/dynlink/fec.cpp
+    src/dynlink/local_compute.cpp
     src/dynlink/watchdog.cpp
     src/dynlink/wire.cpp
-    src/dynlink/hello.cpp
     src/dynlink/idr_listen.cpp
     src/dynlink/runtime_config.cpp
     src/dynlink/osd.cpp
@@ -44,6 +47,7 @@ target_sources(fpvd_core PRIVATE
     src/translate/waybeam.cpp
     src/waybeam/client.cpp
     src/translate/wfb.cpp
+    src/probe/probe_specs.cpp
     src/translate/wfb_control.cpp
     src/translate/telemetry.cpp
 
@@ -88,18 +92,24 @@ if(NOT CMAKE_CROSSCOMPILING)
 
         tests/unit/test_dl_apply_direction.cpp
         tests/unit/test_dl_roi_qp.cpp
+        tests/unit/test_dl_bitrate.cpp
+        tests/unit/test_dl_fec.cpp
+        tests/unit/test_dl_local_compute.cpp
+        tests/unit/test_dl_txpower_curve.cpp
         tests/integration/test_process.cpp
         tests/integration/test_supervisor.cpp
         tests/integration/test_orchestrator.cpp
         tests/integration/test_radio.cpp
         tests/integration/test_radio_tune_script.cpp
         tests/integration/test_beamforming.cpp
+        tests/integration/test_osd.cpp
         tests/integration/test_daemon.cpp
         tests/integration/test_http_server.cpp
         tests/integration/test_http_handlers.cpp
+        tests/unit/test_probe_specs.cpp
+        tests/unit/test_probe_rung.cpp
         tests/unit/test_dl_encoder_client.cpp
         tests/unit/test_dl_radio_txpower.cpp
-        tests/unit/test_dl_hello.cpp
         tests/unit/test_dl_osd.cpp
         tests/unit/test_dl_idr_listen.cpp
         tests/unit/test_dl_runtime_config.cpp
@@ -113,4 +123,8 @@ install(TARGETS fpvd RUNTIME DESTINATION bin)
 install(PROGRAMS scripts/radio-up.sh DESTINATION libexec/fpvd)
 install(PROGRAMS scripts/radio-tune.sh DESTINATION libexec/fpvd)
 install(PROGRAMS scripts/S99fpvd DESTINATION ../etc/init.d)
-install(FILES etc/defaults.json DESTINATION ../rom/etc/fpvd)
+# Lands in the squashfs at /etc/fpvd/defaults.json, which the read-only rootfs
+# also exposes at /rom/etc/fpvd/defaults.json — the path the binary defaults to
+# (main.cpp). Do NOT prefix with rom/: a literal rom/ dir in the image gets
+# shadowed by the /rom squashfs mountpoint at boot, hiding the file from fpvd.
+install(FILES etc/defaults.json DESTINATION ../etc/fpvd)
