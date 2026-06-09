@@ -168,6 +168,11 @@ class Api:
         result["gs"] = {"applied": True, "wfbBounced": wfb_bounced or coord_bounced}
 
         # --- drone lane ---
+        # NOTE: when the shared-link lane ran, the coordinator's drone.apply()
+        # already committed the drone's whole pending (incl. any drone-section
+        # change proxied at PATCH time), so this apply can be a harmless no-op
+        # (the drone diffs internally and restarts nothing). Kept unconditional
+        # so a GS-only or drone-only apply (no link change) still fires the drone.
         if self._drone_dirty:
             try:
                 self.drone.apply()

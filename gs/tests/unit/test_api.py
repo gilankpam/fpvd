@@ -8,7 +8,11 @@ from fpvdgs.link import LinkCoordinator
 
 
 class FakeRunner:
+    def __init__(self):
+        self.restarts = 0      # count bounces so combined-lane tests can assert no double-bounce
+
     def restart(self):
+        self.restarts += 1
         return True
 
     def state(self):
@@ -481,6 +485,42 @@ def test_apply_drone_dirty_fires_drone_lane():
     assert body["drone"] == {"fired": True, "applied": True}
     assert ("POST", "/apply", None) in drone.calls
     assert api._drone_dirty is False                 # cleared after firing
+
+
+def test_apply_combined_link_and_wfb_bounces_runner_once():
+    # Both a shared link field (linkId -> forces a coordinator BOUNCE, since the
+    # default coordinator has retune=None so nothing live-retunes) AND a wfb
+    # field change. The coordinator renders the whole pending and bounces, so the
+    # GS-local wfb lane must be SKIPPED -> the runner bounces EXACTLY once.
+    api, store, drone, cfg_out = _api()
+    render_mod.write_cfg(cfg_out, render_mod.render_cfg(store.effective()))
+    api.handle("PATCH", "/config", {},
+               json.dumps({"link": {"linkId": 12345}, "wfb": {"profile": "gs2"}}).encode())
+    code, obj = api.handle("POST", "/apply", {}, b"")
+    assert code == 200
+    assert obj["sharedLink"]["mode"] == "bounce"     # linkId change is not live-retunable
+    assert obj["gs"]["wfbBounced"] is True           # reported bounced (via the coordinator)
+    assert api.runner.restarts == 1                  # no double-bounce: exactly one restart
+    assert store.effective()["link"]["linkId"] == 12345
+    assert store.effective()["wfb"]["profile"] == "gs2"
+
+
+def test_apply_combined_link_and_drone_section_both_run():
+    # A prior drone-section PATCH (e.g. video) left _drone_dirty AND a shared
+    # link change is pending, drone reachable. The coordinator pushes the link
+    # AND the drone lane fires. The redundant second drone.apply() is acceptable
+    # (the drone diffs internally) -> assert drone.apply() ran at least once.
+    api, store, drone, cfg_out = _api()
+    render_mod.write_cfg(cfg_out, render_mod.render_cfg(store.effective()))
+    api._drone_dirty = True                          # prior drone-section PATCH
+    api.handle("PATCH", "/config", {}, json.dumps({"link": {"channel": 100}}).encode())
+    code, obj = api.handle("POST", "/apply", {}, b"")
+    assert code == 200
+    assert obj["sharedLink"]["droneApplied"] is True     # coordinator pushed the link
+    assert obj["drone"]["fired"] is True
+    # the drone lane's drone.apply() ran (>=1; the redundant no-op is allowed)
+    assert sum(1 for c in drone.calls if c[0] == "POST" and c[1] == "/apply") >= 1
+    assert api._drone_dirty is False
 
 
 def test_wfb_change_does_not_touch_pixelpilot(tmp_path):
