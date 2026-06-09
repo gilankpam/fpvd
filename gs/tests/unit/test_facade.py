@@ -1,4 +1,6 @@
-from fpvdgs.facade import build_config_tree
+import pytest
+
+from fpvdgs.facade import build_config_tree, split_patch, FacadeError
 
 GS_EFF = {
     "link": {"channel": 132, "width": 20, "linkId": 7669206,
@@ -64,3 +66,41 @@ def test_never_seen_drone_yields_empty_drone_subtrees():
     assert t["video"] == {}
     assert t["link"]["gs"]["region"] == "US"
     assert t["dynamicLink"]["controller"]["maxMcs"] == 5
+
+
+# --- split_patch (unified PATCH routing) ---
+def test_split_link_gs_drone_shared():
+    gs, drone, shared = split_patch({"link": {"channel": 140, "gs": {"rxpower": 20},
+                                              "drone": {"mcs": 4}}})
+    assert gs == {"link": {"channel": 140, "rxpower": 20}}
+    assert drone == {"link": {"mcs": 4}}
+    assert shared is True
+
+
+def test_split_dynamiclink_controller_applier_enabled():
+    gs, drone, shared = split_patch({"dynamicLink": {
+        "enabled": True, "controller": {"maxMcs": 6}, "applier": {"failsafe": {"mcs": 2}}}})
+    assert gs == {"dynamicLink": {"enabled": True, "controller": {"maxMcs": 6}}}
+    assert drone == {"dynamicLink": {"enabled": True, "failsafe": {"mcs": 2}}}
+    assert shared is False
+
+
+def test_split_wholly_owned_sections():
+    gs, drone, _ = split_patch({"video": {"bitrate": 9000}, "pixelpilot": {"enabled": False}})
+    assert drone == {"video": {"bitrate": 9000}}
+    assert gs == {"pixelpilot": {"enabled": False}}
+
+
+def test_split_rejects_meta_and_unknown():
+    with pytest.raises(FacadeError):
+        split_patch({"_meta": {"droneStale": False}})
+    with pytest.raises(FacadeError):
+        split_patch({"bogus": {}})
+
+
+def test_split_link_only_shared_no_drone_push():
+    # a shared-link-only patch goes to GS pending only; drone push deferred to apply
+    gs, drone, shared = split_patch({"link": {"channel": 140}})
+    assert gs == {"link": {"channel": 140}}
+    assert drone == {}
+    assert shared is True

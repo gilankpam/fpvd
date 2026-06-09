@@ -6,7 +6,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from .schema import SchemaError
-from .facade import build_config_tree
+from .config import deep_merge
+from .facade import build_config_tree, split_patch, FacadeError
+from .drone_client import DroneRejected, DroneUnreachable
 from .dynlink.config_build import make_dl_snapshot
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .probe.config_build import make_probe_snapshot
@@ -28,6 +30,7 @@ class Api:
         self.pixelpilot = pixelpilot
         self.probe = probe
         self.drone_cache = drone_cache
+        self._drone_dirty = False
 
     def _json(self, body: bytes) -> dict:
         return json.loads(body or b"{}")
@@ -47,10 +50,7 @@ class Api:
                 drone_cfg, meta = self.drone_cache.read()
                 return 200, build_config_tree(gs_cfg, drone_cfg, meta)
             if key == ("PATCH", "/config"):
-                sparse = self._json(body)
-                self.schema.validate_config_patch(sparse)
-                self.store.patch(sparse)
-                return 200, self.store.pending()
+                return self._patch_config(self._json(body))
             if key == ("POST", "/apply"):
                 return self._apply_gs()
             if key == ("POST", "/reset"):
@@ -76,6 +76,41 @@ class Api:
             return 400, {"error": str(e)}
         except Exception as e:  # surfaced, never silent
             return 500, {"error": str(e)}
+
+    def _patch_config(self, patch):
+        """Route a unified sparse PATCH to the GS pending store and the drone.
+
+        Order matters: validate the GS portion (no mutation) -> proxy the drone
+        portion -> patch the GS pending. A drone rejection leaves GS pending
+        clean; a GS validation failure never touches the drone."""
+        try:
+            gs_sparse, drone_sparse, _ = split_patch(patch)
+        except FacadeError as e:
+            return 400, {"error": "bad_config", "message": str(e)}
+        # 1) validate the GS portion locally (no mutation) by merging onto pending
+        if gs_sparse:
+            merged = deep_merge(self.store.pending(), gs_sparse)
+            try:
+                self.schema.validate_effective(merged)
+            except SchemaError as e:
+                return 400, {"error": "bad_config", "message": str(e)}
+        # 2) proxy the drone portion (drone validates; a reject leaves GS untouched)
+        if drone_sparse:
+            try:
+                self.drone.patch_config(drone_sparse)
+                self._drone_dirty = True
+            except DroneRejected as e:
+                return 400, {"error": "drone_rejected", "message": e.message,
+                             "details": e.body}
+            except DroneUnreachable:
+                return 502, {"error": "drone_unreachable"}
+        # 3) patch the GS pending
+        if gs_sparse:
+            self.store.patch(gs_sparse)
+        # return the unified pending tree
+        drone_cfg, meta = self.drone_cache.read() if self.drone_cache else (
+            None, {"droneReachable": False, "droneStale": True, "droneLastSeen": None})
+        return 200, build_config_tree(self.store.pending(), drone_cfg, meta)
 
     @staticmethod
     def _without(cfg: dict, *keys) -> dict:

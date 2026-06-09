@@ -48,3 +48,62 @@ def build_config_tree(gs_eff: dict, drone_cfg: dict | None, meta: dict) -> dict:
         if s in gs_eff:
             out[s] = gs_eff[s]
     return out
+
+
+def split_patch(patch: dict) -> tuple[dict, dict, bool]:
+    """Route a unified sparse PATCH into (gs_sparse, drone_sparse, touches_shared_link).
+    Shared link keys go to the GS pending only (the coordinator pushes them to the
+    drone at apply). dynamicLink.enabled goes to BOTH. Raises FacadeError on a
+    read-only (_meta) or unknown section."""
+    gs: dict = {}
+    drone: dict = {}
+    for top, val in patch.items():
+        if top == "_meta":
+            raise FacadeError("_meta is read-only")
+        elif top == "link":
+            _split_link(val or {}, gs, drone)
+        elif top == "dynamicLink":
+            _split_dynamic_link(val or {}, gs, drone)
+        elif top in DRONE_SECTIONS:
+            drone[top] = val
+        elif top in GS_SECTIONS:
+            gs[top] = val
+        else:
+            raise FacadeError(f"unknown config section: {top!r}")
+    touches_shared = bool(set((patch.get("link") or {})) & set(SHARED_LINK_KEYS))
+    return gs, drone, touches_shared
+
+
+def _split_link(link: dict, gs: dict, drone: dict) -> None:
+    gs_link, drone_link = {}, {}
+    for k, v in link.items():
+        if k in SHARED_LINK_KEYS:
+            gs_link[k] = v
+        elif k == "gs":
+            gs_link.update(v or {})
+        elif k == "drone":
+            drone_link.update(v or {})
+        else:
+            raise FacadeError(f"unknown link key: {k!r}")
+    if gs_link:
+        gs["link"] = gs_link
+    if drone_link:
+        drone["link"] = drone_link
+
+
+def _split_dynamic_link(dl: dict, gs: dict, drone: dict) -> None:
+    gs_dl, drone_dl = {}, {}
+    for k, v in dl.items():
+        if k == "enabled":
+            gs_dl["enabled"] = v
+            drone_dl["enabled"] = v
+        elif k == "controller":
+            gs_dl["controller"] = v
+        elif k == "applier":
+            drone_dl.update(v or {})
+        else:
+            raise FacadeError(f"unknown dynamicLink key: {k!r}")
+    if gs_dl:
+        gs["dynamicLink"] = gs_dl
+    if drone_dl:
+        drone["dynamicLink"] = drone_dl

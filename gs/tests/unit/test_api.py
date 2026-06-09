@@ -18,12 +18,15 @@ class FakeRunner:
 class FakeDrone:
     def __init__(self):
         self.calls = []
+        self.patch_raises = None   # set to an exception to make patch_config raise
 
     def healthz(self):
         return True
 
     def patch_config(self, d):
         self.calls.append(("PATCH", d))
+        if self.patch_raises is not None:
+            raise self.patch_raises
         return {}
 
     def apply(self):
@@ -112,12 +115,92 @@ def test_get_config_renders_gs_when_drone_never_seen():
     assert body["link"]["drone"] == {}
 
 
-def test_patch_config_rejects_link():
-    api, _, _, _ = _api()
+def test_patch_config_routes_gs_section_not_drone():
+    api, store, drone, _ = _api(drone_cache=_FakeDroneCache(_DRONE_CFG, _DRONE_META))
+    code, _ = api.handle("PATCH", "/config", {},
+                         json.dumps({"pixelpilot": {"videoScale": 1.5}}).encode())
+    assert code == 200
+    assert store.pending()["pixelpilot"]["videoScale"] == 1.5
+    assert drone.calls == []          # GS-only patch never touches the drone
+
+
+def test_patch_config_routes_drone_section():
+    api, store, drone, _ = _api(drone_cache=_FakeDroneCache(_DRONE_CFG, _DRONE_META))
+    code, _ = api.handle("PATCH", "/config", {},
+                         json.dumps({"video": {"bitrate": 9000}}).encode())
+    assert code == 200
+    assert ("PATCH", {"video": {"bitrate": 9000}}) in drone.calls
+    assert api._drone_dirty is True
+
+
+def test_patch_config_link_gs_routes_to_pending():
+    api, store, drone, _ = _api(drone_cache=_FakeDroneCache(_DRONE_CFG, _DRONE_META))
+    code, _ = api.handle("PATCH", "/config", {},
+                         json.dumps({"link": {"gs": {"rxpower": 20}}}).encode())
+    assert code == 200
+    assert store.pending()["link"]["rxpower"] == 20
+    assert drone.calls == []          # link.gs is GS-only
+
+
+def test_patch_config_link_drone_proxies():
+    api, store, drone, _ = _api(drone_cache=_FakeDroneCache(_DRONE_CFG, _DRONE_META))
+    code, _ = api.handle("PATCH", "/config", {},
+                         json.dumps({"link": {"drone": {"mcs": 4}}}).encode())
+    assert code == 200
+    assert ("PATCH", {"link": {"mcs": 4}}) in drone.calls
+
+
+def test_patch_config_shared_link_goes_to_gs_pending_only():
+    api, store, drone, _ = _api(drone_cache=_FakeDroneCache(_DRONE_CFG, _DRONE_META))
+    code, _ = api.handle("PATCH", "/config", {},
+                         json.dumps({"link": {"channel": 140}}).encode())
+    assert code == 200
+    assert store.pending()["link"]["channel"] == 140
+    assert drone.calls == []          # shared keys pushed at apply, not now
+
+
+def test_patch_config_rejects_meta():
+    api, store, drone, _ = _api(drone_cache=_FakeDroneCache(_DRONE_CFG, _DRONE_META))
     code, obj = api.handle("PATCH", "/config", {},
-                           json.dumps({"link": {"channel": 100}}).encode())
+                           json.dumps({"_meta": {"droneStale": False}}).encode())
     assert code == 400
-    assert "link" in obj["error"]
+    assert drone.calls == []
+
+
+def test_patch_config_gs_validation_failure_leaves_pending_clean():
+    api, store, drone, _ = _api(drone_cache=_FakeDroneCache(_DRONE_CFG, _DRONE_META))
+    before = store.pending()
+    code, obj = api.handle("PATCH", "/config", {},
+                           json.dumps({"link": {"width": 80}}).encode())
+    assert code == 400
+    assert store.pending() == before          # GS pending unchanged
+    assert drone.calls == []                  # drone never touched
+
+
+def test_patch_config_drone_reject_leaves_gs_pending_clean():
+    from fpvdgs.drone_client import DroneRejected
+    api, store, drone, _ = _api(drone_cache=_FakeDroneCache(_DRONE_CFG, _DRONE_META))
+    drone.patch_raises = DroneRejected(400, {"message": "bad mcs", "field": "mcs"})
+    before = store.pending()
+    # a patch that touches BOTH a GS section and a drone section
+    code, obj = api.handle("PATCH", "/config", {},
+                           json.dumps({"pixelpilot": {"videoScale": 1.5},
+                                       "link": {"drone": {"mcs": 99}}}).encode())
+    assert code == 400
+    assert obj["error"] == "drone_rejected"
+    assert obj["message"] == "bad mcs"
+    assert obj["details"]["field"] == "mcs"
+    assert store.pending() == before          # GS pending NOT mutated on drone reject
+
+
+def test_patch_config_drone_unreachable():
+    from fpvdgs.drone_client import DroneUnreachable
+    api, store, drone, _ = _api(drone_cache=_FakeDroneCache(_DRONE_CFG, _DRONE_META))
+    drone.patch_raises = DroneUnreachable("no route")
+    code, obj = api.handle("PATCH", "/config", {},
+                           json.dumps({"video": {"bitrate": 9000}}).encode())
+    assert code == 502
+    assert obj["error"] == "drone_unreachable"
 
 
 def test_patch_config_then_apply_renders_cfg():
