@@ -116,21 +116,21 @@ std::vector<ValidationError> validate(const Config& c) {
     // dynamicLink
     {
         const auto& dl = c.dynamicLink;
-        if (dl.safe.mcs < 0 || dl.safe.mcs > 7)
-            errs.push_back({"dynamicLink.safe.mcs", "must be 0..7"});
-        if (dl.safe.k < 1 || dl.safe.k > 32 ||
-            dl.safe.n < 1 || dl.safe.n > 32 ||
-            dl.safe.k >= dl.safe.n)
-            errs.push_back({"dynamicLink.safe.fec", "require 1<=k<n<=32"});
-        if (dl.safe.depth < 1 || dl.safe.depth > 8)
-            errs.push_back({"dynamicLink.safe.depth", "must be 1..8"});
-        if (dl.safe.bandwidth != 10 && dl.safe.bandwidth != 20 &&
-            dl.safe.bandwidth != 40)
-            errs.push_back({"dynamicLink.safe.bandwidth", "must be 10, 20, or 40"});
-        if (dl.safe.txPowerDbm < -10 || dl.safe.txPowerDbm > 30)
-            errs.push_back({"dynamicLink.safe.txPowerDbm", "must be -10..30"});
-        if (dl.safe.bitrateKbps <= 0)
-            errs.push_back({"dynamicLink.safe.bitrateKbps", "must be > 0"});
+        if (dl.failsafe.mcs < 0 || dl.failsafe.mcs > 7)
+            errs.push_back({"dynamicLink.failsafe.mcs", "must be 0..7"});
+        if (dl.failsafe.k < 1 || dl.failsafe.k > 32 ||
+            dl.failsafe.n < 1 || dl.failsafe.n > 32 ||
+            dl.failsafe.k >= dl.failsafe.n)
+            errs.push_back({"dynamicLink.failsafe.fec", "require 1<=k<n<=32"});
+        if (dl.failsafe.depth < 1 || dl.failsafe.depth > 8)
+            errs.push_back({"dynamicLink.failsafe.depth", "must be 1..8"});
+        if (dl.failsafe.bandwidth != 10 && dl.failsafe.bandwidth != 20 &&
+            dl.failsafe.bandwidth != 40)
+            errs.push_back({"dynamicLink.failsafe.bandwidth", "must be 10, 20, or 40"});
+        if (dl.failsafe.txPowerDbm < -10 || dl.failsafe.txPowerDbm > 30)
+            errs.push_back({"dynamicLink.failsafe.txPowerDbm", "must be -10..30"});
+        if (dl.failsafe.bitrateKbps <= 0)
+            errs.push_back({"dynamicLink.failsafe.bitrateKbps", "must be > 0"});
 
         if (dl.healthTimeoutMs < 1000)
             errs.push_back({"dynamicLink.healthTimeoutMs", "must be >= 1000"});

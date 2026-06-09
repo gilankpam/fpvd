@@ -91,6 +91,6 @@ TEST_CASE("store: defaults file carries dynamicLink section") {
     auto c = fpvd::loadEffective("tests/fixtures/defaults.json",
                                   "/no/such/path");
     CHECK(c.dynamicLink.enabled == false);
-    CHECK(c.dynamicLink.safe.mcs == 1);
+    CHECK(c.dynamicLink.failsafe.mcs == 1);
     CHECK(c.dynamicLink.roiQp.thresholdKbps == 6000);
 }

@@ -9,7 +9,7 @@ TEST_CASE("buildDlSnapshot maps schema + derived inputs") {
     Config c{};                       // defaults
     c.link.mtu = 1400; c.video.fps = 90;
     c.link.stbc = false; c.link.ldpc = true;   // preserved through, not DL-decided
-    c.dynamicLink.safe.mcs = 3; c.dynamicLink.healthTimeoutMs = 8000;
+    c.dynamicLink.failsafe.mcs = 3; c.dynamicLink.healthTimeoutMs = 8000;
     auto s = buildDlSnapshot(c, "wlan1");
     CHECK(s.iface == "wlan1");
     CHECK(s.stbc == false);
@@ -44,13 +44,13 @@ TEST_CASE("buildDlSnapshot maps all DynamicLink fields") {
 
 TEST_CASE("buildDlSnapshot maps safe defaults correctly") {
     Config c{};
-    c.dynamicLink.safe.mcs         = 2;
-    c.dynamicLink.safe.k           = 6;
-    c.dynamicLink.safe.n           = 10;
-    c.dynamicLink.safe.depth       = 2;
-    c.dynamicLink.safe.bandwidth   = 40;
-    c.dynamicLink.safe.txPowerDbm  = 15;
-    c.dynamicLink.safe.bitrateKbps = 3000;
+    c.dynamicLink.failsafe.mcs         = 2;
+    c.dynamicLink.failsafe.k           = 6;
+    c.dynamicLink.failsafe.n           = 10;
+    c.dynamicLink.failsafe.depth       = 2;
+    c.dynamicLink.failsafe.bandwidth   = 40;
+    c.dynamicLink.failsafe.txPowerDbm  = 15;
+    c.dynamicLink.failsafe.bitrateKbps = 3000;
 
     auto s = buildDlSnapshot(c, "wlan0");
 

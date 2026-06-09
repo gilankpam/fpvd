@@ -160,7 +160,7 @@ struct DynamicLink {
     int applySubPaceMs{5};
     DynamicLinkOsd osd{};
     DynamicLinkRoiQp roiQp{};
-    DynamicLinkSafe safe{};
+    DynamicLinkSafe failsafe{};
     DynamicLinkBitrate bitrate{};
     DynamicLinkFec     fec{};
 };
@@ -169,7 +169,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled,
                                                interleavingSupported,
                                                minIdrIntervalMs, applyStaggerMs,
                                                applySubPaceMs,
-                                               osd, roiQp, safe, bitrate, fec)
+                                               osd, roiQp, failsafe, bitrate, fec)
 
 struct Service {
     bool enabled{true};

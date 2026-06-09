@@ -101,69 +101,69 @@ TEST_CASE("validate: service.restart must be always|on-failure|never") {
     CHECK(errs[0].path == "services.x.restart");
 }
 
-TEST_CASE("validate: dynamicLink.safe.mcs in [0,7]") {
-    Config c{}; c.dynamicLink.safe.mcs = 8;
+TEST_CASE("validate: dynamicLink.failsafe.mcs in [0,7]") {
+    Config c{}; c.dynamicLink.failsafe.mcs = 8;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.mcs");
+    CHECK(errs[0].path == "dynamicLink.failsafe.mcs");
 }
 
-TEST_CASE("validate: dynamicLink.safe k<n and both in [1,32]") {
-    Config c{}; c.dynamicLink.safe.k = 12; c.dynamicLink.safe.n = 8;
+TEST_CASE("validate: dynamicLink.failsafe k<n and both in [1,32]") {
+    Config c{}; c.dynamicLink.failsafe.k = 12; c.dynamicLink.failsafe.n = 8;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.fec");
+    CHECK(errs[0].path == "dynamicLink.failsafe.fec");
 
-    Config c2{}; c2.dynamicLink.safe.k = 0;
+    Config c2{}; c2.dynamicLink.failsafe.k = 0;
     auto errs2 = validate(c2);
     REQUIRE(errs2.size() == 1);
-    CHECK(errs2[0].path == "dynamicLink.safe.fec");
+    CHECK(errs2[0].path == "dynamicLink.failsafe.fec");
 
-    Config c3{}; c3.dynamicLink.safe.n = 33;
+    Config c3{}; c3.dynamicLink.failsafe.n = 33;
     auto errs3 = validate(c3);
     REQUIRE(errs3.size() == 1);
-    CHECK(errs3[0].path == "dynamicLink.safe.fec");
+    CHECK(errs3[0].path == "dynamicLink.failsafe.fec");
 }
 
-TEST_CASE("validate: dynamicLink.safe.depth in [1,8]") {
-    Config c{}; c.dynamicLink.safe.depth = 0;
+TEST_CASE("validate: dynamicLink.failsafe.depth in [1,8]") {
+    Config c{}; c.dynamicLink.failsafe.depth = 0;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.depth");
+    CHECK(errs[0].path == "dynamicLink.failsafe.depth");
 
-    Config c2{}; c2.dynamicLink.safe.depth = 9;
+    Config c2{}; c2.dynamicLink.failsafe.depth = 9;
     auto errs2 = validate(c2);
     REQUIRE(errs2.size() == 1);
-    CHECK(errs2[0].path == "dynamicLink.safe.depth");
+    CHECK(errs2[0].path == "dynamicLink.failsafe.depth");
 }
 
-TEST_CASE("validate: dynamicLink.safe.bandwidth must be 10, 20, or 40") {
-    Config c{}; c.dynamicLink.safe.bandwidth = 80;
+TEST_CASE("validate: dynamicLink.failsafe.bandwidth must be 10, 20, or 40") {
+    Config c{}; c.dynamicLink.failsafe.bandwidth = 80;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.bandwidth");
+    CHECK(errs[0].path == "dynamicLink.failsafe.bandwidth");
 
-    Config ok{}; ok.dynamicLink.safe.bandwidth = 10;
+    Config ok{}; ok.dynamicLink.failsafe.bandwidth = 10;
     CHECK(validate(ok).empty());
 }
 
-TEST_CASE("validate: dynamicLink.safe.txPowerDbm in [-10,30]") {
-    Config c{}; c.dynamicLink.safe.txPowerDbm = 31;
+TEST_CASE("validate: dynamicLink.failsafe.txPowerDbm in [-10,30]") {
+    Config c{}; c.dynamicLink.failsafe.txPowerDbm = 31;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.txPowerDbm");
+    CHECK(errs[0].path == "dynamicLink.failsafe.txPowerDbm");
 
-    Config c2{}; c2.dynamicLink.safe.txPowerDbm = -11;
+    Config c2{}; c2.dynamicLink.failsafe.txPowerDbm = -11;
     auto errs2 = validate(c2);
     REQUIRE(errs2.size() == 1);
-    CHECK(errs2[0].path == "dynamicLink.safe.txPowerDbm");
+    CHECK(errs2[0].path == "dynamicLink.failsafe.txPowerDbm");
 }
 
-TEST_CASE("validate: dynamicLink.safe.bitrateKbps > 0") {
-    Config c{}; c.dynamicLink.safe.bitrateKbps = 0;
+TEST_CASE("validate: dynamicLink.failsafe.bitrateKbps > 0") {
+    Config c{}; c.dynamicLink.failsafe.bitrateKbps = 0;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.bitrateKbps");
+    CHECK(errs[0].path == "dynamicLink.failsafe.bitrateKbps");
 }
 
 TEST_CASE("validate: dynamicLink.healthTimeoutMs >= 1000") {

@@ -26,8 +26,8 @@ TEST_CASE("schema: round-trip a minimal config through json") {
             "osd":{"enabled":true,"debugLatency":false},
             "roiQp":{"thresholdKbps":6000,"lowAnchorKbps":2000,
                      "floor":-24,"step":3},
-            "safe":{"mcs":1,"k":8,"n":12,"depth":1,
-                    "bandwidth":20,"txPowerDbm":20,"bitrateKbps":2000},
+            "failsafe":{"mcs":1,"k":8,"n":12,"depth":1,
+                        "bandwidth":20,"txPowerDbm":20,"bitrateKbps":2000},
             "bitrate":{"minBitrateKbps":1000,"maxBitrateKbps":24000},
             "fec":{"baseRedundancyRatio":0.5,"blocksPerFrame":2.0,"kMin":2,"kMax":50}
         },
@@ -87,13 +87,13 @@ TEST_CASE("schema: service entry round-trips") {
 TEST_CASE("schema: dynamicLink round-trips through json") {
     fpvd::Config c{};
     c.dynamicLink.enabled = true;
-    c.dynamicLink.safe.mcs = 3;
+    c.dynamicLink.failsafe.mcs = 3;
     c.dynamicLink.roiQp.floor = -18;
     c.dynamicLink.osd.debugLatency = true;
     json j = c;
     fpvd::Config c2 = j.get<fpvd::Config>();
     CHECK(c2.dynamicLink.enabled == true);
-    CHECK(c2.dynamicLink.safe.mcs == 3);
+    CHECK(c2.dynamicLink.failsafe.mcs == 3);
     CHECK(c2.dynamicLink.roiQp.floor == -18);
     CHECK(c2.dynamicLink.osd.debugLatency == true);
     // unchanged defaults round-trip too
@@ -123,13 +123,22 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
     CHECK(c.dynamicLink.roiQp.lowAnchorKbps == 2000);
     CHECK(c.dynamicLink.roiQp.floor == -24);
     CHECK(c.dynamicLink.roiQp.step == 3);
-    CHECK(c.dynamicLink.safe.mcs == 1);
-    CHECK(c.dynamicLink.safe.k == 8);
-    CHECK(c.dynamicLink.safe.n == 12);
-    CHECK(c.dynamicLink.safe.depth == 1);
-    CHECK(c.dynamicLink.safe.bandwidth == 20);
-    CHECK(c.dynamicLink.safe.txPowerDbm == 20);
-    CHECK(c.dynamicLink.safe.bitrateKbps == 2000);
+    CHECK(c.dynamicLink.failsafe.mcs == 1);
+    CHECK(c.dynamicLink.failsafe.k == 8);
+    CHECK(c.dynamicLink.failsafe.n == 12);
+    CHECK(c.dynamicLink.failsafe.depth == 1);
+    CHECK(c.dynamicLink.failsafe.bandwidth == 20);
+    CHECK(c.dynamicLink.failsafe.txPowerDbm == 20);
+    CHECK(c.dynamicLink.failsafe.bitrateKbps == 2000);
+}
+
+TEST_CASE("DynamicLink parses the failsafe key (renamed from safe)") {
+    auto j = nlohmann::json::parse(R"({
+        "dynamicLink": {"failsafe": {"mcs": 3, "bitrateKbps": 5000}}
+    })");
+    auto c = j.get<fpvd::Config>();
+    CHECK(c.dynamicLink.failsafe.mcs == 3);
+    CHECK(c.dynamicLink.failsafe.bitrateKbps == 5000);
 }
 
 TEST_CASE("schema: beamforming defaults and round-trip") {
@@ -172,6 +181,6 @@ TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") 
     })");
     fpvd::Config c = j.get<fpvd::Config>();  // must not throw
     CHECK(c.dynamicLink.enabled == false);
-    CHECK(c.dynamicLink.safe.mcs == 1);
+    CHECK(c.dynamicLink.failsafe.mcs == 1);
     CHECK(c.dynamicLink.healthTimeoutMs == 10000);
 }

@@ -51,9 +51,9 @@ TEST_CASE("diff: dynamicLink.enabled toggle flags DynamicLink") {
     CHECK(r.dynamicLink);
 }
 
-TEST_CASE("diff: dynamicLink.safe.mcs change flags DynamicLink only") {
+TEST_CASE("diff: dynamicLink.failsafe.mcs change flags DynamicLink only") {
     fpvd::Config a{}, b{};
-    b.dynamicLink.safe.mcs = 3;
+    b.dynamicLink.failsafe.mcs = 3;
     auto r = fpvd::diffSubsystems(a, b);
     CHECK(r.dynamicLink);
     CHECK_FALSE(r.radio);
