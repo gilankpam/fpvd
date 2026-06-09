@@ -102,6 +102,14 @@ TEST_CASE("beamforming: reconcile is idempotent and disables on enabled=false") 
     fs::remove_all(tmp);
 }
 
+TEST_CASE("beamforming: parseCbrRssi extracts the 4th rfinfo field") {
+    // token:ndp0:ndp1:cbrrssi0:cbrrssi1:cbrsnr0:cbrsnr1
+    CHECK(fpvd::parseCbrRssi("0:29:13:-48:-67:21:23") == -48);
+    CHECK(fpvd::parseCbrRssi("0:22:22:0:0:0:0") == 0);
+    CHECK(fpvd::parseCbrRssi("") == 0);
+    CHECK(fpvd::parseCbrRssi("garbage") == 0);
+}
+
 TEST_CASE("beamforming: force re-writes conf even when params unchanged") {
     auto tmp = fs::temp_directory_path() / "fpvd-bf-force";
     fs::remove_all(tmp);

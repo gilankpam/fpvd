@@ -44,6 +44,21 @@ std::string resolveLocalMac(const std::string& procBase,
     return "";
 }
 
+int parseCbrRssi(const std::string& rfinfo) {
+    int field = 0;
+    size_t start = 0;
+    while (field < 3) {                       // skip token, ndp0, ndp1
+        size_t colon = rfinfo.find(':', start);
+        if (colon == std::string::npos) return 0;
+        start = colon + 1;
+        ++field;
+    }
+    size_t end = rfinfo.find(':', start);
+    std::string tok = rfinfo.substr(start, end == std::string::npos
+                                            ? std::string::npos : end - start);
+    try { return std::stoi(tok); } catch (...) { return 0; }
+}
+
 BeamformingController::BeamformingController(std::string procBase,
                                              std::string sysBase)
     : procBase_(std::move(procBase)), sysBase_(std::move(sysBase)) {}
@@ -151,9 +166,11 @@ void BeamformingController::loop() {
         }
         token = (token + 1) % 64;
         std::string cbr = readNode(p.iface, "bf_monitor_trig");
+        int cbrRssi = parseCbrRssi(readNode(p.iface, "bf_monitor_rfinfo"));
         {
             std::lock_guard<std::mutex> g(mu_);
             status_.soundingCount++;
+            status_.cbrRssi = cbrRssi;
             status_.lastCbr = cbr.empty() ? std::nullopt
                                           : std::optional<std::string>(cbr);
         }

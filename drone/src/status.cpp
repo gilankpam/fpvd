@@ -99,6 +99,7 @@ nlohmann::json buildStatus(Daemon& d) {
             {"remoteMac", bf.remoteMac},
             {"bw", bf.bw},
             {"soundingCount", bf.soundingCount},
+            {"cbrRssi", bf.cbrRssi},
             {"lastCbr", bf.lastCbr.has_value()
                          ? nlohmann::json(bf.lastCbr.value())
                          : nlohmann::json(nullptr)}

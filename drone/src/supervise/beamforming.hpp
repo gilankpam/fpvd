@@ -33,6 +33,7 @@ struct BfStatus {
     std::string remoteMac;
     int bw{0};
     long soundingCount{0};
+    int cbrRssi{0};             // cbr_rssi0 from bf_monitor_rfinfo; 0 = no report
     std::optional<std::string> lastCbr;
 };
 
@@ -42,6 +43,10 @@ struct BfStatus {
 std::string resolveLocalMac(const std::string& procBase,
                             const std::string& sysBase,
                             const std::string& iface);
+
+// Parse the 4th colon-field (cbr_rssi0, dBm) of a bf_monitor_rfinfo line.
+// Returns 0 on empty/malformed input (0 == no report received).
+int parseCbrRssi(const std::string& rfinfo);
 
 class BeamformingController {
 public:
