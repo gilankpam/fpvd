@@ -152,10 +152,11 @@ TEST_CASE("beamforming: cbrFresh drops false when the rfinfo token stops advanci
     std::this_thread::sleep_for(120ms);          // many ticks of a frozen token
     CHECK(bf.status().cbrFresh == false);         // detected stale
 
-    // Advance the token -> fresh again.
+    // Advance the token -> fresh again (check within a few ticks of the change,
+    // so this does not depend on the exact kCbrStaleTicks value).
     { std::ofstream f(ifd / "bf_monitor_rfinfo", std::ios::trunc);
       f << "9:30:15:-48:-67:21:23"; }
-    std::this_thread::sleep_for(40ms);
+    std::this_thread::sleep_for(15ms);
     CHECK(bf.status().cbrFresh == true);          // recovered
     bf.stop();
     fs::remove_all(tmp);

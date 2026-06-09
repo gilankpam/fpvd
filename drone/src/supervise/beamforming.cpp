@@ -8,10 +8,10 @@
 
 namespace fpvd {
 
-// Consecutive same-token ticks before a report is considered stale (no fresh CBR).
-// At the default 100 ms interval this is ~2 s; at the 5 ms test interval it is 100 ms,
-// which is safely above the 40 ms recovery-check window in the integration test.
-static constexpr int kCbrStaleTicks = 20;
+// Consecutive same-token ticks before a report is considered stale (no fresh
+// CBR). ~1s at the default 100ms interval — responsive enough for the OSD to
+// flag a silent ground station, while tolerating a few dropped CBRs.
+static constexpr int kCbrStaleTicks = 10;
 
 static std::string extractMac(const std::string& text) {
     // Find the first aa:bb:cc:dd:ee:ff token.
@@ -161,6 +161,8 @@ void BeamformingController::startLoop() {
 
 void BeamformingController::loop() {
     int token = 0;
+    // Per-loop (reset on every reconcile/restart). lastCbrToken=-1 makes the
+    // first rfinfo read count as "changed", so startup never spuriously stales.
     int lastCbrToken = -1;
     int cbrStaleTicks = 0;
     BfParams p;
