@@ -94,10 +94,10 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
                               wlans=wlans, ready_port=ready_port,
                               ready_timeout=ready_timeout, log_path=log_path)
 
-    drone = DroneClient(effective.get("droneLink", {}).get("endpoint", "http://10.5.0.10:8080"))
+    endpoint = effective.get("droneLink", {}).get("endpoint", "http://10.5.0.10:8080")
+    drone = DroneClient(endpoint)
 
     if idr_relay is None:
-        endpoint = effective.get("droneLink", {}).get("endpoint", "http://10.5.0.10:8080")
         idr_relay = IdrRelay(drone_host_from_endpoint(endpoint))
 
     probe_ctrl = ProbeController(make_probe_snapshot(effective), spawn=probe_spawn)

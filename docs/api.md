@@ -640,7 +640,7 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
 | `controller.dronePort` | integer | `9999` | 1 – 65535 |
 | `controller.tuning` | object | `{}` | see [Tuning passthrough](#tuning-passthrough) |
 
-The RF bandwidth the controller targets is **derived from `link.width`** — it is no longer a separate `bandwidth` field. The video rx stream is selected by an internal constant (`videoStreamId = "video"`), no longer a config field. The IDR-token relay config (`idrForward`/`idrPort`) has been removed from the config — the relay is becoming always-on GS infra.
+The RF bandwidth the controller targets is **derived from `link.width`** — it is no longer a separate `bandwidth` field. The video rx stream is selected by an internal constant (`videoStreamId = "video"`), no longer a config field. The IDR-token relay config (`idrForward`/`idrPort`) has been removed from the config — the relay **is** always-on GS infrastructure: it listens on `0.0.0.0:11223` and forwards keyframe tokens to the drone at `droneLink.endpoint` host:`11223`, independent of `dynamicLink.enabled` (so it serves static links too).
 
 **Operating model.** Enabling, disabling, or tuning is applied at runtime via `PATCH /config` + `POST /apply` with **no wfb restart** — the GS runner is never bounced for `dynamicLink`-only changes. The controller reads wfb-ng stats on `:8103` (fpvd renders `log_interval = 100` so the feed is 10 Hz). The drone side must be armed **independently** (its own `dynamicLink.enabled`, reachable via the GS `/air` proxy); `GET /status.dynamicLink` reports the controller state plus a `drone` sub-object (`reachable`, `dynamicLinkActive`, `hello`) so a GS-armed/drone-not mismatch is visible.
 
@@ -943,13 +943,15 @@ Validates pending, renders the cfg, and **bounces only the runner** (a brief RX 
     {"wlan": "wlx84fc146c36e6", "type": "monitor", "channel": 132,
      "freqMhz": 5660, "widthMhz": 40, "txpowerDbm": 19.0}
   ],
-  "link":   {"linkId": 7669206, "droneReachable": true, "inSync": null}
+  "link":   {"linkId": 7669206, "droneReachable": true, "inSync": null},
+  "idrRelay": {"running": true, "listen": "0.0.0.0:11223"}
 }
 ```
 
 - `runner` — the supervised wfb runner: `restarts` counts operator bounces, `autoRestarts` counts crash auto-restarts, `fault` is the crash-loop guard.
 - `radio` — one entry per wlan, parsed from `iw dev <wlan> info`.
 - `link.droneReachable` — cached probe of the drone fpvd. `link.inSync` — best-effort: set after an `applyTo:"both"`; `null`/`false` after a GS-only apply even when the widths happen to match (compare against `GET /air/config` to confirm).
+- `idrRelay` — the always-on keyframe relay: `{ "running": bool, "listen": "0.0.0.0:11223" | null }`. `listen` is `null` (and `running` `false`) only if the `:11223` bind failed. Independent of `dynamicLink.enabled`; serves static and adaptive links alike.
 
 ## Link coordinator
 

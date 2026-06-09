@@ -22,30 +22,6 @@ from .wire import Encoder as WireEncoder
 log = logging.getLogger("fpvdgs.dynlink")
 
 
-class _IdrRelay(asyncio.DatagramProtocol):
-    """Bridge PixelPilot IDR/keyframe tokens to the drone.
-
-    The local video player sends IDR tokens to 127.0.0.1:<idrPort> (wfb_rx
-    relays RTP through localhost, so the player aims its requests there). We
-    forward each datagram over the tunnel to the drone's idr_listen at
-    <droneAddr>:<idrPort>. Replaces the standalone `socat` idr-forwarder that
-    shipped with the old dynamic-link-gs service."""
-
-    def __init__(self, dest):
-        self._dest = dest          # (droneAddr, idrPort)
-        self._transport = None
-
-    def connection_made(self, transport):
-        self._transport = transport
-
-    def datagram_received(self, data, addr):
-        if self._transport is not None:
-            try:
-                self._transport.sendto(data, self._dest)
-            except OSError:
-                pass               # drone momentarily unreachable — drop, keep relaying
-
-
 class DynamicLinkController:
     def __init__(self, snapshot, *, stats_endpoint="tcp://127.0.0.1:8103",
                  stats_client_factory=StatsClient, probe_status=None):
@@ -61,7 +37,7 @@ class DynamicLinkController:
         self._started = threading.Event()
         self._status = {"running": False, "statsConnected": False,
                         "decision": None, "lastEmitMs": None, "emitSeq": 0,
-                        "reason": "", "idrListen": None}
+                        "reason": ""}
 
     # ---- thread-safe public API -----------------------------------------
     def start(self):
@@ -140,29 +116,6 @@ class DynamicLinkController:
         return_link = ReturnLink(snap["droneAddr"], int(snap["dronePort"]))
         encoder = WireEncoder(seq=1)
 
-        # IDR-token relay: 0.0.0.0:idrPort -> droneAddr:idrPort. Non-fatal if
-        # the local port is taken (e.g. a leftover socat); the controller runs on.
-        #
-        # The listen address MUST be 0.0.0.0 (INADDR_ANY), never 127.0.0.1: we
-        # reuse this same socket to forward each token on to the (non-loopback)
-        # drone, and a socket bound to 127.0.0.1 cannot send off-loopback — the
-        # sendto() fails with EINVAL, which _IdrRelay swallows, so every IDR
-        # request gets dropped silently. INADDR_ANY still accepts the player's
-        # loopback tokens and lets the kernel pick the source for the drone route.
-        idr_transport = None
-        self._set(idrListen=None)
-        if snap.get("idrForward", True):
-            idr_port = int(snap.get("idrPort", 11223))
-            try:
-                idr_transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(
-                    lambda: _IdrRelay((snap["droneAddr"], idr_port)),
-                    local_addr=("0.0.0.0", idr_port))
-                sa = idr_transport.get_extra_info("sockname")
-                self._set(idrListen="%s:%d" % (sa[0], sa[1]) if sa else None)
-            except OSError as e:
-                log.warning("dl: IDR relay bind 0.0.0.0:%d failed: %s", idr_port, e)
-                idr_transport = None
-
         # The wfb stats feed (:8103) interleaves rx records for every service
         # (video / mavlink / tunnel). Only the VIDEO stream may drive the policy:
         # the low/zero-rate uplink streams would trip link_starved and pin MCS at
@@ -199,10 +152,8 @@ class DynamicLinkController:
             await self._stats_loop(on_event)
         finally:
             policy.close()
-            if idr_transport is not None:
-                idr_transport.close()
             return_link.close()
-            self._set(running=False, statsConnected=False, idrListen=None)
+            self._set(running=False, statsConnected=False)
 
     async def _stats_loop(self, on_event):
         """Run the stats client, reconnecting across runner bounces until
