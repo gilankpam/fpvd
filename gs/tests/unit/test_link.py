@@ -342,9 +342,11 @@ def test_bf_enable_pushes_transformed_mac_and_arms_gs():
     drone = BfDrone(drone_mac="00:c0:ca:dd:ee:ff")
     bf = FakeBf(gs_mac="84:fc:14:6c:36:e6")
     res = _bf_coord(store, runner, drone, bf).apply_link("both")
-    # Drone receives the GS MAC as its remoteMac (transformed, not echoed).
+    # Drone receives the GS MAC as its remoteMac (transformed, not echoed),
+    # plus stbc=False because BF and STBC are mutually exclusive.
     assert drone.patched == {"link": {"beamforming": {"enabled": True,
-                                                      "remoteMac": "84:fc:14:6c:36:e6"}}}
+                                                      "remoteMac": "84:fc:14:6c:36:e6"},
+                                      "stbc": False}}
     assert drone.applied is True
     # GS armed to respond to the drone's MAC.
     assert bf.calls == [(True, "wlan0", "00:c0:ca:dd:ee:ff")]
@@ -467,3 +469,43 @@ def test_rollback_reconciles_bf_to_last_good():
     assert res["gsApplied"] is False
     assert bf.calls[-1] == (False, "wlan0", "")    # disarmed back to last-good
     assert store.effective()["link"].get("beamforming") in (None, {})  # not committed
+
+
+def test_bf_enable_pushes_stbc_false():
+    store = _bf_store()
+    store.patch({"link": {"beamforming": {"enabled": True}}})
+    runner, drone, bf = FakeRunner(), BfDrone(), FakeBf()
+    _bf_coord(store, runner, drone, bf).apply_link("both")
+    assert drone.patched["link"]["stbc"] is False
+    assert drone.patched["link"]["beamforming"]["enabled"] is True
+
+
+def test_bf_disable_pushes_stbc_true():
+    store = ConfigStore({"link": {"channel": 132, "width": 40, "region": "US",
+                                  "beamforming": {"enabled": True}}})
+    store.patch({"link": {"beamforming": {"enabled": False}}})
+    runner, drone, bf = FakeRunner(), BfDrone(), FakeBf()
+    _bf_coord(store, runner, drone, bf).apply_link("both")
+    assert drone.patched["link"]["stbc"] is True
+    assert drone.patched["link"]["beamforming"]["enabled"] is False
+
+
+def test_drone_rejection_surfaced_not_unreachable():
+    from fpvdgs.drone_client import DroneRejected
+
+    class RejectingDrone(BfDrone):
+        def patch_config(self, sparse):
+            raise DroneRejected(400, {"message": "requires link.stbc=false",
+                                      "details": [{"path": "link.beamforming"}]})
+
+    store = _bf_store()
+    store.patch({"link": {"beamforming": {"enabled": True}}})
+    runner, drone, bf = FakeRunner(), RejectingDrone(), FakeBf()
+    res = _bf_coord(store, runner, drone, bf).apply_link("both")
+    # A validation rejection is a real error, NOT "drone unreachable".
+    assert res["droneReachable"] is True
+    assert res["droneApplied"] is False
+    assert res["droneError"]["code"] == 400
+    assert "stbc" in res["droneError"]["message"]
+    # GS still applies locally (best-effort).
+    assert res["gsApplied"] is True

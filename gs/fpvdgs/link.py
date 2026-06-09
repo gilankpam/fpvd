@@ -5,7 +5,7 @@ The drone push is best-effort, only for apply_to == "both" and only when the
 drone is reachable — never a precondition.
 """
 
-from .drone_client import DroneUnreachable
+from .drone_client import DroneUnreachable, DroneRejected
 from .schema import SchemaError
 
 # Only the truly-shared radio params go to the drone. GS-only keys
@@ -99,6 +99,7 @@ class LinkCoordinator:
         drone_applied = False
         drone_reachable = False
         drone_mac = ""
+        drone_error = None
         if apply_to == "both":
             drone_reachable = self.drone.healthz()
             if drone_reachable:
@@ -111,6 +112,10 @@ class LinkCoordinator:
                     gs_mac = self.beamforming.local_mac(primary) if primary else ""
                     push["beamforming"] = {"enabled": bf_enabled,
                                            "remoteMac": gs_mac}
+                    # STBC and TX beamforming are mutually exclusive on the drone
+                    # (it rejects beamforming while stbc=true). Flip stbc to match:
+                    # false to enable BF, true to restore on disable.
+                    push["stbc"] = not bf_enabled
                 try:
                     if push:
                         self.drone.patch_config({"link": push})
@@ -124,6 +129,12 @@ class LinkCoordinator:
                         drone_mac = (self.drone.get_status()
                                      .get("beamforming", {}).get("localMac", ""))
                     drone_applied = True   # empty push => already in sync
+                except DroneRejected as e:
+                    # Validation rejection — a real error, NOT a connectivity
+                    # failure. Keep drone_reachable True; surface the error.
+                    drone_error = {"code": e.code, "message": e.message,
+                                   "details": e.body.get("details")
+                                              if isinstance(e.body, dict) else None}
                 except DroneUnreachable:
                     drone_reachable = False
 
@@ -171,4 +182,6 @@ class LinkCoordinator:
         }
         if bf_result is not None:
             res["beamforming"] = bf_result
+        if drone_error is not None:
+            res["droneError"] = drone_error
         return res
