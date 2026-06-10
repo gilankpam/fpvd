@@ -121,6 +121,22 @@ def test_shipped_defaults_include_pixelpilot_and_validate():
     schema.validate_effective(cfg)  # no raise
 
 
+def test_effective_accepts_rxpower_in_dbm_range():
+    schema.validate_effective({"link": {"channel": 132, "region": "US", "width": 20,
+                                        "rxpower": 20}})
+    schema.validate_effective({"link": {"channel": 132, "region": "US", "width": 20,
+                                        "rxpower": None}})   # null ok (driver default)
+
+
+def test_effective_rejects_rxpower_out_of_dbm_range():
+    with pytest.raises(SchemaError):
+        schema.validate_effective({"link": {"channel": 132, "region": "US", "width": 20,
+                                            "rxpower": 2007}})   # raw/legacy value, now invalid
+    with pytest.raises(SchemaError):
+        schema.validate_effective({"link": {"channel": 132, "region": "US", "width": 20,
+                                            "rxpower": 31}})
+
+
 def test_beamforming_enabled_bool_ok():
     from fpvdgs import schema
     cfg = {"link": {"region": "US", "channel": 132,

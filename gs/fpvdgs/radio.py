@@ -28,7 +28,7 @@ def iw_args(wlan: str, channel: int, width: int) -> list[str]:
 def retune_commands(wlans, link: dict) -> list[list[str]]:
     """Ordered `iw` commands to apply the live-settable radio params from `link`:
     regulatory domain first (it gates the channel), then per-interface
-    channel/width, then txpower. txpower is mBm (wfb-ng's wifi_txpower units);
+    channel/width, then txpower. rxpower is dBm (iw gets mBm = dBm * 100);
     None means 'leave at the driver default' (we don't touch it), matching the
     rendered cfg which omits wifi_txpower when null."""
     cmds: list[list[str]] = []
@@ -44,11 +44,11 @@ def retune_commands(wlans, link: dict) -> list[list[str]]:
         if channel is not None:
             cmds.append(iw_args(wlan, channel, width))
         # None => 'auto' (driver default), so lowering back to null reverts live;
-        # a value is fixed mBm (wfb-ng's wifi_txpower units).
+        # a value is dBm; iw expects mBm = dBm * 100 (matches radio-tune.sh).
         if txpower is None:
             cmds.append(["iw", "dev", wlan, "set", "txpower", "auto"])
         else:
-            cmds.append(["iw", "dev", wlan, "set", "txpower", "fixed", str(txpower)])
+            cmds.append(["iw", "dev", wlan, "set", "txpower", "fixed", str(int(txpower * 100))])
     return cmds
 
 

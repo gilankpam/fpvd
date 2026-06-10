@@ -918,7 +918,7 @@ The GS surface is therefore: `GET/PATCH /config`, `POST /apply`, `GET /status`, 
   "link": {
     "channel": 132, "width": 20, "linkId": 7669206,          // SHARED → BOTH GS + drone
     "beamforming": { "enabled": false },                     // SHARED → BOTH
-    "gs":    { "region": "US", "rxpower": null,              // → GS (the receiver)
+    "gs":    { "region": "US", "rxpower": null,              // → GS (the receiver); rxpower 0..30 (dBm) | null=auto
                "wlans": "auto" },
     "drone": { "mcs": 3, "txpower": 25, "txpowerCurve": null,// → DRONE (last-seen; stale when unreachable)
                "fec": {…}, "stbc": false, "ldpc": false,
@@ -949,7 +949,7 @@ The drone-side sections (`link.drone`, `dynamicLink.applier`, `video`, `image`, 
 |---|---|---|
 | `link.channel`, `link.width`, `link.linkId`, `link.beamforming` | **SHARED → BOTH** | The shared-link lane: GS-first retune/bounce + best-effort drone push. |
 | `dynamicLink.enabled` | **SHARED → BOTH** | Hard-gated on drone reachability (see policy). |
-| `link.gs.*` (`region`, `rxpower`, `wlans`) | **GS** | Receiver-only. |
+| `link.gs.*` (`region`, `rxpower`, `wlans`) | **GS** | Receiver-only. `rxpower` is dBm (0..30, like `link.drone.txpower`) or `null` for driver auto; emitted as `wifi_txpower`/`iw txpower` = dBm×100. |
 | `dynamicLink.controller.*` | **GS** | The in-process MCS/FEC selector. |
 | `wfb`, `pixelpilot`, `droneLink` | **GS** | wfb data-plane render config, PixelPilot launch knobs, drone endpoint. |
 | `link.drone.*` (`mcs`, `txpower`, `fec`, …) | **DRONE** | Last-seen; grayed when `_meta.droneStale`. |

@@ -23,11 +23,11 @@ def test_iw_args_freq_when_above_2000():
 
 def test_retune_commands_region_channel_txpower_in_order():
     cmds = radio.retune_commands(
-        ["wlan0"], {"region": "US", "channel": 132, "width": 20, "rxpower": 2200})
+        ["wlan0"], {"region": "US", "channel": 132, "width": 20, "rxpower": 22})
     assert cmds == [
         ["iw", "reg", "set", "US"],
         ["iw", "dev", "wlan0", "set", "channel", "132", "HT20"],
-        ["iw", "dev", "wlan0", "set", "txpower", "fixed", "2200"],
+        ["iw", "dev", "wlan0", "set", "txpower", "fixed", "2200"],   # 22 dBm * 100
     ]
 
 

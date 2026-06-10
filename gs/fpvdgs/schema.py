@@ -20,6 +20,11 @@ def validate_effective(cfg: dict) -> None:
         raise SchemaError("link.region is required")
     if not link.get("channel"):
         raise SchemaError("link.channel is required")
+    rx = link.get("rxpower")
+    if rx is not None and (isinstance(rx, bool) or not isinstance(rx, (int, float))
+                           or not 0 <= rx <= 30):
+        # dBm, mirrors the drone's link.txpower (0..30); null => driver auto.
+        raise SchemaError("link.rxpower must be a number 0..30 (dBm) or null")
     bf = link.get("beamforming")
     if bf is not None:
         _validate_beamforming(bf)

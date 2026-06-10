@@ -39,7 +39,7 @@ def test_render_maps_common_section():
     cfg = _parse_literals(render_cfg(EFFECTIVE))
     assert cfg["common"]["wifi_channel"] == 132
     assert cfg["common"]["wifi_region"] == "US"
-    assert cfg["common"]["wifi_txpower"] == 19
+    assert cfg["common"]["wifi_txpower"] == 1900   # 19 dBm * 100
 
 
 def test_render_omits_txpower_when_unset():
@@ -48,10 +48,11 @@ def test_render_omits_txpower_when_unset():
     assert "wifi_txpower" not in cfg["common"]
 
 
-def test_render_emits_rxpower_as_wifi_txpower():
+def test_render_emits_rxpower_dbm_as_wifi_txpower_x100():
+    # rxpower is dBm; wfb-ng's wifi_txpower is mBm = dBm * 100 (matches the drone).
     out = render_cfg({"link": {"channel": 132, "width": 40, "region": "US",
-                               "rxpower": 1500}, "wfb": {"profile": "gs", "raw": {}}})
-    assert "wifi_txpower = 1500" in out
+                               "rxpower": 20}, "wfb": {"profile": "gs", "raw": {}}})
+    assert "wifi_txpower = 2000" in out   # 20 dBm * 100
 
 
 def test_render_omits_txpower_when_rxpower_null():

@@ -263,12 +263,12 @@ def test_10_to_20_width_retunes_live():
 
 def test_rxpower_change_retunes_live():
     store = _store()  # width 40, no rxpower
-    store.patch({"link": {"rxpower": 2200}})
+    store.patch({"link": {"rxpower": 22}})   # dBm
     runner, drone, retune = FakeRunner(), FakeDrone(reachable=False), FakeRetune(ok=True)
     coord = LinkCoordinator(store, lambda cfg: None, runner, drone, retune=retune)
     res = coord.apply_link("gs")
     assert res["mode"] == "live"          # rxpower is pure iw, no restart
-    assert retune.calls[0]["rxpower"] == 2200
+    assert retune.calls[0]["rxpower"] == 22
     assert runner.restarts == 0
 
 
