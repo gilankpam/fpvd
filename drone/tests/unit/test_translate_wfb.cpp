@@ -101,3 +101,28 @@ TEST_CASE("translate.wfb: stbc and ldpc reflected") {
     REQUIRE(idxL != a.end());
     CHECK(*(idxL + 1) == "1");
 }
+
+TEST_CASE("translate.wfb: video tx argv in swfec mode") {
+    Config c{};
+    c.link.fec.mode = "swfec";
+    c.link.fec.overheadPct = 60;
+    c.link.fec.deadlineMs = 25;
+    auto a = wfbArgs(c, fpvd::WfbRole::VideoTx, "wlan0", "/etc/drone.key");
+    auto at = [&](const std::string& flag){
+        auto it = std::find(a.begin(), a.end(), flag);
+        REQUIRE(it != a.end());
+        return *(it + 1);
+    };
+    CHECK(std::find(a.begin(), a.end(), "-z") != a.end());
+    CHECK(at("-k") == "60");   // overhead_pct rides -k
+    CHECK(at("-n") == "25");   // deadline_ms rides -n
+}
+
+TEST_CASE("translate.wfb: tun/tlm tx stay RS even in swfec mode") {
+    Config c{};
+    c.link.fec.mode = "swfec";
+    for (auto role : {fpvd::WfbRole::TunTx, fpvd::WfbRole::TlmTx}) {
+        auto tx = wfbArgs(c, role, "wlan0", "/etc/drone.key");
+        CHECK(std::find(tx.begin(), tx.end(), "-z") == tx.end());
+    }
+}

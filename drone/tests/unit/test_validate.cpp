@@ -291,6 +291,7 @@ TEST_CASE("validate: link.fec swfec rules") {
     SUBCASE("deadlineMs range — uint8 wire cap") {
         c.link.fec.deadlineMs = 0;
         CHECK(hasErr(fpvd::validate(c), "link.fec.deadlineMs"));
+        c = {};
         c.link.fec.deadlineMs = 256;
         CHECK(hasErr(fpvd::validate(c), "link.fec.deadlineMs"));
     }

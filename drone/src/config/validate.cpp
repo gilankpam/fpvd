@@ -140,7 +140,7 @@ std::vector<ValidationError> validate(const Config& c) {
         if (dl.safe.overheadPct < 0 || dl.safe.overheadPct > 255)
             errs.push_back({"dynamicLink.safe.overheadPct", "must be 0..255"});
         if (dl.safe.deadlineMs < 1 || dl.safe.deadlineMs > 255)
-            errs.push_back({"dynamicLink.safe.deadlineMs", "must be 1..255"});
+            errs.push_back({"dynamicLink.safe.deadlineMs", "must be 1..255 (uint8 on the control wire)"});
 
         if (dl.healthTimeoutMs < 1000)
             errs.push_back({"dynamicLink.healthTimeoutMs", "must be >= 1000"});
