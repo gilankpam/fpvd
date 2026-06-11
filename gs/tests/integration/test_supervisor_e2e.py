@@ -60,7 +60,7 @@ def daemon(tmp_path, fake_drone):
 def test_healthz_and_status(daemon):
     base, _, _ = daemon
     assert _req(base, "GET", "/healthz")[0] == 200
-    code, st = _req(base, "GET", "/status")
+    code, st = _req(base, "GET", "/gs/status")
     assert code == 200
     assert st["runner"]["running"] is True
 
@@ -71,13 +71,16 @@ def test_cfg_rendered_on_boot(daemon):
     assert "wifi_channel = 132" in text
 
 
-def test_link_apply_pushes_drone_and_rerenders(daemon):
+def test_gs_apply_link_change_rerenders_cfg(daemon):
+    # A link change goes through /gs/config + /gs/apply and is a GS-local effect:
+    # the cfg is re-rendered (and the runner retunes/bounces). The drone push is
+    # now the client's job, not the GS's — so no drone /config call here.
     base, cfg_out, fake_drone = daemon
-    _req(base, "PATCH", "/link", {"link": {"channel": 100}})
-    code, obj = _req(base, "POST", "/link/apply", {"applyTo": "both"})
-    assert code == 200 and obj["droneApplied"] is True
+    _req(base, "PATCH", "/gs/config", {"link": {"channel": 100}})
+    code, _ = _req(base, "POST", "/gs/apply", {})
+    assert code == 200
     assert "wifi_channel = 100" in cfg_out.read_text()
-    assert any(m == "PATCH" and p == "/config" for (m, p, _b) in fake_drone["calls"])
+    assert not any(p == "/config" for (_m, p, _b) in fake_drone["calls"])
 
 
 def test_air_proxy_roundtrip(daemon):
@@ -125,7 +128,7 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
     app = supervisor.build_app(str(defaults), str(tmp_path / "config.json"),
                                str(cfg_out), "127.0.0.1", 0,
                                runner_cmd=["true"])
-    code, body = app.api.handle("GET", "/status", {}, b"")
+    code, body = app.api.handle("GET", "/gs/status", {}, b"")
     assert code == 200
     assert "dynamicLink" in body
     assert "pixelpilot" in body
@@ -180,7 +183,7 @@ def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
     t.start()
     time.sleep(0.3)
     try:
-        code, body = app.api.handle("GET", "/status", {}, b"")
+        code, body = app.api.handle("GET", "/gs/status", {}, b"")
         assert code == 200
         assert body["probe"]["enabled"] is True
         assert len(spawned) == 1            # one wfb_rx, started with dynamicLink

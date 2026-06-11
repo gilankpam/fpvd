@@ -25,7 +25,6 @@ from .config import ConfigStore
 from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot
-from .link import LinkCoordinator
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .probe.config_build import make_probe_snapshot
 from .probe.controller import ProbeController
@@ -105,19 +104,6 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
     armer = BeamformingArmer(beamforming, drone, resolve_wlans,
                              lambda: store.effective())
 
-    def renderer_write(eff):
-        render_mod.write_cfg(cfg_out, render_mod.render_cfg(eff))
-
-    # live iw retune of the monitor cards (no process restart) for channel /
-    # 10<->20 width / txpower / region changes; the coordinator falls back to a
-    # runner bounce for changes that need a -B change (crossing 40 MHz) or that
-    # are structural (wlans, linkId, profile, …).
-    link = LinkCoordinator(store, renderer_write, runner, drone,
-                           validate=schema.validate_effective,
-                           retune=lambda lnk: radio.retune(wlans, lnk),
-                           beamforming=beamforming,
-                           wlans_resolver=resolve_wlans)
-
     started = time.monotonic()
 
     _warned = {"adapter": False}
@@ -160,8 +146,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         wlan_info = {w: status_mod.iw_info(w) for w in resolve_wlans(store.effective())}
         reachable = drone.healthz()
         eff_link = store.effective().get("link", {})
-        probe = {"reachable": reachable, "linkId": eff_link.get("linkId"),
-                 "inSync": link.in_sync() if link else None}
+        probe = {"reachable": reachable, "linkId": eff_link.get("linkId")}
         uptime_ms = int((time.monotonic() - started) * 1000)
         return status_mod.build_status(__version__, runner.state(), wlan_info, probe,
                                        uptime_ms=uptime_ms,
@@ -171,8 +156,11 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
                                        beamforming=beamforming.status())
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
-              drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out,
-              dynlink=dynlink, pixelpilot=pixelpilot, probe=probe_ctrl)
+              drone=drone, status_fn=status_fn, cfg_out=cfg_out,
+              dynlink=dynlink, pixelpilot=pixelpilot, probe=probe_ctrl,
+              retune=lambda lnk: radio.retune(resolve_wlans(store.effective()), lnk),
+              wlans_resolver=resolve_wlans,
+              armer_tick=lambda: armer._tick())
 
     http_server = make_http_server(api, host, port)
     return App(store, runner, http_server, api, dynlink,

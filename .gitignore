@@ -13,3 +13,17 @@ dist/
 
 # MVP validation rig (throwaway; kept local)
 tools/probe-mvp/
+
+# Session / tooling artifacts (not part of the project)
+.claude/
+.codegraph/
+.gemini/
+.mcp.json
+opencode.jsonc
+logs/
+
+# Local deploy configs / captures (live, machine-specific)
+config.drone.json
+config.gs.json
+osd.json
+*.bin

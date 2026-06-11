@@ -64,11 +64,10 @@ def test_app_shutdown_order_pixelpilot_before_runner():
     assert events.index("pp") < events.index("runner")
 
 
-def test_link_coordinator_has_beamforming_wired(tmp_path, monkeypatch):
-    """build_app must wire a BeamformingController + wlans_resolver into the
-    coordinator so /link/apply can arm the GS beamformee."""
+def test_build_app_wires_api_collaborators(tmp_path, monkeypatch):
+    """build_app must wire the new Api collaborators (retune, wlans_resolver,
+    armer_tick) so /gs/apply can retune the GS and reconcile the beamformee."""
     import fpvdgs.supervisor as sup
-    from fpvdgs.beamforming import BeamformingController
 
     monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
     monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
@@ -83,5 +82,6 @@ def test_link_coordinator_has_beamforming_wired(tmp_path, monkeypatch):
 
     app = sup.build_app(str(defaults), str(overlay), str(tmp_path / "out.cfg"),
                         "127.0.0.1", 0, runner_cmd=["true"])
-    assert isinstance(app.api.link.beamforming, BeamformingController)
-    assert app.api.link.wlans_resolver is not None
+    assert app.api.retune is not None
+    assert app.api.wlans_resolver is not None
+    assert app.api.armer_tick is not None
