@@ -1,6 +1,6 @@
 #!/bin/sh
 # radio-up.sh — bring up the USB radio for fpvd.
-# Inputs (env): FPVD_CHANNEL, FPVD_WIDTH, FPVD_TXPOWER, FPVD_MTU
+# Inputs (env): FPVD_CHANNEL, FPVD_WIDTH, FPVD_TXPOWER_DBM, FPVD_MTU
 # Optional:     FPVD_WLAN_ADAPTER (forces an adapter id)
 # Outputs (stdout, key=value lines): driver=, iface=, adapter_id=
 set -eu
@@ -44,11 +44,7 @@ case "${FPVD_WIDTH:-20}" in
     *)  iw $WLAN_DEV set channel "${FPVD_CHANNEL:-161}" HT20 ;;
 esac
 iw reg set 00
-if [ "$driver" = "88XXau" ]; then
-    iw $WLAN_DEV set txpower fixed $(( ${FPVD_TXPOWER:-1} * -100 ))
-else
-    iw $WLAN_DEV set txpower fixed $(( ${FPVD_TXPOWER:-1} *  50 ))
-fi
+iw $WLAN_DEV set txpower fixed $(( ${FPVD_TXPOWER_DBM:-20} * 100 ))
 
 # Chipset poke for ssc33x boards (telemetry serial enablement).
 if command -v ipcinfo >/dev/null 2>&1; then

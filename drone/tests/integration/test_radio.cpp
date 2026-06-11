@@ -31,7 +31,7 @@ TEST_CASE("radio: tuneRadio passes action and env to script") {
     fpvd::Config c{};
     c.link.channel = 100;
     c.link.width = 40;
-    c.link.txpower = 5;
+    c.link.txPowerDbm = 5;
     c.link.mtu = 1400;
     auto r = fpvd::tuneRadio("tests/fixtures/fake_radio_tune.sh", "txpower",
                              c, "wlan0", "8812eu");
