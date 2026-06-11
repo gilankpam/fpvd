@@ -53,7 +53,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beamforming, enabled, remoteMac,
 struct Link {
     int channel{161};
     int width{20};
-    int txpower{1};
+    int txPowerDbm{20};
     int mcs{2};
     Fec fec{};
     bool stbc{true};
@@ -63,7 +63,7 @@ struct Link {
     std::optional<std::string> wlanAdapter{};
     Beamforming beamforming{};
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Link, channel, width, txpower,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Link, channel, width, txPowerDbm,
                                                 mcs, fec, stbc, ldpc, linkId,
                                                 mtu, wlanAdapter, beamforming)
 

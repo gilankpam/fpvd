@@ -9,11 +9,11 @@ static const std::vector<std::vector<std::string>> kLockedPaths = {
     {"link", "mcs"},
     {"link", "fec"},
     {"link", "width"},
-    {"link", "txpower"},
+    {"link", "txPowerDbm"},
     // NOTE: link.stbc / link.ldpc are deliberately NOT locked. They are static
     // link parameters the controller preserves on every CMD_SET_RADIO from the
     // config snapshot — the GS decision never carries them — so an operator may
-    // retune them while DL is enabled. link.txpower IS locked: the per-MCS power
+    // retune them while DL is enabled. link.txPowerDbm IS locked: the per-MCS power
     // curve drives tx power per decision, so a manual value would be overridden.
     {"video", "bitrate"},
     {"video", "qpDelta"},

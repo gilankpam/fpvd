@@ -44,7 +44,7 @@ LinkChange classifyLinkChange(const Config& a, const Config& b) {
     const bool width   = la.width   != lb.width;
     c.nicChannel    = channel || width;
     c.nicWidth      = width;
-    c.nicTxpower    = la.txpower != lb.txpower;
+    c.nicTxpower    = la.txPowerDbm != lb.txPowerDbm;
     c.nicMtu        = la.mtu != lb.mtu;
     c.videoRadiotap = (la.mcs != lb.mcs) || (la.stbc != lb.stbc) ||
                       (la.ldpc != lb.ldpc) || width;

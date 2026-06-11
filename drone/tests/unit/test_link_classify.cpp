@@ -17,7 +17,7 @@ TEST_CASE("classifyLinkChange: no change -> all false") {
 }
 
 TEST_CASE("classifyLinkChange: txpower only") {
-    Config a{}, b{}; b.link.txpower = a.link.txpower + 1;
+    Config a{}, b{}; b.link.txPowerDbm = a.link.txPowerDbm + 1;
     auto c = classifyLinkChange(a, b);
     CHECK(c.nicTxpower);
     CHECK_FALSE(c.nicChannel);

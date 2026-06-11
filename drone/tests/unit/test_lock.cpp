@@ -154,12 +154,12 @@ TEST_CASE("lock: DL off + body writes link.ldpc → allowed") {
     CHECK(r.lockedPaths.empty());
 }
 
-TEST_CASE("lock: DL on + body writes link.txpower → rejected (curve owns power)") {
+TEST_CASE("lock: DL on + body writes link.txPowerDbm → rejected (curve owns power)") {
     // With the per-MCS power curve, the controller drives tx power per decision.
     // A manual value would be silently overridden, so it is locked like link.mcs.
-    auto body = nlohmann::json::parse(R"({"link":{"txpower":20}})");
+    auto body = nlohmann::json::parse(R"({"link":{"txPowerDbm":20}})");
     auto r = checkDynamicLinkLock(body, dlOn());
     CHECK_FALSE(r.ok);
     REQUIRE(r.lockedPaths.size() == 1);
-    CHECK(r.lockedPaths[0] == "link.txpower");
+    CHECK(r.lockedPaths[0] == "link.txPowerDbm");
 }

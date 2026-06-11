@@ -135,6 +135,25 @@ TEST_CASE("validate: dynamicLink.safe.bandwidth must be 10, 20, or 40") {
     CHECK(validate(ok).empty());
 }
 
+TEST_CASE("validate: link.txPowerDbm in [-10,30]") {
+    Config c{}; c.link.txPowerDbm = 31;
+    auto errs = validate(c);
+    REQUIRE(errs.size() >= 1);
+    bool found = false;
+    for (auto& e : errs) if (e.path == "link.txPowerDbm") found = true;
+    CHECK(found);
+
+    Config c2{}; c2.link.txPowerDbm = -11;
+    auto errs2 = validate(c2);
+    bool found2 = false;
+    for (auto& e : errs2) if (e.path == "link.txPowerDbm") found2 = true;
+    CHECK(found2);
+
+    Config c3{}; c3.link.txPowerDbm = 20;   // in range
+    auto errs3 = validate(c3);
+    for (auto& e : errs3) CHECK(e.path != "link.txPowerDbm");
+}
+
 TEST_CASE("validate: dynamicLink.safe.txPowerDbm in [-10,30]") {
     Config c{}; c.dynamicLink.safe.txPowerDbm = 31;
     auto errs = validate(c);
