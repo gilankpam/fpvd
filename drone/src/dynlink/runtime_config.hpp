@@ -11,10 +11,13 @@ struct SafeDefaults {
     uint8_t  mcs;
     uint8_t  k;
     uint8_t  n;
-    uint8_t  depth;
     uint8_t  bandwidth;
     int8_t   txPowerDbm;
     uint16_t bitrateKbps;
+    // swfec-mode safe recovery params — appended last + defaulted so existing
+    // positional aggregate inits keep compiling — do not reorder.
+    uint8_t  overheadPct{100};
+    uint8_t  deadlineMs{30};
 };
 
 struct BitrateEngineConfig {
@@ -33,7 +36,9 @@ struct DlRuntimeConfig {
     uint32_t minIdrIntervalMs;
     uint32_t applyStaggerMs;
     uint32_t applySubPaceMs;
-    bool     interleavingSupported;
+    bool     swfec{false};        // link.fec.mode == "swfec"
+    uint8_t  swfecOverheadPct{50};
+    uint8_t  swfecDeadlineMs{30};
     bool     osdEnabled;
     bool     osdDebugLatency;
     bool     debug;

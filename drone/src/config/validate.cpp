@@ -59,6 +59,12 @@ std::vector<ValidationError> validate(const Config& c) {
         c.link.fec.n < 1 || c.link.fec.n > 32 ||
         c.link.fec.k >= c.link.fec.n)
         errs.push_back({"link.fec", "require 1<=k<n<=32"});
+    if (c.link.fec.mode != "rs" && c.link.fec.mode != "swfec")
+        errs.push_back({"link.fec.mode", "must be \"rs\" or \"swfec\""});
+    if (c.link.fec.overheadPct < 0 || c.link.fec.overheadPct > 255)
+        errs.push_back({"link.fec.overheadPct", "must be 0..255"});
+    if (c.link.fec.deadlineMs < 1 || c.link.fec.deadlineMs > 255)
+        errs.push_back({"link.fec.deadlineMs", "must be 1..255 (uint8 on the control wire)"});
     if (c.link.channel < 1 || c.link.channel > 200)
         errs.push_back({"link.channel", "out of range"});
     if (c.link.beamforming.enabled) {
@@ -122,8 +128,6 @@ std::vector<ValidationError> validate(const Config& c) {
             dl.safe.n < 1 || dl.safe.n > 32 ||
             dl.safe.k >= dl.safe.n)
             errs.push_back({"dynamicLink.safe.fec", "require 1<=k<n<=32"});
-        if (dl.safe.depth < 1 || dl.safe.depth > 8)
-            errs.push_back({"dynamicLink.safe.depth", "must be 1..8"});
         if (dl.safe.bandwidth != 10 && dl.safe.bandwidth != 20 &&
             dl.safe.bandwidth != 40)
             errs.push_back({"dynamicLink.safe.bandwidth", "must be 10, 20, or 40"});
@@ -131,6 +135,10 @@ std::vector<ValidationError> validate(const Config& c) {
             errs.push_back({"dynamicLink.safe.txPowerDbm", "must be -10..30"});
         if (dl.safe.bitrateKbps <= 0)
             errs.push_back({"dynamicLink.safe.bitrateKbps", "must be > 0"});
+        if (dl.safe.overheadPct < 0 || dl.safe.overheadPct > 255)
+            errs.push_back({"dynamicLink.safe.overheadPct", "must be 0..255"});
+        if (dl.safe.deadlineMs < 1 || dl.safe.deadlineMs > 255)
+            errs.push_back({"dynamicLink.safe.deadlineMs", "must be 1..255 (uint8 on the control wire)"});
 
         if (dl.healthTimeoutMs < 1000)
             errs.push_back({"dynamicLink.healthTimeoutMs", "must be >= 1000"});

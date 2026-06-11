@@ -6,17 +6,27 @@ namespace fpvd {
 static std::vector<std::string> commonTx(const Config& c, int mcs,
                                           const std::string& /*iface*/,
                                           const std::string& key) {
-    return {
+    std::vector<std::string> a = {
         "/usr/bin/wfb_tx",
         "-K", key,
         "-M", std::to_string(mcs),
         "-B", std::to_string(modulationWidth(c.link.width)),
-        "-k", std::to_string(c.link.fec.k),
-        "-n", std::to_string(c.link.fec.n),
+    };
+    if (c.link.fec.mode == "swfec") {
+        // swfec repurposes -k/-n: overhead_pct / deadline_ms (see spec).
+        a.push_back("-z");
+        a.push_back("-k"); a.push_back(std::to_string(c.link.fec.overheadPct));
+        a.push_back("-n"); a.push_back(std::to_string(c.link.fec.deadlineMs));
+    } else {
+        a.push_back("-k"); a.push_back(std::to_string(c.link.fec.k));
+        a.push_back("-n"); a.push_back(std::to_string(c.link.fec.n));
+    }
+    a.insert(a.end(), {
         "-S", c.link.stbc ? "1" : "0",
         "-L", c.link.ldpc ? "1" : "0",
         "-i", std::to_string(c.link.linkId)
-    };
+    });
+    return a;
 }
 
 // tun/tlm are boot-once processes with fixed, robust radiotap/FEC, decoupled

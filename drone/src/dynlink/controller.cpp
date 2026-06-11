@@ -156,9 +156,9 @@ void DynamicLinkController::stopLocked() {
 
 // ---- dispatch helpers -------------------------------------------------------
 
-// Port of dl_backend_tx_apply: FEC (if k/n differ) -> DEPTH (if interleaving
-// supported && depth differ) -> RADIO (if mcs/bandwidth differ), with
-// sub-pacing (usleep applySubPaceMs) between sub-commands. Updates lastTx_.
+// Port of dl_backend_tx_apply: FEC (if k/n differ) -> RADIO (if mcs/bandwidth
+// differ), with sub-pacing (usleep applySubPaceMs) between sub-commands.
+// Updates lastTx_.
 // d.bandwidth is already the 20/40 radiotap value — passed directly.
 void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const Decision& d) {
     bool first = (lastTx_.magic != kWireMagic);
@@ -167,11 +167,6 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
 
     if (first || lastTx_.k != d.k || lastTx_.n != d.n) {
         wfb_->setFec(d.k, d.n);
-        emitted = true;
-    }
-    if (cfg.interleavingSupported && (first || lastTx_.depth != d.depth)) {
-        if (emitted && paceUs > 0) usleep(paceUs);
-        wfb_->setInterleaveDepth(d.depth);
         emitted = true;
     }
     if (first || lastTx_.mcs != d.mcs || lastTx_.bandwidth != d.bandwidth) {
@@ -206,15 +201,12 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
     lastTx_ = d;
 }
 
-// Port of dl_backend_tx_apply_safe: emit FEC + (DEPTH if interleaving) + RADIO
-// unconditionally, with sub-pacing. safe.bandwidth is the 20/40 radiotap value.
+// Port of dl_backend_tx_apply_safe: emit FEC + RADIO unconditionally, with
+// sub-pacing. safe.bandwidth is the 20/40 radiotap value.
 void DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
     useconds_t paceUs = static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
-    wfb_->setFec(cfg.safe.k, cfg.safe.n);
-    if (cfg.interleavingSupported) {
-        if (paceUs > 0) usleep(paceUs);
-        wfb_->setInterleaveDepth(cfg.safe.depth);
-    }
+    if (cfg.swfec) wfb_->setFec(cfg.safe.overheadPct, cfg.safe.deadlineMs);
+    else           wfb_->setFec(cfg.safe.k, cfg.safe.n);
     if (paceUs > 0) usleep(paceUs);
     // Safe recovery drops mcs/fec but still preserves the configured stbc/ldpc
     // (robustness coding is, if anything, helpful during recovery).
@@ -310,9 +302,9 @@ void DynamicLinkController::run(int evfd) {
 
             // Hot-reload reconcile: load the latest cfg_ snapshot and apply
             // structural changes that the components hold their own copies of.
-            // The bulk of cfg knobs (safe.*, applyStaggerMs, applySubPaceMs,
-            // interleavingSupported) are picked up automatically on the next
-            // iteration via the now-mutable local `cfg`.
+            // The bulk of cfg knobs (safe.*, applyStaggerMs, applySubPaceMs)
+            // are picked up automatically on the next iteration via the
+            // now-mutable local `cfg`.
             std::shared_ptr<const DlRuntimeConfig> newCfgPtr;
             { std::lock_guard<std::mutex> cg(cfgMu_); newCfgPtr = cfg_; }
             if (newCfgPtr) {
@@ -349,8 +341,8 @@ void DynamicLinkController::run(int evfd) {
                     (newCfg.stbc != cfg.stbc) || (newCfg.ldpc != cfg.ldpc);
 
                 // Update the local cfg snapshot. safe.*, applyStaggerMs,
-                // applySubPaceMs, interleavingSupported, and other loop-read
-                // knobs are now live on the next iteration.
+                // applySubPaceMs, and other loop-read knobs are now live on
+                // the next iteration.
                 cfg = newCfg;
 
                 // Restate the radiotap with the controller's CURRENT mcs/bw
@@ -398,7 +390,7 @@ void DynamicLinkController::run(int evfd) {
                         d.bandwidth = cfg.linkBandwidth;
 
                         // Phase 3a: the drone computes its own bitrate/k/n
-                        // (and a constant depth/fps) from {mcs,bandwidth};
+                        // (and a constant fps) from {mcs,bandwidth};
                         // the GS-sent values on the wire are ignored.
                         applyLocalCompute(cfg, d);
 

@@ -94,7 +94,7 @@ DecodeResult decodeDecision(const uint8_t* buf, size_t len, Decision& d) {
     d.flags    = buf[5];
     d.sequence = get_u32(&buf[6]);
     d.mcs      = buf[10];
-    return DecodeResult::Ok;   // bandwidth/k/n/depth/bitrate/fps left default; filled by config + applyLocalCompute
+    return DecodeResult::Ok;   // bandwidth/k/n/bitrate/fps left default; filled by config + applyLocalCompute
 }
 
 } // namespace fpvd::dynlink

@@ -44,6 +44,9 @@ nlohmann::json toWaybeamJson(const Config& c) {
             {"enabled", true},
             {"server", "unix://venc_wfb"},
             {"streamMode", "rtp"},
+            // 1400 + 12B RTP must stay <= swfec's SWFEC_MAX_INPUT (static_assert
+            // in the wfb-ng fork's tx.hpp) — oversize datagrams are silently
+            // dropped in swfec mode.
             {"maxPayloadSize", 1400},
             {"connectedUdp", true},
             {"audioPort", 5601},

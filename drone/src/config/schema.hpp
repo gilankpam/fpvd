@@ -32,8 +32,14 @@ struct adl_serializer<std::optional<T>> {
 
 namespace fpvd {
 
-struct Fec { int k{8}; int n{12}; };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Fec, k, n)
+struct Fec {
+    std::string mode{"rs"};   // "rs" | "swfec" — mode flip restarts wfb_tx (-z is constructor-time)
+    int k{8};                 // rs-mode block geometry: data fragments per block
+    int n{12};                //   ...and total fragments (k data + n-k parity)
+    int overheadPct{50};      // swfec-mode repair budget, 0..255 (uint8 on the control wire)
+    int deadlineMs{30};       // swfec-mode recovery window, 1..255
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Fec, mode, k, n, overheadPct, deadlineMs)
 
 struct Beamforming {
     bool enabled{false};
@@ -108,13 +114,15 @@ struct DynamicLinkSafe {
     int mcs{1};
     int k{8};
     int n{12};
-    int depth{1};
+    int overheadPct{100};   // swfec-mode safe recovery: more repair at the low rung (0..255, uint8 wire)
+    int deadlineMs{30};     // 1..255 (uint8 wire)
     int bandwidth{20};
     int txPowerDbm{20};
     int bitrateKbps{2000};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkSafe, mcs, k, n,
-                                               depth, bandwidth, txPowerDbm,
+                                               overheadPct, deadlineMs,
+                                               bandwidth, txPowerDbm,
                                                bitrateKbps)
 
 struct DynamicLinkOsd {
@@ -154,7 +162,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkFec,
 struct DynamicLink {
     bool enabled{false};
     int healthTimeoutMs{10000};
-    bool interleavingSupported{true};
     int minIdrIntervalMs{500};
     int applyStaggerMs{50};
     int applySubPaceMs{5};
@@ -166,7 +173,6 @@ struct DynamicLink {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled,
                                                healthTimeoutMs,
-                                               interleavingSupported,
                                                minIdrIntervalMs, applyStaggerMs,
                                                applySubPaceMs,
                                                osd, roiQp, safe, bitrate, fec)

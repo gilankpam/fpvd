@@ -46,4 +46,12 @@ uint16_t computeBitrateKbps(double wireTargetKbps, int k, int n,
     return sat16(v);
 }
 
+uint16_t computeBitrateKbpsSwfec(double wireTargetKbps, int overheadPct,
+                                 int minKbps, int maxKbps) {
+    if (overheadPct < 0) overheadPct = 0;
+    // Identical math to the RS formula with k=100, n=100+overhead.
+    return computeBitrateKbps(wireTargetKbps, 100, 100 + overheadPct,
+                              minKbps, maxKbps);
+}
+
 } // namespace fpvd::dynlink

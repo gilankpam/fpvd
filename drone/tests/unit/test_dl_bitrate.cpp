@@ -58,3 +58,22 @@ TEST_CASE("wire target with probe rung saturated at the ceiling") {
     double expect = 55000.0 * (2.0 / 3.0 - 280.0 / 55000.0);
     CHECK(computeWireTargetKbps(20, 7, 7, 280.0) == doctest::Approx(expect).epsilon(0.001));
 }
+
+TEST_CASE("computeBitrateKbpsSwfec: 50% overhead = 2/3 of wire target") {
+    // 9000 * 100/150 = 6000, exact
+    CHECK(computeBitrateKbpsSwfec(9000.0, 50, 1000, 24000) == 6000);
+}
+
+TEST_CASE("computeBitrateKbpsSwfec: 0% overhead passes wire target through") {
+    CHECK(computeBitrateKbpsSwfec(8000.0, 0, 1000, 24000) == 8000);
+}
+
+TEST_CASE("computeBitrateKbpsSwfec: truncates toward zero like RS path") {
+    // 10000 * 100/130 = 7692.3 -> 7692
+    CHECK(computeBitrateKbpsSwfec(10000.0, 30, 1000, 24000) == 7692);
+}
+
+TEST_CASE("computeBitrateKbpsSwfec: clamps to min and max") {
+    CHECK(computeBitrateKbpsSwfec(900.0, 50, 1000, 24000) == 1000);
+    CHECK(computeBitrateKbpsSwfec(90000.0, 50, 1000, 24000) == 24000);
+}

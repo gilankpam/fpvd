@@ -8,7 +8,7 @@ using nlohmann::json;
 TEST_CASE("schema: round-trip a minimal config through json") {
     json j = json::parse(R"({
         "link":{"channel":161,"width":20,"txpower":1,"mcs":2,
-                "fec":{"k":8,"n":12},"stbc":false,"ldpc":false,
+                "fec":{"mode":"rs","k":8,"n":12,"overheadPct":50,"deadlineMs":30},"stbc":false,"ldpc":false,
                 "linkId":7669206,"mtu":1500,"wlanAdapter":null,
                 "beamforming":{"enabled":false,"remoteMac":"","ackTimeout":255,"intervalMs":100}},
         "video":{"codec":"h265","resolution":"1920x1080","fps":60,
@@ -21,12 +21,11 @@ TEST_CASE("schema: round-trip a minimal config through json") {
                      "mode":"mirror","maxSeconds":300,"maxMB":500},
         "dynamicLink":{
             "enabled":false,"healthTimeoutMs":10000,
-            "interleavingSupported":true,
             "minIdrIntervalMs":500,"applyStaggerMs":50,"applySubPaceMs":5,
             "osd":{"enabled":true,"debugLatency":false},
             "roiQp":{"thresholdKbps":6000,"lowAnchorKbps":2000,
                      "floor":-24,"step":3},
-            "safe":{"mcs":1,"k":8,"n":12,"depth":1,
+            "safe":{"mcs":1,"k":8,"n":12,"overheadPct":100,"deadlineMs":30,
                     "bandwidth":20,"txPowerDbm":20,"bitrateKbps":2000},
             "bitrate":{"minBitrateKbps":1000,"maxBitrateKbps":24000},
             "fec":{"baseRedundancyRatio":0.5,"blocksPerFrame":2.0,"kMin":2,"kMax":50}
@@ -98,7 +97,6 @@ TEST_CASE("schema: dynamicLink round-trips through json") {
     CHECK(c2.dynamicLink.osd.debugLatency == true);
     // unchanged defaults round-trip too
     CHECK(c2.dynamicLink.healthTimeoutMs == 10000);
-    CHECK(c2.dynamicLink.interleavingSupported == true);
     // mavlinkEnable was removed from schema — must NOT appear in serialised output
     CHECK(j.at("dynamicLink").contains("mavlinkEnable") == false);
     // a stray mavlinkEnable in input is silently ignored (NLOHMANN_WITH_DEFAULT behaviour)
@@ -113,7 +111,6 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
     fpvd::Config c{};
     CHECK(c.dynamicLink.enabled == false);
     CHECK(c.dynamicLink.healthTimeoutMs == 10000);
-    CHECK(c.dynamicLink.interleavingSupported == true);
     CHECK(c.dynamicLink.minIdrIntervalMs == 500);
     CHECK(c.dynamicLink.applyStaggerMs == 50);
     CHECK(c.dynamicLink.applySubPaceMs == 5);
@@ -126,7 +123,6 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
     CHECK(c.dynamicLink.safe.mcs == 1);
     CHECK(c.dynamicLink.safe.k == 8);
     CHECK(c.dynamicLink.safe.n == 12);
-    CHECK(c.dynamicLink.safe.depth == 1);
     CHECK(c.dynamicLink.safe.bandwidth == 20);
     CHECK(c.dynamicLink.safe.txPowerDbm == 20);
     CHECK(c.dynamicLink.safe.bitrateKbps == 2000);
@@ -152,6 +148,32 @@ TEST_CASE("schema: beamforming defaults and round-trip") {
     auto c3 = old.get<fpvd::Config>();
     CHECK(c3.link.beamforming.enabled == false);
     CHECK(c3.link.channel == 149);
+}
+
+TEST_CASE("schema: link.fec swfec keys default and round-trip") {
+    fpvd::Config c{};
+    CHECK(c.link.fec.mode == "rs");
+    CHECK(c.link.fec.overheadPct == 50);
+    CHECK(c.link.fec.deadlineMs == 30);
+    nlohmann::json j = c;
+    auto back = j.get<fpvd::Config>();
+    CHECK(back.link.fec.mode == "rs");
+    CHECK(back.link.fec.overheadPct == 50);
+    CHECK(back.link.fec.deadlineMs == 30);
+}
+
+TEST_CASE("schema: legacy fec object without swfec keys parses with defaults") {
+    auto j = nlohmann::json::parse(R"({"link":{"fec":{"k":3,"n":5}}})");
+    auto c = j.get<fpvd::Config>();
+    CHECK(c.link.fec.k == 3);
+    CHECK(c.link.fec.n == 5);
+    CHECK(c.link.fec.mode == "rs");
+}
+
+TEST_CASE("schema: dynamicLink.safe swfec keys default") {
+    fpvd::Config c{};
+    CHECK(c.dynamicLink.safe.overheadPct == 100);
+    CHECK(c.dynamicLink.safe.deadlineMs == 30);
 }
 
 TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") {

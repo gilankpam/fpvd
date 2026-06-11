@@ -125,18 +125,6 @@ TEST_CASE("validate: dynamicLink.safe k<n and both in [1,32]") {
     CHECK(errs3[0].path == "dynamicLink.safe.fec");
 }
 
-TEST_CASE("validate: dynamicLink.safe.depth in [1,8]") {
-    Config c{}; c.dynamicLink.safe.depth = 0;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.depth");
-
-    Config c2{}; c2.dynamicLink.safe.depth = 9;
-    auto errs2 = validate(c2);
-    REQUIRE(errs2.size() == 1);
-    CHECK(errs2[0].path == "dynamicLink.safe.depth");
-}
-
 TEST_CASE("validate: dynamicLink.safe.bandwidth must be 10, 20, or 40") {
     Config c{}; c.dynamicLink.safe.bandwidth = 80;
     auto errs = validate(c);
@@ -270,4 +258,42 @@ TEST_CASE("validate: beamforming ackTimeout and intervalMs ranges") {
     c.link.beamforming.intervalMs = 0;      // below 1
     REQUIRE(validate(c).size() == 1);
     CHECK(validate(c)[0].path == "link.beamforming.intervalMs");
+}
+
+TEST_CASE("validate: link.fec swfec rules") {
+    auto hasErr = [](const std::vector<fpvd::ValidationError>& errs,
+                     const std::string& path) {
+        for (auto& e : errs) if (e.path == path) return true;
+        return false;
+    };
+    fpvd::Config c{};
+
+    SUBCASE("bad mode rejected") {
+        c.link.fec.mode = "raptor";
+        CHECK(hasErr(fpvd::validate(c), "link.fec.mode"));
+    }
+    SUBCASE("overheadPct range") {
+        c.link.fec.overheadPct = 256;
+        CHECK(hasErr(fpvd::validate(c), "link.fec.overheadPct"));
+    }
+    SUBCASE("deadlineMs range — uint8 wire cap") {
+        c.link.fec.deadlineMs = 0;
+        CHECK(hasErr(fpvd::validate(c), "link.fec.deadlineMs"));
+        c = {};
+        c.link.fec.deadlineMs = 256;
+        CHECK(hasErr(fpvd::validate(c), "link.fec.deadlineMs"));
+    }
+    SUBCASE("safe swfec ranges") {
+        c.dynamicLink.safe.overheadPct = -1;
+        CHECK(hasErr(fpvd::validate(c), "dynamicLink.safe.overheadPct"));
+        c.dynamicLink.safe = {};
+        c.dynamicLink.safe.deadlineMs = 300;
+        CHECK(hasErr(fpvd::validate(c), "dynamicLink.safe.deadlineMs"));
+    }
+    SUBCASE("valid swfec config passes") {
+        c.link.fec.mode = "swfec";
+        c.link.fec.overheadPct = 50;
+        c.link.fec.deadlineMs = 30;
+        CHECK(fpvd::validate(c).empty());
+    }
 }

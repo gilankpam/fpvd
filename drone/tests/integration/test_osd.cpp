@@ -14,7 +14,7 @@ static std::string slurp(const fs::path& p) {
 TEST_CASE("osd: writeStatus renders the BF token by code") {
     auto msg = fs::temp_directory_path() / "fpvd-osd-bf.msg";
     fs::remove(msg);
-    Decision d{}; d.mcs = 4; d.bitrateKbps = 9000; d.k = 8; d.n = 12; d.depth = 1;
+    Decision d{}; d.mcs = 4; d.bitrateKbps = 9000; d.k = 8; d.n = 12;
     d.txPowerDbm = 22;
 
     OsdWriter off(msg.string(), /*enabled=*/true, 1000, false);

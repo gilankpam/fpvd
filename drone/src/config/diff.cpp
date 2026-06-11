@@ -48,9 +48,15 @@ LinkChange classifyLinkChange(const Config& a, const Config& b) {
     c.nicMtu        = la.mtu != lb.mtu;
     c.videoRadiotap = (la.mcs != lb.mcs) || (la.stbc != lb.stbc) ||
                       (la.ldpc != lb.ldpc) || width;
-    c.videoFec      = (la.fec.k != lb.fec.k) || (la.fec.n != lb.fec.n);
+    const bool fecMode = la.fec.mode != lb.fec.mode;
+    // Per-mode param diff: only the active mode's knobs are live.
+    c.videoFec      = !fecMode && (lb.fec.mode == "swfec"
+                          ? (la.fec.overheadPct != lb.fec.overheadPct) ||
+                            (la.fec.deadlineMs  != lb.fec.deadlineMs)
+                          : (la.fec.k != lb.fec.k) || (la.fec.n != lb.fec.n));
     c.fullRestart   = (la.linkId != lb.linkId) ||
-                      (la.wlanAdapter != lb.wlanAdapter);
+                      (la.wlanAdapter != lb.wlanAdapter) ||
+                      fecMode;  // -z is constructor-time: wfb_tx must respawn
     // link.beamforming is intentionally not routed here — it is reconciled
     // separately in Daemon::apply() (bfChanged), not via this hot-apply diff.
     return c;

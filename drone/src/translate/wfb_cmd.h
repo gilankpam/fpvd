@@ -6,7 +6,6 @@ namespace fpvd {
 
 constexpr uint8_t kWfbCmdSetFec              = 1;
 constexpr uint8_t kWfbCmdSetRadio            = 2;
-constexpr uint8_t kWfbCmdSetInterleaveDepth  = 5;
 
 #pragma pack(push, 1)
 struct WfbCmdReq {
@@ -23,7 +22,6 @@ struct WfbCmdReq {
             bool    vht_mode;
             uint8_t vht_nss;
         } set_radio;
-        struct { uint8_t depth; } set_interleave_depth;
     } u;
 };
 
@@ -41,7 +39,6 @@ struct WfbCmdResp {
             bool    vht_mode;
             uint8_t vht_nss;
         } get_radio;
-        struct { uint8_t depth; } get_interleave_depth;
     } u;
 };
 #pragma pack(pop)

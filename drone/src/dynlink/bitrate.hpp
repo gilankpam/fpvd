@@ -21,4 +21,10 @@ double computeWireTargetKbps(int bandwidthMhz, int mcs, int probeCeiling,
 uint16_t computeBitrateKbps(double wireTargetKbps, int k, int n,
                             int minKbps, int maxKbps);
 
+// swfec: sources own wire_target * 100/(100+overheadPct) of the budget
+// (repairs are extra packets on top of sources — same airtime semantics as
+// the RS n/k de-rate). Same truncation + clamping as computeBitrateKbps.
+uint16_t computeBitrateKbpsSwfec(double wireTargetKbps, int overheadPct,
+                                 int minKbps, int maxKbps);
+
 } // namespace fpvd::dynlink

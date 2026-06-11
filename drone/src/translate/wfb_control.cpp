@@ -99,15 +99,4 @@ WfbCtlResult WfbControlClient::setFec(uint8_t k, uint8_t n) {
                        id, "set_fec");
 }
 
-WfbCtlResult WfbControlClient::setInterleaveDepth(uint8_t depth) {
-    uint32_t id = reqId_++;
-    WfbCmdReq req{};
-    req.req_id = htonl(id);
-    req.cmd_id = kWfbCmdSetInterleaveDepth;
-    req.u.set_interleave_depth.depth = depth;
-    return sendAndRecv(&req,
-                       offsetof(WfbCmdReq, u) + sizeof(req.u.set_interleave_depth),
-                       id, "set_interleave_depth");
-}
-
 } // namespace fpvd

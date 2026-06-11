@@ -20,7 +20,9 @@ log = logging.getLogger(__name__)
 # session-record schema changes. Vanilla wfb-ng emits 1; the
 # feat/interleaving_uep branch emits 2. We accept both because we
 # decode the same minimal subset (fec_*, epoch) regardless.
-CONTRACT_VERSIONS_SUPPORTED = frozenset({1, 2})
+# v3: wfb-ng swfec fork — fec_type may be 'swfec', in which case the
+# session's fec_k/fec_n slots carry overhead_pct/deadline_ms.
+CONTRACT_VERSIONS_SUPPORTED = frozenset({1, 2, 3})
 
 
 class ContractVersionError(RuntimeError):
@@ -53,6 +55,13 @@ class RxAnt:
 
 @dataclass
 class SessionInfo:
+    """Session parameters from the wfb_rx SESSION record.
+
+    For fec_type 'swfec' (contract v3), fec_k/fec_n carry
+    overhead_pct/deadline_ms — the sliding-window codec has no block
+    geometry. interleave_depth is a legacy v2 field; v3 feeds omit it
+    (defaults to 1).
+    """
     fec_type: str
     fec_k: int
     fec_n: int

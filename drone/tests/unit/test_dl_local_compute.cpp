@@ -13,12 +13,12 @@ static DlRuntimeConfig cfgWithBitrate() {
     return c;
 }
 
-TEST_CASE("applyLocalCompute overrides bitrate/k/n/depth/fps, keeps mcs/bw/txpower") {
+TEST_CASE("applyLocalCompute overrides bitrate/k/n/fps, keeps mcs/bw/txpower") {
     DlRuntimeConfig cfg = cfgWithBitrate();
     Decision d{};
     d.mcs = 5; d.bandwidth = 20; d.txPowerDbm = 27;
     // GS-sent values that MUST be overridden:
-    d.bitrateKbps = 9999; d.k = 99; d.n = 99; d.depth = 9; d.fps = 30;
+    d.bitrateKbps = 9999; d.k = 99; d.n = 99; d.fps = 30;
 
     applyLocalCompute(cfg, d);
 
@@ -30,7 +30,6 @@ TEST_CASE("applyLocalCompute overrides bitrate/k/n/depth/fps, keeps mcs/bw/txpow
     CHECK(d.k == static_cast<uint8_t>(k));
     CHECK(d.n == static_cast<uint8_t>(n));
     CHECK(d.bitrateKbps == computeBitrateKbps(wt, k, n, 1000, 24000));
-    CHECK(d.depth == kInterleaveDepth);     // constant 1
     CHECK(d.fps == 60);                     // drone video.fps, not the wire 30
     // untouched:
     CHECK(d.mcs == 5);
@@ -76,4 +75,21 @@ TEST_CASE("applyLocalCompute sets txPowerDbm from the per-MCS curve") {
     d.mcs = 3; applyLocalCompute(cfg, d); CHECK(d.txPowerDbm == 23);
     d.mcs = 4; applyLocalCompute(cfg, d); CHECK(d.txPowerDbm == 19);
     d.mcs = 7; applyLocalCompute(cfg, d); CHECK(d.txPowerDbm == 19);
+}
+
+TEST_CASE("applyLocalCompute swfec: k/n slots carry overhead/deadline, bitrate de-rated") {
+    DlRuntimeConfig cfg = cfgWithBitrate();
+    cfg.swfec = true;
+    cfg.swfecOverheadPct = 50;
+    cfg.swfecDeadlineMs = 30;
+    Decision d{};
+    d.mcs = 2; d.bandwidth = 20;
+    applyLocalCompute(cfg, d);
+    CHECK(d.k == 50);   // overhead_pct
+    CHECK(d.n == 30);   // deadline_ms
+    // Cross-check the bitrate against the swfec formula at the same wire target.
+    double probeKbps = fpvd::kProbePps * fpvd::kProbePacketBytes * 8.0 / 1000.0;
+    double wt = computeWireTargetKbps(20, 2, cfg.probeMcsCeiling, probeKbps);
+    CHECK(d.bitrateKbps == computeBitrateKbpsSwfec(wt, 50,
+            cfg.bitrate.minBitrateKbps, cfg.bitrate.maxBitrateKbps));
 }

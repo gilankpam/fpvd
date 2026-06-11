@@ -1,12 +1,22 @@
 #include "doctest.h"
 #include "daemon.hpp"
 #include "status.hpp"
+#include "translate/wfb.hpp"
+#include "translate/wfb_cmd.h"
 #include <httplib.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
 #include <algorithm>
+#include <atomic>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -526,6 +536,82 @@ TEST_CASE("apply: enabled false->true starts controller; true->false stops it") 
     CHECK_FALSE(d.dynamicLinkStatus().running);
     CHECK(d.orchestrator().names() == namesBefore);  // probe removed, no rebuild
 
+    fs::remove_all(tmp);
+}
+
+// DL on->off reverts the link via restateStaticLink(). In swfec mode the revert
+// must push (overheadPct, deadlineMs) over CMD_SET_FEC — pushing the rs k/n
+// would silently degrade the swfec link to overhead=8/deadline=12. A fake UDP
+// control server stands in for wfb_tx on kVideoControlPort and records every
+// SET_FEC payload sent during the disable apply.
+TEST_CASE("apply: DL disable restates swfec fec as (overheadPct,deadlineMs), not k/n") {
+    auto tmp = fs::temp_directory_path() / "fpvd-route-swfec-restate";
+    auto paths = makeRoutingPaths(tmp, 46802);
+
+    // Seed swfec via the overlay BEFORE bootstrap: a fec.mode flip through
+    // apply() is full-restart-class (real process churn the harness can't run).
+    std::ofstream(paths.overlayPath)
+        << R"({"link":{"fec":{"mode":"swfec","overheadPct":77,"deadlineMs":44}}})";
+
+    // Fake wfb_tx control server on the fixed video control port.
+    int srv = ::socket(AF_INET, SOCK_DGRAM, 0);
+    REQUIRE(srv >= 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons(static_cast<uint16_t>(fpvd::kVideoControlPort));
+    REQUIRE(::bind(srv, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0);
+    timeval tv{0, 100000};   // 100 ms poll so the stop flag is honored
+    ::setsockopt(srv, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    std::mutex mu;
+    std::vector<std::pair<int, int>> fecCalls;
+    std::atomic<bool> stop{false};
+    std::thread server([&] {
+        while (!stop.load()) {
+            fpvd::WfbCmdReq req{};
+            sockaddr_in from{};
+            socklen_t flen = sizeof(from);
+            ssize_t n = ::recvfrom(srv, &req, sizeof(req), 0,
+                                   reinterpret_cast<sockaddr*>(&from), &flen);
+            if (n <= 0) continue;   // timeout — re-check the stop flag
+            if (req.cmd_id == fpvd::kWfbCmdSetFec) {
+                std::lock_guard<std::mutex> lk(mu);
+                fecCalls.emplace_back(req.u.set_fec.k, req.u.set_fec.n);
+            }
+            fpvd::WfbCmdResp resp{};
+            resp.req_id = req.req_id;   // echo as-is (already network order)
+            resp.rc = htonl(0);
+            ::sendto(srv, &resp, offsetof(fpvd::WfbCmdResp, u), 0,
+                     reinterpret_cast<sockaddr*>(&from), flen);
+        }
+    });
+
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+    REQUIRE(d.effective().link.fec.mode == "swfec");
+
+    // DL on (hot), then forget anything recorded so far.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+    REQUIRE(d.dynamicLinkStatus().running);
+    { std::lock_guard<std::mutex> lk(mu); fecCalls.clear(); }
+
+    // DL off — restateStaticLink() must push the static swfec params.
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+        R"({"dynamicLink":{"enabled":false}})")).ok);
+    REQUIRE(d.apply(/*reallyRestart=*/true).ok);
+    CHECK_FALSE(d.dynamicLinkStatus().running);
+
+    stop = true;
+    server.join();
+    ::close(srv);
+
+    std::lock_guard<std::mutex> lk(mu);
+    REQUIRE(fecCalls.size() == 1);
+    CHECK(fecCalls[0] == std::pair<int, int>(77, 44));   // overheadPct, deadlineMs
+    CHECK(fecCalls[0] != std::pair<int, int>(8, 12));    // NOT the rs k/n
     fs::remove_all(tmp);
 }
 

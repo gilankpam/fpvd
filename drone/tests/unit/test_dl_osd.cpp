@@ -24,7 +24,6 @@ TEST_CASE("osd: status includes IDR counter") {
     d.bitrateKbps  = 12000;
     d.k            = 8;
     d.n            = 14;
-    d.depth        = 2;
     d.txPowerDbm   = 18;
 
     /* Zero counter is rendered as I0. */
@@ -52,7 +51,6 @@ TEST_CASE("osd: status line contains expected fields") {
     d.bitrateKbps = 6000;
     d.k           = 8;
     d.n           = 12;
-    d.depth       = 1;
     d.txPowerDbm  = 20;
 
     osd.writeStatus(d, -60, 0);
@@ -66,8 +64,6 @@ TEST_CASE("osd: status line contains expected fields") {
     CHECK(buf.find("6M") != std::string::npos);
     /* FEC tuple */
     CHECK(buf.find("(8,12)") != std::string::npos);
-    /* Depth */
-    CHECK(buf.find("d1") != std::string::npos);
     /* TX power */
     CHECK(buf.find("TX20") != std::string::npos);
     /* RSSI */
