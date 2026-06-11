@@ -79,8 +79,9 @@ Port the GS-side stats contract from `wfb-ng-interleav`:
   - Tolerant PKT parsing (≥11 fields; ignore extras). Do **not** port the
     interleaver counters (`bursts_rec`, `holdoff`, `late_deadline`).
   - `fec_types` mapping gains `2 → 'swfec'`.
-- `wfb_ng/services.py` + `wfb_ng/conf/master.cfg`: matching plumbing from the
-  interleav fork, minus interleave config keys.
+- `wfb_ng/services.py` + `wfb_ng/conf/master.cfg`: no changes — their
+  interleav-fork diffs are interleaver-only (`-X` flag, `interleave_depth`
+  keys), which we are not adopting.
 - `src/rx.cpp`: SESSION IPC lines currently emit 4 fields
   (`epoch:fec_type:k:n` — verified; swfec sessions carry
   `epoch:2:overhead_pct:deadline_ms`). Extend both RS and swfec lines with
@@ -143,9 +144,10 @@ constraint when flipping modes.)
   `fec_work_rate_w` read the same PKT keys, which the swfec RX populates with
   equivalent semantics. The probe path spawns FEC-off RS `wfb_rx` (still
   supported by the new base); the GS→drone decision wire stays v3 `{mcs}`.
-- GS unified-config / `/link` API: surface `fec.mode`, `fec.overheadPct`,
-  `fec.deadlineMs` as shared keys pushed to the drone, like existing link
-  keys.
+- GS config surface: no change. `link.fec` is drone-owned (Phase 3b) — the
+  GS pushes only `channel`/`width`/`linkId` (`fpvdgs/link.py
+  DRONE_PUSH_KEYS`); fec keys are edited through the `/air/*` proxy straight
+  to the drone's own config API.
 
 ### 4. Deployment & cutover
 
