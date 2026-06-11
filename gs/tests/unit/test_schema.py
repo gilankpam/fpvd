@@ -4,15 +4,17 @@ from fpvdgs import schema
 from fpvdgs.schema import (
     SchemaError,
     validate_config_patch,
-    validate_link_patch,
     validate_effective,
 )
 
 
-def test_config_patch_rejects_link_keys():
-    with pytest.raises(SchemaError) as e:
-        validate_config_patch({"link": {"channel": 100}})
-    assert "link" in str(e.value)
+def test_config_patch_accepts_link():
+    schema.validate_config_patch({"link": {"channel": 100}})  # no raise
+
+
+def test_config_patch_rejects_unknown_link_key():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_config_patch({"link": {"bogus": 1}})
 
 
 def test_config_patch_allows_non_link():
@@ -22,17 +24,6 @@ def test_config_patch_allows_non_link():
 def test_config_patch_rejects_unknown_top_level():
     with pytest.raises(SchemaError):
         validate_config_patch({"bogus": 1})
-
-
-def test_link_patch_allows_only_link():
-    validate_link_patch({"link": {"channel": 100, "width": 20}})
-    with pytest.raises(SchemaError):
-        validate_link_patch({"wfb": {"profile": "gs"}})
-
-
-def test_link_patch_rejects_unknown_link_key():
-    with pytest.raises(SchemaError):
-        validate_link_patch({"link": {"mcs": 5}})
 
 
 def test_validate_effective_checks_width_domain():
@@ -47,7 +38,7 @@ def test_validate_effective_accepts_10mhz():
 
 def test_validate_effective_ok():
     validate_effective({
-        "link": {"channel": 132, "width": 40, "txpower": 19, "region": "US",
+        "link": {"channel": 132, "width": 40, "txPowerDbm": 19, "region": "US",
                  "linkId": 7669206, "beamforming": {"enabled": False}, "wlans": "auto"},
         "wfb": {"profile": "gs", "mavlink": {"peer": "connect://127.0.0.1:14550"}, "raw": {}},
         "drone": {"endpoint": "http://10.5.0.10:8080"},

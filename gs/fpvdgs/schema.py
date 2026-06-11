@@ -1,12 +1,13 @@
-"""Validation rules. Link/overlap params are mutated ONLY via /link."""
+"""Validation rules. `link` is a normal mutable block in /config."""
 
 from pathlib import Path
 
-LINK_KEYS = {"channel", "width", "txpower", "region", "linkId", "beamforming", "wlans"}
-CONFIG_TOP_KEYS = {"wfb", "drone", "dynamicLink", "pixelpilot"}   # link is excluded on purpose
+LINK_KEYS = {"channel", "width", "txPowerDbm", "region", "linkId",
+             "beamforming", "wlans"}
+CONFIG_TOP_KEYS = {"link", "wfb", "drone", "dynamicLink", "pixelpilot",
+                   "idrForward"}
 DL_BANDWIDTHS = {20, 40}
 DL_PROFILES_DIR = Path(__file__).resolve().parent / "dynlink" / "profiles"
-ALL_TOP_KEYS = {"link"} | CONFIG_TOP_KEYS
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
@@ -15,24 +16,17 @@ class SchemaError(ValueError):
 
 
 def validate_config_patch(sparse: dict) -> None:
-    """A /config PATCH: any top-level key except `link`."""
-    if "link" in sparse:
-        raise SchemaError("link.* is read-only via /config; use /link")
+    """A /gs/config PATCH: any known top-level key, including `link`."""
     unknown = set(sparse) - CONFIG_TOP_KEYS
     if unknown:
         raise SchemaError(f"unknown config keys: {sorted(unknown)}")
-
-
-def validate_link_patch(sparse: dict) -> None:
-    """A /link PATCH: only `link.*`, only known link keys."""
-    if set(sparse) - {"link"}:
-        raise SchemaError("only link.* allowed via /link")
-    link = sparse.get("link", {})
-    if not isinstance(link, dict) or not link:
-        raise SchemaError("link patch must be a non-empty object")
-    unknown = set(link) - LINK_KEYS
-    if unknown:
-        raise SchemaError(f"unknown link keys: {sorted(unknown)}")
+    link = sparse.get("link")
+    if link is not None:
+        if not isinstance(link, dict):
+            raise SchemaError("link must be an object")
+        unknown_link = set(link) - LINK_KEYS
+        if unknown_link:
+            raise SchemaError(f"unknown link keys: {sorted(unknown_link)}")
 
 
 def validate_effective(cfg: dict) -> None:
