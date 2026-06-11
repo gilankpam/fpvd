@@ -51,5 +51,6 @@ sleep 5
 remote '
     printf "  procs: "; for p in fpvd wfb_tx wfb_rx wfb_tun; do
         printf "%s=%s " "$p" "$(pidof $p 2>/dev/null | cut -d" " -f1 || echo -)"; done; echo
-'
+    pidof fpvd >/dev/null 2>&1
+' || { echo "VERIFY FAILED: fpvd not running" >&2; exit 1; }
 echo "done. rollback: restore /root/fpvd-rollback/wfb/*.orig and restart S99fpvd"

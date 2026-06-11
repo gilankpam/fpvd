@@ -6,9 +6,13 @@ Builds come from `~/Projects/poc/wfb-ng` branch `swfec`:
 
 ## Staged cutover (order matters)
 
-1. **Binaries first, behavior unchanged.** With `link.fec.mode` still `"rs"`:
-   `./deploy-drone.sh` then `./deploy-gs.sh`. New code, old RS behavior,
-   contract v3 live on the stats feed.
+1. **Binaries + full wfb_ng python package first, behavior unchanged.** With
+   `link.fec.mode` still `"rs"`: `./deploy-drone.sh` then `./deploy-gs.sh`.
+   The GS script ships the binaries AND the fork's complete `wfb_ng` python
+   package together — the GS's previous (interleav-fork) `services.py` passes
+   `-X` to every wfb_tx it spawns, which the swfec-fork binary rejects at
+   spawn, killing the GS uplink. New code, old RS behavior, contract v3 live
+   on the stats feed.
    - Verify: video up, GS `:8103` JSON shows `"contract_version": 3`,
      probe + dynamic link still driving MCS.
 2. **fpvd both ends.** `deploy/drone/deploy.sh` (new fpvd: swfec schema,
@@ -33,6 +37,10 @@ Builds come from `~/Projects/poc/wfb-ng` branch `swfec`:
    - Verify: GS stats show `"fec_type": "swfec"`, `"fec_k": 50`,
      `"fec_n": 30`; OSD FEC tuple now reads `(overhead,deadline)` —
      `(50,30)` — not k/n; fec_rec activity under induced loss.
+     NOTE: a HOT overheadPct change (no restart) is not reflected in the
+     GS-reported fec_k until the next session re-announce (deadline change
+     or wfb_tx restart) — by design; verify overhead changes via drone
+     config, not GS stats.
 
 ## Rollback
 
