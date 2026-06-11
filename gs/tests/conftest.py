@@ -14,6 +14,17 @@ def _free_port():
     return port
 
 
+@pytest.fixture(autouse=True)
+def _reset_bf_capable():
+    """build_app installs a process-global schema.set_bf_capable hook with no
+    teardown; reset it around every test so a leaked probe can't shell out to
+    `wfb-nics` or spuriously reject a later validate_effective."""
+    from fpvdgs import schema
+    schema.set_bf_capable(None)
+    yield
+    schema.set_bf_capable(None)
+
+
 @pytest.fixture
 def free_port():
     return _free_port()

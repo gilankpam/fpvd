@@ -101,6 +101,13 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         log_path="/tmp/pixelpilot.log")
 
     beamforming = BeamformingController()
+
+    def _bf_capable(cfg):
+        wlans = resolve_wlans(cfg)
+        primary = wlans[0] if wlans else None
+        return bool(primary and beamforming.supported(primary))
+    schema.set_bf_capable(_bf_capable)
+
     armer = BeamformingArmer(beamforming, drone, resolve_wlans,
                              lambda: store.effective())
 

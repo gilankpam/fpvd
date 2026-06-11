@@ -11,6 +11,14 @@ DL_PROFILES_DIR = Path(__file__).resolve().parent / "dynlink" / "profiles"
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
+_bf_capable = None   # callable(cfg) -> bool; None => unknown => allow
+
+
+def set_bf_capable(fn) -> None:
+    global _bf_capable
+    _bf_capable = fn
+
+
 class SchemaError(ValueError):
     pass
 
@@ -42,6 +50,11 @@ def validate_effective(cfg: dict) -> None:
     bf = link.get("beamforming")
     if bf is not None:
         _validate_beamforming(bf)
+    if bf is not None and bf.get("enabled") and _bf_capable is not None:
+        if not _bf_capable(cfg):
+            raise SchemaError(
+                "beamforming requires a card with a bf_monitor_conf node "
+                "(GS driver lacks CONFIG_BEAMFORMING_MONITOR)")
     dl = cfg.get("dynamicLink")
     if dl is not None:
         _validate_dynamic_link(dl)

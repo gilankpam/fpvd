@@ -144,6 +144,9 @@ def test_shipped_defaults_include_pixelpilot_and_validate():
 
 def test_beamforming_enabled_bool_ok():
     from fpvdgs import schema
+    # Shape-only check: pin the capability hook to "unknown" so a probe left
+    # registered by a prior build_app test doesn't shell out / reject here.
+    schema.set_bf_capable(None)
     cfg = {"link": {"region": "US", "channel": 132,
                     "beamforming": {"enabled": True}}}
     schema.validate_effective(cfg)   # must not raise
@@ -163,3 +166,22 @@ def test_beamforming_rejects_unknown_subkey():
                     "beamforming": {"enabled": True, "remoteMac": "x"}}}
     with pytest.raises(schema.SchemaError):
         schema.validate_effective(cfg)
+
+
+def test_enable_bf_on_incapable_card_rejected():
+    schema.set_bf_capable(lambda cfg: False)
+    try:
+        with pytest.raises(schema.SchemaError):
+            schema.validate_effective({"link": {"channel": 1, "region": "US",
+                                                 "beamforming": {"enabled": True}}})
+    finally:
+        schema.set_bf_capable(lambda cfg: True)
+
+
+def test_enable_bf_on_capable_card_ok():
+    schema.set_bf_capable(lambda cfg: True)
+    try:
+        schema.validate_effective({"link": {"channel": 1, "region": "US",
+                                            "beamforming": {"enabled": True}}})
+    finally:
+        schema.set_bf_capable(None)
