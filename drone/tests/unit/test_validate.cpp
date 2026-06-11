@@ -271,3 +271,40 @@ TEST_CASE("validate: beamforming ackTimeout and intervalMs ranges") {
     REQUIRE(validate(c).size() == 1);
     CHECK(validate(c)[0].path == "link.beamforming.intervalMs");
 }
+
+TEST_CASE("validate: link.fec swfec rules") {
+    auto hasErr = [](const std::vector<fpvd::ValidationError>& errs,
+                     const std::string& path) {
+        for (auto& e : errs) if (e.path == path) return true;
+        return false;
+    };
+    fpvd::Config c{};
+
+    SUBCASE("bad mode rejected") {
+        c.link.fec.mode = "raptor";
+        CHECK(hasErr(fpvd::validate(c), "link.fec.mode"));
+    }
+    SUBCASE("overheadPct range") {
+        c.link.fec.overheadPct = 256;
+        CHECK(hasErr(fpvd::validate(c), "link.fec.overheadPct"));
+    }
+    SUBCASE("deadlineMs range — uint8 wire cap") {
+        c.link.fec.deadlineMs = 0;
+        CHECK(hasErr(fpvd::validate(c), "link.fec.deadlineMs"));
+        c.link.fec.deadlineMs = 256;
+        CHECK(hasErr(fpvd::validate(c), "link.fec.deadlineMs"));
+    }
+    SUBCASE("safe swfec ranges") {
+        c.dynamicLink.safe.overheadPct = -1;
+        CHECK(hasErr(fpvd::validate(c), "dynamicLink.safe.overheadPct"));
+        c.dynamicLink.safe = {};
+        c.dynamicLink.safe.deadlineMs = 300;
+        CHECK(hasErr(fpvd::validate(c), "dynamicLink.safe.deadlineMs"));
+    }
+    SUBCASE("valid swfec config passes") {
+        c.link.fec.mode = "swfec";
+        c.link.fec.overheadPct = 50;
+        c.link.fec.deadlineMs = 30;
+        CHECK(fpvd::validate(c).empty());
+    }
+}

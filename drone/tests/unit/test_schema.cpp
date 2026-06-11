@@ -154,7 +154,7 @@ TEST_CASE("schema: beamforming defaults and round-trip") {
     CHECK(c3.link.channel == 149);
 }
 
-TEST_CASE("schema: link.fec swfec keys default and roundtrip") {
+TEST_CASE("schema: link.fec swfec keys default and round-trip") {
     fpvd::Config c{};
     CHECK(c.link.fec.mode == "rs");
     CHECK(c.link.fec.overheadPct == 50);
