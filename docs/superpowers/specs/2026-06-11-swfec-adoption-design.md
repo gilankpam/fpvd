@@ -73,8 +73,9 @@ Tun and telemetry links stay RS k3/n5 (boot-once, robust, unchanged).
 Port the GS-side stats contract from `wfb-ng-interleav`:
 
 - `wfb_ng/protocols.py`:
-  - Tolerant SESSION parsing (4–6 colon fields); defaults
-    `interleave_depth=1`, `contract_version=1` when absent.
+  - Tolerant SESSION parsing (4–5 colon fields); a missing trailing field
+    defaults `contract_version=1`. No `interleave_depth` — the slot is
+    dropped from v3.
   - On-change + once-per-log-interval SESSION emission (dedup before notify).
   - Tolerant PKT parsing (≥11 fields; ignore extras). Do **not** port the
     interleaver counters (`bursts_rec`, `holdoff`, `late_deadline`).
