@@ -94,6 +94,73 @@ server enforces nothing — this ordering lives in the API docs and is the
 client's responsibility. This is the intended trade-off: the server stops being
 a coordination point.
 
+### GS-local link apply (replaces `LinkCoordinator`)
+
+On `main`, `_apply_gs` **rejects** any `link` change with a 409 — the actual
+link-apply mechanics live in `LinkCoordinator.apply_link`, which bundles three
+concerns: (a) GS-local RF apply (live `iw` retune vs. runner bounce), (b) the
+drone push of shared keys, and (c) beamforming arm/disarm coordination. With
+`/link` removed, (b) becomes the client's job and (c) moves to the armer (see
+below), leaving only (a) as a GS-local concern.
+
+Decision: **delete `LinkCoordinator` entirely** and write a fresh, small
+GS-local link applier inside `_apply_gs`. It preserves only the valuable part —
+the live-`iw` **retune-vs-bounce** optimization:
+
+- When `pending.link != effective.link`, decide retune vs. bounce on the
+  **non-beamforming** link delta:
+  - **Live `iw` retune** when every changed key is in
+    `{channel, width, txpower→txPowerDbm, region}` **and** the radiotap BW class
+    is unchanged (10 and 20 MHz are both `BW_20`; only crossing 40 differs).
+  - **Runner bounce** otherwise (`wlans`, `linkId`, profile change, or a 40 MHz
+    crossing).
+  - On a failed retune, fall back to a bounce; on a failed bounce, restore the
+    last-good cfg and bounce again (rollback), mirroring today's behavior.
+- **No drone push, no `apply_to`, no beamforming** in this path. The retune
+  helper (`radio.retune`) and the `_bw_class` rule carry over from
+  `LinkCoordinator`/`radio.py` unchanged.
+- `_apply_gs` integrates this alongside the existing wfb / dynamicLink /
+  pixelpilot routing: render the pending cfg, apply the link delta (retune or
+  bounce), then route the non-link blocks, then commit.
+
+Keeping retune (vs. always-bounce) is deliberate: a plain channel or txpower
+change must not drop the video pipeline, and it matters for the planned
+auto-channel-hop feature.
+
+### Beamforming: GS beamformee self-reconciles from config
+
+The drone↔GS BF **MAC handshake is cross-device, so the client owns it.** To
+enable downlink BF the client: reads the GS card MAC from `/gs/status`, then sets
+the drone's `link.beamforming` via `/air` — `enabled:true`,
+`remoteMac:<GS card MAC>`, and `stbc:false` (STBC and TX-BF are mutually
+exclusive on the drone) — and applies `/air`.
+
+On the GS side the beamformee only needs to **match `link.beamforming.enabled`**.
+The `BeamformingArmer` already reconciles toward config every 5 s (reading the
+drone MAC read-only) but **only ever arms**. Decision:
+
+- **Extend `BeamformingArmer` to a full reconcile** — arm when
+  `link.beamforming.enabled` is true *and* the beamformee isn't active, **and
+  disarm** when it is false *and* the beamformee is still armed. This closes the
+  orphaned-disarm gap (previously only `apply_link` disarmed) with less code than
+  porting `reconcile` into the apply path. It still reads the drone MAC
+  read-only; it never pushes to the drone.
+- `/gs/apply` fires **one immediate armer tick** after a successful apply so a
+  toggle isn't stuck waiting for the 5 s loop.
+- The **capability hard-reject** (enabling BF requires a `bf_monitor_conf` node
+  on the primary card) moves into `/gs/config` **schema validation** — fail fast
+  at PATCH time. Validation needs a card-capability probe; inject the
+  `BeamformingController.supported(iface)` check (and `resolve_wlans`) into the
+  patch-validation path, or surface it through `validate_effective` at apply
+  time if the iface list isn't available at patch time. (Plan picks the concrete
+  wiring; the requirement is: enabling BF on an incapable card is rejected, not
+  silently dropped.)
+- **No beamforming logic remains in the apply critical path.**
+
+Net effect: `LinkCoordinator` (188 lines) is deleted; the armer grows by a few
+lines; BF becomes purely config-driven on the GS; every cross-device step lives
+in the client.
+
 ## Section 2 — txpower unified on dBm
 
 ### Current units (the problem)
@@ -214,6 +281,15 @@ and stays down (non-fatal, matching today's bind-failure tolerance).
 - **link via /gs/config**: a `link` PATCH through `/gs/config` is accepted and
   validated (was previously rejected as read-only); unknown link keys still
   rejected.
+- **link apply** (`test_api.py`): a channel/txPowerDbm/region change through
+  `/gs/apply` retunes live (no runner bounce); a `wlans`/`linkId`/40 MHz-crossing
+  change bounces; a failed retune falls back to bounce; a failed bounce restores
+  last-good. (Replaces the deleted `test_link.py`; `LinkCoordinator` is gone.)
+- **beamforming** (`test_beamforming_armer.py`): the armer arms when
+  `link.beamforming.enabled` flips true and disarms when it flips false (full
+  reconcile); reads drone MAC read-only; `/gs/apply` triggers an immediate tick;
+  enabling BF on a card with no `bf_monitor_conf` is rejected at `/gs/config`
+  (or `validate_effective`) time.
 - **txpower** (`test_render.py`, `test_schema.py`): `link.txPowerDbm` renders to
   `wifi_txpower = dBm*100`; null omits it; out-of-range dBm rejected.
 - **IDR** (`test_idr_relay.py`, `test_api.py`): relay starts/stops on
