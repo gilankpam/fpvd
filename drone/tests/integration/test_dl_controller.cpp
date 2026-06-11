@@ -539,3 +539,61 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     c.stop();
     CHECK(c.status().running == false);
 }
+
+TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline") {
+    FakeWfbTx wfb;
+    FakeEnc enc;
+
+    Endpoints ep;
+    ep.listenAddr = "127.0.0.1";
+    ep.listenPort = 45807;                 // unique fixed test port
+    ep.wfbCtlAddr = "127.0.0.1";
+    ep.wfbCtlPort = wfb.port;
+    ep.encHost    = "127.0.0.1";
+    ep.encPort    = static_cast<uint16_t>(enc.port);
+    ep.idrPort    = 0;
+    ep.gsTunnelPort = 0;
+    ep.osdMsgPath = "/tmp/fpvd_test_osd_swfec.msg";
+    ep.osdUpdateIntervalMs = 1000;
+
+    DlRuntimeConfig snap{};
+    snap.healthTimeoutMs  = 300;            // watchdog trips fast
+    snap.minIdrIntervalMs = 500;
+    snap.applyStaggerMs   = 0;
+    snap.applySubPaceMs   = 0;
+    snap.interleavingSupported = false;     // (field removed in a later task)
+    snap.osdEnabled = false; snap.osdDebugLatency = false; snap.debug = false;
+    snap.roiQp = RoiCurve{6000, 2000, -24, 3};
+    snap.stbc = true; snap.ldpc = true;
+    snap.linkBandwidth = 40;
+    snap.iface = "wlan-test-nonexistent";
+    snap.swfec = true;
+    snap.swfecOverheadPct = 50;
+    snap.swfecDeadlineMs  = 30;
+    snap.safe = SafeDefaults{/*mcs=*/1, /*k=*/8, /*n=*/12, /*depth=*/0,
+                             /*bandwidth=*/20, /*txPowerDbm=*/5,
+                             /*bitrateKbps=*/2000};
+    snap.safe.overheadPct = 100;            // trailing NSDMI fields, set by name
+    snap.safe.deadlineMs  = 35;
+
+    DynamicLinkController c(ep);
+    c.start(snap);
+
+    Decision d{};
+    d.magic = kWireMagic; d.version = kWireVersion;
+    d.sequence = 100; d.timestampMs = 1;
+    d.mcs = 7; d.bandwidth = 20; d.txPowerDbm = 10;
+    d.k = 4; d.n = 6; d.bitrateKbps = 6000; d.fps = 60;
+
+    // Decision dispatch: the k/n fec slots must carry the STATIC swfec
+    // params from the snapshot, never the wire's k/n or RS block math.
+    CHECK(waitFor([&] {
+        sendDecision(ep.listenPort, d);
+        return wfb.sawFec(50, 30);
+    }, 1000));
+
+    // Watchdog silence -> safe push uses safe.overheadPct/deadlineMs.
+    CHECK(waitFor([&] { return wfb.sawFec(100, 35); }, 2000));
+
+    c.stop();
+}

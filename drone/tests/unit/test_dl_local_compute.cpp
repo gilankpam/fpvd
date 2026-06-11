@@ -77,3 +77,20 @@ TEST_CASE("applyLocalCompute sets txPowerDbm from the per-MCS curve") {
     d.mcs = 4; applyLocalCompute(cfg, d); CHECK(d.txPowerDbm == 19);
     d.mcs = 7; applyLocalCompute(cfg, d); CHECK(d.txPowerDbm == 19);
 }
+
+TEST_CASE("applyLocalCompute swfec: k/n slots carry overhead/deadline, bitrate de-rated") {
+    DlRuntimeConfig cfg = cfgWithBitrate();
+    cfg.swfec = true;
+    cfg.swfecOverheadPct = 50;
+    cfg.swfecDeadlineMs = 30;
+    Decision d{};
+    d.mcs = 2; d.bandwidth = 20;
+    applyLocalCompute(cfg, d);
+    CHECK(d.k == 50);   // overhead_pct
+    CHECK(d.n == 30);   // deadline_ms
+    // Cross-check the bitrate against the swfec formula at the same wire target.
+    double probeKbps = fpvd::kProbePps * fpvd::kProbePacketBytes * 8.0 / 1000.0;
+    double wt = computeWireTargetKbps(20, 2, cfg.probeMcsCeiling, probeKbps);
+    CHECK(d.bitrateKbps == computeBitrateKbpsSwfec(wt, 50,
+            cfg.bitrate.minBitrateKbps, cfg.bitrate.maxBitrateKbps));
+}

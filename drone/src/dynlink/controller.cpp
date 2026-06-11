@@ -210,7 +210,8 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
 // unconditionally, with sub-pacing. safe.bandwidth is the 20/40 radiotap value.
 void DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
     useconds_t paceUs = static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
-    wfb_->setFec(cfg.safe.k, cfg.safe.n);
+    if (cfg.swfec) wfb_->setFec(cfg.safe.overheadPct, cfg.safe.deadlineMs);
+    else           wfb_->setFec(cfg.safe.k, cfg.safe.n);
     if (cfg.interleavingSupported) {
         if (paceUs > 0) usleep(paceUs);
         wfb_->setInterleaveDepth(cfg.safe.depth);

@@ -149,3 +149,24 @@ TEST_CASE("buildDlSnapshot maps link.width to linkBandwidth (radiotap value)") {
     auto s10 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
     CHECK(s10.linkBandwidth == 20);
 }
+
+TEST_CASE("buildDlSnapshot: swfec fields from link.fec + safe") {
+    fpvd::Config c{};
+    c.link.fec.mode = "swfec";
+    c.link.fec.overheadPct = 70;
+    c.link.fec.deadlineMs = 40;
+    c.dynamicLink.safe.overheadPct = 120;
+    c.dynamicLink.safe.deadlineMs = 35;
+    auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    CHECK(s.swfec);
+    CHECK(s.swfecOverheadPct == 70);
+    CHECK(s.swfecDeadlineMs == 40);
+    CHECK(s.safe.overheadPct == 120);
+    CHECK(s.safe.deadlineMs == 35);
+}
+
+TEST_CASE("buildDlSnapshot: rs mode -> swfec false") {
+    fpvd::Config c{};
+    auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    CHECK_FALSE(s.swfec);
+}
