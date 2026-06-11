@@ -160,7 +160,7 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
               dynlink=dynlink, pixelpilot=pixelpilot, probe=probe_ctrl,
               retune=lambda lnk: radio.retune(resolve_wlans(store.effective()), lnk),
               wlans_resolver=resolve_wlans,
-              armer_tick=lambda: armer._tick())
+              armer_tick=armer.tick)
 
     http_server = make_http_server(api, host, port)
     return App(store, runner, http_server, api, dynlink,

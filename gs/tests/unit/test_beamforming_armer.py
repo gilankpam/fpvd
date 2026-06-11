@@ -42,41 +42,47 @@ def _armer(bf, drone, enabled=True, wlans=None):
 
 def test_arms_when_enabled_not_active_drone_up():
     bf, drone = FakeBf(state="disabled"), FakeDrone()
-    _armer(bf, drone)._tick()
+    _armer(bf, drone).tick()
     assert bf.calls == [(True, "wlan0", "dc:84:03:e7:8f:0c")]
+
+
+def test_disarms_when_disabled_and_active():
+    bf, drone = FakeBf(state="active"), FakeDrone()
+    _armer(bf, drone, enabled=False).tick()
+    assert bf.calls == [(False, "wlan0", "")]
 
 
 def test_noop_when_already_active():
     bf, drone = FakeBf(state="active"), FakeDrone()
-    _armer(bf, drone)._tick()
+    _armer(bf, drone).tick()
     assert bf.calls == []
 
 
-def test_noop_when_disabled():
+def test_noop_when_disabled_and_inactive():
     bf, drone = FakeBf(state="disabled"), FakeDrone()
-    _armer(bf, drone, enabled=False)._tick()
+    _armer(bf, drone, enabled=False).tick()
     assert bf.calls == []
 
 
 def test_noop_when_drone_down():
     bf, drone = FakeBf(state="disabled"), FakeDrone(reachable=False)
-    _armer(bf, drone)._tick()
+    _armer(bf, drone).tick()
     assert bf.calls == []
 
 
 def test_survives_get_status_raising():
     bf, drone = FakeBf(state="disabled"), FakeDrone(raise_status=True)
-    _armer(bf, drone)._tick()   # must not raise
+    _armer(bf, drone).tick()   # must not raise
     assert bf.calls == []
 
 
 def test_noop_when_unsupported():
     bf, drone = FakeBf(state="disabled", supported=False), FakeDrone()
-    _armer(bf, drone)._tick()
+    _armer(bf, drone).tick()
     assert bf.calls == []
 
 
 def test_noop_when_no_drone_mac():
     bf, drone = FakeBf(state="disabled"), FakeDrone(mac="")
-    _armer(bf, drone)._tick()
+    _armer(bf, drone).tick()
     assert bf.calls == []
