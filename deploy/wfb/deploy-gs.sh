@@ -69,11 +69,17 @@ remote "
 "
 
 echo "==> verify"
-sleep 5
+# Poll up to ~30s: a full-package swap makes fpvdgs re-import wfb_ng and
+# rebind sockets, which takes well over 5s — a single short sleep+check
+# false-negatives even on a healthy start (observed live 2026-06-11).
 remote '
+    for i in $(seq 1 15); do
+        ss -tln 2>/dev/null | grep -q ":8103" && break
+        sleep 2
+    done
     printf "  procs: "; for p in wfb_rx wfb_tx; do
         printf "%s=%s " "$p" "$(pidof $p 2>/dev/null | cut -d" " -f1 || echo -)"; done; echo
     printf "  8103:  "; ss -tln 2>/dev/null | grep -q ":8103" && echo listening || echo down
     ss -tln 2>/dev/null | grep -q ":8103"
-' || { echo "VERIFY FAILED: GS :8103 not listening" >&2; exit 1; }
+' || { echo "VERIFY FAILED: GS :8103 not listening after ~30s" >&2; exit 1; }
 echo "done. rollback: restore /root/fpvd-gs-rollback/wfb/* and restart S99fpvd"

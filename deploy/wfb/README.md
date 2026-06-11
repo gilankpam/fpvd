@@ -6,21 +6,31 @@ Builds come from `~/Projects/poc/wfb-ng` branch `swfec`:
 
 ## Staged cutover (order matters)
 
-1. **Binaries + full wfb_ng python package first, behavior unchanged.** With
-   `link.fec.mode` still `"rs"`: `./deploy-drone.sh` then `./deploy-gs.sh`.
-   The GS script ships the binaries AND the fork's complete `wfb_ng` python
-   package together — the GS's previous (interleav-fork) `services.py` passes
-   `-X` to every wfb_tx it spawns, which the swfec-fork binary rejects at
-   spawn, killing the GS uplink. New code, old RS behavior, contract v3 live
-   on the stats feed.
-   - Verify: video up, GS `:8103` JSON shows `"contract_version": 3`,
-     probe + dynamic link still driving MCS.
-2. **fpvd both ends.** `deploy/drone/deploy.sh` (new fpvd: swfec schema,
-   interleaver removed) and `deploy/gs/deploy.sh` (fpvdgs accepts v3).
-   - NOTE: deploy fpvd only AFTER the wfb binaries. OLD fpvd with
-     interleavingSupported=true against NEW binaries would push CMD 5,
-     which the new wfb_tx rejects with an error response; fpvd logs it on
-     every dynlink dispatch — noisy but not fatal. Keep the window short.
+**Per-host ordering is asymmetric** because of the v3 stats contract:
+- The new `wfb_rx` emits `contract_version: 3`. The GS `fpvdgs` *consumes*
+  the `:8103` feed and hard-aborts (`ContractVersionError`) on a version it
+  doesn't know. The currently-deployed fpvdgs only accepts `{1,2}`. So on the
+  **GS, the new fpvdgs (accepts `{1,2,3}`) MUST land before the new wfb_rx** —
+  fpvdgs first, then wfb. (New fpvdgs tolerates the old v2 feed, so there is
+  no reverse hazard.)
+- The **drone** fpvd never parses `contract_version`, so its order is free.
+  Do wfb binaries first there so the brief old-fpvd→new-wfb_tx CMD-5 rejection
+  window (interleave cmd, noisy-not-fatal) is short.
+
+1. **Drone wfb binaries.** With `link.fec.mode` still `"rs"`:
+   `./deploy-drone.sh`. Old fpvd keeps running (RS); expect transient CMD-5
+   rejection log noise until step 3.
+2. **GS new fpvdgs, THEN GS wfb.** `deploy/gs/deploy.sh` first (new fpvdgs,
+   accepts v3, still reading the old v2 feed), then `./deploy-gs.sh` (ships
+   the binaries AND the fork's complete `wfb_ng` python package — the GS's
+   previous interleav-fork `services.py` passes `-X` to every wfb_tx, which
+   the swfec binary rejects at spawn, killing the GS uplink, so the whole
+   package goes together). After this the feed reports `contract_version: 3`.
+   - Verify: video up, GS `:8103` shows `"contract_version": 3`, probe +
+     dynamic link still driving MCS.
+3. **Drone new fpvd.** `deploy/drone/deploy.sh` (swfec schema, interleaver
+   removed). Stops the CMD-5 noise from step 1. `link.fec.mode` defaults to
+   `"rs"` (WITH_DEFAULT parse of the existing on-disk config).
 3. **Flip the mode.** Via the GS proxy to the drone config API:
 
        curl -X PATCH http://10.18.0.1:8080/air/config \
