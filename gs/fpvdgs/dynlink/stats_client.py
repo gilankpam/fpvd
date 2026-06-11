@@ -59,7 +59,8 @@ class SessionInfo:
 
     For fec_type 'swfec' (contract v3), fec_k/fec_n carry
     overhead_pct/deadline_ms — the sliding-window codec has no block
-    geometry. interleave_depth is a legacy field, always 1 on v3 feeds.
+    geometry. interleave_depth is a legacy v2 field; v3 feeds omit it
+    (defaults to 1).
     """
     fec_type: str
     fec_k: int

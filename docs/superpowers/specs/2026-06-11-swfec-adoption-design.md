@@ -85,10 +85,10 @@ Port the GS-side stats contract from `wfb-ng-interleav`:
 - `src/rx.cpp`: SESSION IPC lines currently emit 4 fields
   (`epoch:fec_type:k:n` — verified; swfec sessions carry
   `epoch:2:overhead_pct:deadline_ms`). Extend both RS and swfec lines with
-  the trailing `:1:3` fields (`interleave_depth=1` always,
-  `contract_version=3`), matching the deployed interleav-fork convention so
-  the C side stays the single source of truth for the contract version and
-  the ported python parsing logic is unchanged.
+  a trailing `:3` field (contract_version only; the interleave_depth slot
+  is dropped — v3 is the 5-field form
+  `epoch:fec_type:k:n:contract_version`), so the C side stays the single
+  source of truth for the contract version.
 - Tests: add a stats-format check for swfec SESSION/PKT lines alongside the
   existing byte-exact/fuzz suites.
 
