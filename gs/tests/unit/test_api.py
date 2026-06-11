@@ -315,3 +315,31 @@ def test_disable_dynamiclink_stops_probe(tmp_path):
     code, _ = api.handle("POST", "/gs/apply", {}, b"")
     assert code == 200
     assert probe.started is False and runner.restarts == 0
+
+
+class FakeRelay:
+    def __init__(self): self.events = []; self._running = False
+    def start(self): self._running = True; self.events.append("start")
+    def stop(self): self._running = False; self.events.append("stop")
+    def status(self): return {"running": self._running, "listen": None}
+
+
+def test_idr_forward_apply_starts_and_stops():
+    cfg_out = os.path.join(tempfile.mkdtemp(), "wifibroadcast.cfg")
+    store = ConfigStore({"link": {"channel": 132, "width": 40, "region": "US"},
+                         "wfb": {"profile": "gs"}, "drone": {"endpoint": "http://x"},
+                         "idrForward": {"enabled": False, "port": 11223}},
+                        overlay_path=None)
+    relay = FakeRelay()
+    api = Api(store=store, schema=schema, render_mod=render_mod, runner=FakeRunner(),
+              drone=FakeDrone(), status_fn=lambda: {}, cfg_out=cfg_out,
+              retune=lambda l: True, wlans_resolver=lambda c: ["wlan0"],
+              armer_tick=lambda: None, idr_relay=relay)
+    api.handle("PATCH", "/gs/config", {},
+               json.dumps({"idrForward": {"enabled": True}}).encode())
+    api.handle("POST", "/gs/apply", {}, b"")
+    assert "start" in relay.events
+    api.handle("PATCH", "/gs/config", {},
+               json.dumps({"idrForward": {"enabled": False}}).encode())
+    api.handle("POST", "/gs/apply", {}, b"")
+    assert relay.events[-1] == "stop"

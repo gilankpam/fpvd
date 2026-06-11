@@ -136,7 +136,19 @@ class Api:
         return self.runner.restart()
 
     def _route_idr_forward(self, old, new, pending):
-        return  # implemented in Part C (Task C3)
+        """Start/stop the always-available IDR relay on idrForward changes.
+        Independent of dynamicLink. Never bounces the wfb runner."""
+        if self.idr_relay is None or old == new:
+            return
+        was = bool(old.get("enabled", True))
+        now = bool(new.get("enabled", True))
+        if now and not was:
+            self.idr_relay.start()
+        elif was and not now:
+            self.idr_relay.stop()
+        elif now and was and old.get("port") != new.get("port"):
+            self.idr_relay.stop()
+            self.idr_relay.start()
 
     def _route_dynamic_link(self, dl_old, dl_new, pending):
         """Start/stop/reconfigure the in-process controller AND the observe-only
