@@ -22,8 +22,9 @@ def test_iw_args_freq_when_above_2000():
 
 
 def test_retune_commands_region_channel_txpower_in_order():
+    # txPowerDbm=22 (dBm) -> 2200 mBm fixed
     cmds = radio.retune_commands(
-        ["wlan0"], {"region": "US", "channel": 132, "width": 20, "txpower": 2200})
+        ["wlan0"], {"region": "US", "channel": 132, "width": 20, "txPowerDbm": 22})
     assert cmds == [
         ["iw", "reg", "set", "US"],
         ["iw", "dev", "wlan0", "set", "channel", "132", "HT20"],
@@ -33,9 +34,22 @@ def test_retune_commands_region_channel_txpower_in_order():
 
 def test_retune_commands_txpower_none_sets_auto():
     cmds = radio.retune_commands(
-        ["wlan0"], {"region": "US", "channel": 132, "width": 10, "txpower": None})
+        ["wlan0"], {"region": "US", "channel": 132, "width": 10, "txPowerDbm": None})
     assert ["iw", "reg", "set", "US"] in cmds
     assert ["iw", "dev", "wlan0", "set", "channel", "132", "10MHz"] in cmds
+    assert ["iw", "dev", "wlan0", "set", "txpower", "auto"] in cmds
+
+
+def test_retune_commands_txpower_dbm_to_mbm():
+    cmds = radio.retune_commands(["wlan0"], {"channel": 132, "width": 40,
+                                             "region": "US", "txPowerDbm": 20})
+    # 20 dBm -> 2000 mBm
+    assert ["iw", "dev", "wlan0", "set", "txpower", "fixed", "2000"] in cmds
+
+
+def test_retune_commands_txpower_none_is_auto():
+    cmds = radio.retune_commands(["wlan0"], {"channel": 132, "width": 40,
+                                             "region": "US", "txPowerDbm": None})
     assert ["iw", "dev", "wlan0", "set", "txpower", "auto"] in cmds
 
 
