@@ -61,6 +61,9 @@ def validate_effective(cfg: dict) -> None:
     pp = cfg.get("pixelpilot")
     if pp is not None:
         _validate_pixelpilot(pp)
+    idr = cfg.get("idrForward")
+    if idr is not None:
+        _validate_idr_forward(idr)
 
 
 def _validate_beamforming(bf: dict) -> None:
@@ -87,9 +90,6 @@ def _validate_dynamic_link(dl: dict) -> None:
     port = dl.get("dronePort", 9999)
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("dynamicLink.dronePort must be an int in 1..65535")
-    idr_port = dl.get("idrPort", 11223)
-    if not isinstance(idr_port, int) or not 1 <= idr_port <= 65535:
-        raise SchemaError("dynamicLink.idrPort must be an int in 1..65535")
     vid = dl.get("videoStreamId", "video")
     if not isinstance(vid, str) or not vid:
         raise SchemaError("dynamicLink.videoStreamId must be a non-empty string")
@@ -99,6 +99,14 @@ def _validate_dynamic_link(dl: dict) -> None:
         raise SchemaError(
             f"dynamicLink.radioProfile {profile!r} not found; available: {available}"
         )
+
+
+def _validate_idr_forward(idr: dict) -> None:
+    if not isinstance(idr.get("enabled", True), bool):
+        raise SchemaError("idrForward.enabled must be a bool")
+    port = idr.get("port", 11223)
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise SchemaError("idrForward.port must be an int in 1..65535")
 
 
 def _validate_pixelpilot(pp: dict) -> None:

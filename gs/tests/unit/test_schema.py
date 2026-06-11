@@ -87,9 +87,12 @@ def test_effective_accepts_known_radio_profile():
     schema.validate_effective(_eff(radioProfile="m8812eu2"))  # no raise
 
 
-def test_effective_rejects_bad_idr_port():
-    with pytest.raises(SchemaError):
-        schema.validate_effective(_eff(idrPort=70000))
+def test_idr_forward_validates():
+    schema.validate_effective({"link": {"channel": 1, "region": "US"},
+                               "idrForward": {"enabled": True, "port": 11223}})
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective({"link": {"channel": 1, "region": "US"},
+                                   "idrForward": {"enabled": True, "port": 0}})
 
 
 def test_config_patch_accepts_pixelpilot():
