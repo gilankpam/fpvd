@@ -4,7 +4,7 @@ import configparser
 from fpvdgs.render import render_cfg, write_cfg
 
 EFFECTIVE = {
-    "link": {"channel": 132, "width": 40, "txpower": 19, "region": "US",
+    "link": {"channel": 132, "width": 40, "txPowerDbm": 19, "region": "US",
              "linkId": 7669206, "beamforming": {"enabled": False}, "wlans": "auto"},
     "wfb": {"profile": "gs", "mavlink": {"peer": "connect://127.0.0.1:14550"},
             "raw": {"gs_tunnel": {"ldpc": 1}}},
@@ -39,7 +39,7 @@ def test_render_maps_common_section():
     cfg = _parse_literals(render_cfg(EFFECTIVE))
     assert cfg["common"]["wifi_channel"] == 132
     assert cfg["common"]["wifi_region"] == "US"
-    assert cfg["common"]["wifi_txpower"] == 19
+    assert cfg["common"]["wifi_txpower"] == 1900
 
 
 def test_render_omits_txpower_when_unset():

@@ -21,9 +21,10 @@ def render_cfg(effective: dict) -> str:
     lines = [HEADER, "[common]"]
     lines.append(f"wifi_channel = {_lit(link['channel'])}")
     lines.append(f"wifi_region = {_lit(link['region'])}")
-    if link.get("txpower") is not None:
-        # NOTE: wfb-ng wifi_txpower is in mBm; leave unset to keep the driver default.
-        lines.append(f"wifi_txpower = {_lit(link['txpower'])}")
+    if link.get("txPowerDbm") is not None:
+        # wfb-ng wifi_txpower is mBm (dBm * 100); leave unset to keep the
+        # driver default.
+        lines.append(f"wifi_txpower = {_lit(round(link['txPowerDbm'] * 100))}")
     # Dynamic-link needs 10 Hz stats (log_interval ms). Emitted unconditionally
     # so enabling/disabling dynamic-link never requires a runner bounce.
     lines.append("log_interval = 100")
