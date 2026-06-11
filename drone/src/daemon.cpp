@@ -450,8 +450,13 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         }
         if (link.videoFec) {
             WfbControlClient cli("127.0.0.1", kVideoControlPort);
-            auto rr = cli.setFec(static_cast<uint8_t>(effective_.link.fec.k),
-                                 static_cast<uint8_t>(effective_.link.fec.n));
+            const auto& f = effective_.link.fec;
+            // swfec rides the same CMD_SET_FEC: k=overhead_pct, n=deadline_ms.
+            auto rr = (f.mode == "swfec")
+                ? cli.setFec(static_cast<uint8_t>(f.overheadPct),
+                             static_cast<uint8_t>(f.deadlineMs))
+                : cli.setFec(static_cast<uint8_t>(f.k),
+                             static_cast<uint8_t>(f.n));
             if (!rr.ok) {
                 lastApply_ = {nowIso(), false, restarted,
                               std::string("fec: ") + rr.error};

@@ -75,3 +75,28 @@ TEST_CASE("classifyLinkChange: wlanAdapter -> fullRestart") {
     auto c = classifyLinkChange(a, b);
     CHECK(c.fullRestart);
 }
+
+TEST_CASE("classifyLinkChange: fec mode flip -> fullRestart, not videoFec") {
+    Config a{}, b{}; b.link.fec.mode = "swfec";
+    auto c = classifyLinkChange(a, b);
+    CHECK(c.fullRestart);
+    CHECK_FALSE(c.videoFec);
+}
+
+TEST_CASE("classifyLinkChange: swfec param change -> videoFec only") {
+    Config a{}, b{};
+    a.link.fec.mode = b.link.fec.mode = "swfec";
+    b.link.fec.overheadPct = 80;
+    auto c = classifyLinkChange(a, b);
+    CHECK(c.videoFec);
+    CHECK_FALSE(c.fullRestart);
+}
+
+TEST_CASE("classifyLinkChange: rs k/n change ignored under swfec mode") {
+    Config a{}, b{};
+    a.link.fec.mode = b.link.fec.mode = "swfec";
+    b.link.fec.k = 3;  // rs-only knob; meaningless in swfec mode
+    auto c = classifyLinkChange(a, b);
+    CHECK_FALSE(c.videoFec);
+    CHECK_FALSE(c.fullRestart);
+}
