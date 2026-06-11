@@ -25,6 +25,7 @@ from .config import ConfigStore
 from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot
+from .idr_relay import IdrRelay, drone_host_from_endpoint
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .probe.config_build import make_probe_snapshot
 from .probe.controller import ProbeController
@@ -33,7 +34,7 @@ from .runner_supervisor import RunnerSupervisor, ProcessSupervisor, resolve_wlan
 
 class App:
     def __init__(self, store, runner, http_server, api, dynlink,
-                 pixelpilot=None, probe=None, armer=None):
+                 pixelpilot=None, probe=None, armer=None, idr_relay=None):
         self.store = store
         self.runner = runner
         self.http = http_server
@@ -42,6 +43,7 @@ class App:
         self.pixelpilot = pixelpilot
         self.probe = probe
         self.armer = armer
+        self.idr_relay = idr_relay
 
     def start(self):
         self.runner.start()
@@ -50,6 +52,9 @@ class App:
         if (self.pixelpilot is not None
                 and self.store.effective().get("pixelpilot", {}).get("enabled", True)):
             self.pixelpilot.start()
+        if (self.idr_relay is not None
+                and self.store.effective().get("idrForward", {}).get("enabled", True)):
+            self.idr_relay.start()
         if self.store.effective().get("dynamicLink", {}).get("enabled"):
             self.dynlink.start()
         if (self.probe is not None
@@ -66,6 +71,8 @@ class App:
         self.dynlink.stop()
         if self.pixelpilot is not None:
             self.pixelpilot.shutdown()
+        if self.idr_relay is not None:
+            self.idr_relay.stop()
         if self.probe is not None:
             self.probe.stop()
         self.runner.shutdown()
@@ -87,7 +94,12 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
                               wlans=wlans, ready_port=ready_port,
                               ready_timeout=ready_timeout, log_path=log_path)
 
-    drone = DroneClient(effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080"))
+    endpoint = effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080")
+    drone = DroneClient(endpoint)
+
+    idr_cfg = effective.get("idrForward", {})
+    idr_relay = IdrRelay(drone_host_from_endpoint(endpoint),
+                         port=int(idr_cfg.get("port", 11223)))
 
     probe_ctrl = ProbeController(make_probe_snapshot(effective), spawn=probe_spawn)
 
@@ -167,11 +179,12 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
               dynlink=dynlink, pixelpilot=pixelpilot, probe=probe_ctrl,
               retune=lambda lnk: radio.retune(resolve_wlans(store.effective()), lnk),
               wlans_resolver=resolve_wlans,
-              armer_tick=armer.tick)
+              armer_tick=armer.tick, idr_relay=idr_relay)
 
     http_server = make_http_server(api, host, port)
     return App(store, runner, http_server, api, dynlink,
-               pixelpilot=pixelpilot, probe=probe_ctrl, armer=armer)
+               pixelpilot=pixelpilot, probe=probe_ctrl, armer=armer,
+               idr_relay=idr_relay)
 
 
 def main(argv=None):
