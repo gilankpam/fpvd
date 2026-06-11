@@ -1,5 +1,7 @@
-"""Single front-door HTTP API: /config /apply /reset /defaults /status /healthz,
-opaque /air/* drone proxy, and /link coordinator. Transport-free `handle()`."""
+"""Single front-door HTTP API: GS-local config under /gs/* (/gs/config /gs/apply
+/gs/reset /gs/defaults /gs/status), an opaque /air/* drone proxy, and /healthz at
+root. The GS-local link delta is applied here (live iw retune vs. runner bounce);
+cross-device link orchestration moves to the client. Transport-free `handle()`."""
 
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,19 +14,24 @@ from .probe.config_build import make_probe_snapshot
 
 
 class Api:
-    def __init__(self, store, schema, render_mod, runner, drone, link,
-                 status_fn, cfg_out, dynlink=None, pixelpilot=None, probe=None):
+    def __init__(self, store, schema, render_mod, runner, drone,
+                 status_fn, cfg_out, dynlink=None, pixelpilot=None, probe=None,
+                 retune=None, wlans_resolver=None, armer_tick=None,
+                 idr_relay=None):
         self.store = store
         self.schema = schema
         self.render_mod = render_mod
         self.runner = runner
         self.drone = drone
-        self.link = link
         self.status_fn = status_fn
         self.cfg_out = cfg_out
         self.dynlink = dynlink
         self.pixelpilot = pixelpilot
         self.probe = probe
+        self.retune = retune
+        self.wlans_resolver = wlans_resolver
+        self.armer_tick = armer_tick
+        self.idr_relay = idr_relay
 
     def _json(self, body: bytes) -> dict:
         return json.loads(body or b"{}")
@@ -36,36 +43,26 @@ class Api:
             key = (method, path)
             if key == ("GET", "/healthz"):
                 return 200, {"ok": True}
-            if key == ("GET", "/defaults"):
+            if key == ("GET", "/gs/defaults"):
                 return 200, self.store.defaults()
-            if key == ("GET", "/config"):
+            if key == ("GET", "/gs/config"):
                 pending = query.get("pending", ["false"])[0] == "true"
                 return 200, (self.store.pending() if pending else self.store.effective())
-            if key == ("PATCH", "/config"):
+            if key == ("PATCH", "/gs/config"):
                 sparse = self._json(body)
                 self.schema.validate_config_patch(sparse)
                 self.store.patch(sparse)
                 return 200, self.store.pending()
-            if key == ("POST", "/apply"):
+            if key == ("POST", "/gs/apply"):
                 return self._apply_gs()
-            if key == ("POST", "/reset"):
+            if key == ("POST", "/gs/reset"):
                 self.store.reset()
                 self.render_mod.write_cfg(self.cfg_out,
                                           self.render_mod.render_cfg(self.store.effective()))
                 self.runner.restart()
                 return 200, {"reset": True}
-            if key == ("GET", "/status"):
+            if key == ("GET", "/gs/status"):
                 return 200, self.status_fn()
-            if key == ("GET", "/link"):
-                return 200, self._link_view()
-            if key == ("PATCH", "/link"):
-                sparse = self._json(body)
-                self.schema.validate_link_patch(sparse)
-                self.store.patch(sparse)
-                return 200, self.store.pending().get("link", {})
-            if key == ("POST", "/link/apply"):
-                apply_to = self._json(body).get("applyTo", "both")
-                return 200, self.link.apply_link(apply_to)
             return 404, {"error": "not found"}
         except SchemaError as e:
             return 400, {"error": str(e)}
@@ -79,30 +76,67 @@ class Api:
     def _apply_gs(self):
         pending = self.store.pending()
         effective = self.store.effective()
-        # Guard: link drift must go through /link/apply (drone coordination).
-        if pending.get("link") != effective.get("link"):
-            return 409, {"error": "link changed; use POST /link/apply"}
         self.schema.validate_effective(pending)
 
-        # Anything outside dynamicLink/pixelpilot (link already equal) needs the
-        # runner. (probe carries no config now; its lifecycle rides dynamicLink.)
-        wfb_changed = (self._without(pending, "dynamicLink", "pixelpilot")
-                       != self._without(effective, "dynamicLink", "pixelpilot"))
-        if wfb_changed:
+        link_changed = pending.get("link") != effective.get("link")
+        wfb_changed = (self._without(pending, "dynamicLink", "pixelpilot",
+                                     "idrForward", "link")
+                       != self._without(effective, "dynamicLink", "pixelpilot",
+                                        "idrForward", "link"))
+
+        if link_changed or wfb_changed:
+            # Render the cfg the runner reads on a (re)start, before applying.
             self.render_mod.write_cfg(self.cfg_out,
                                       self.render_mod.render_cfg(pending))
-            if not self.runner.restart():
-                self.render_mod.restore_bak(self.cfg_out)
+            if not self._apply_link_local(effective.get("link", {}),
+                                          pending.get("link", {}),
+                                          force_bounce=wfb_changed):
+                self.render_mod.write_cfg(self.cfg_out,
+                                          self.render_mod.render_cfg(effective))
                 self.runner.restart()
                 return 500, {"applied": False,
-                             "error": "runner failed; rolled back to last-good cfg"}
+                             "error": "apply failed; rolled back to last-good cfg"}
 
         self._route_dynamic_link(effective.get("dynamicLink", {}),
                                  pending.get("dynamicLink", {}), pending)
         self._route_pixelpilot(effective.get("pixelpilot", {}),
                                pending.get("pixelpilot", {}), pending)
+        self._route_idr_forward(effective.get("idrForward", {}),
+                                pending.get("idrForward", {}), pending)
         self.store.commit()
+        if self.armer_tick is not None:
+            self.armer_tick()
         return 200, {"applied": True}
+
+    @staticmethod
+    def _bw_class(width):
+        return 40 if width == 40 else 20
+
+    def _can_retune_live(self, old, new):
+        """Live iw retune is safe only when changes are limited to fields iw can
+        apply on a running monitor card AND the radiotap BW class is unchanged.
+        beamforming is reconciled by the armer, so it is excluded here."""
+        if self.retune is None:
+            return False
+        changed = {k for k in set(old) | set(new)
+                   if k != "beamforming" and old.get(k) != new.get(k)}
+        if not changed <= {"channel", "width", "txPowerDbm", "region"}:
+            return False
+        return self._bw_class(old.get("width")) == self._bw_class(new.get("width"))
+
+    def _apply_link_local(self, old_link, new_link, force_bounce=False):
+        """Apply the GS-local link delta: live retune when possible, else bounce.
+        No drone push (client orchestrates). Returns True on success."""
+        non_bf_changed = any(k != "beamforming" and old_link.get(k) != new_link.get(k)
+                             for k in set(old_link) | set(new_link))
+        if not force_bounce and non_bf_changed and self._can_retune_live(old_link, new_link):
+            if self.retune(new_link):
+                return True
+            # live retune failed -> fall back to a bounce
+        return self.runner.restart()
+
+    def _route_idr_forward(self, old, new, pending):
+        return  # implemented in Part C (Task C3)
 
     def _route_dynamic_link(self, dl_old, dl_new, pending):
         """Start/stop/reconfigure the in-process controller AND the observe-only
@@ -143,12 +177,6 @@ class Api:
                 self.pixelpilot.start()
         elif was and not now:
             self.pixelpilot.stop()
-
-    def _link_view(self):
-        link = dict(self.store.effective().get("link", {}))
-        reachable = self.drone.healthz()
-        link["droneReachable"] = reachable
-        return link
 
     def _proxy(self, method, path, body):
         sub = path[len("/air"):]  # "/config", "/apply", "/status"
