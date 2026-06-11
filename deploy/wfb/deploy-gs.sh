@@ -34,33 +34,30 @@ remote "
     [ -f /root/fpvd-gs-rollback/wfb/protocols.py.orig ] || cp -a $SITE/wfb_ng/protocols.py /root/fpvd-gs-rollback/wfb/protocols.py.orig
 "
 
-echo "==> staging + swap binaries"
+echo "==> staging + swap binaries + protocols.py"
 for b in wfb_rx wfb_tx; do
-    # shellcheck disable=SC2086
     scp -O "${SSH_OPTS[@]}" "$WFB_BIN/$b" "$TARGET:/usr/bin/$b.new"
 done
+scp -O "${SSH_OPTS[@]}" "$WFB_SRC/wfb_ng/protocols.py" "$TARGET:$SITE/wfb_ng/protocols.py.new"
 
-echo "==> deploying protocols.py"
-# shellcheck disable=SC2086
-scp -O "${SSH_OPTS[@]}" "$WFB_SRC/wfb_ng/protocols.py" "$TARGET:$SITE/wfb_ng/protocols.py"
-
-remote '
+remote "
     set -e
     for b in wfb_rx wfb_tx; do
-        chmod +x /usr/bin/$b.new && mv -f /usr/bin/$b.new /usr/bin/$b
+        chmod +x /usr/bin/\$b.new && mv -f /usr/bin/\$b.new /usr/bin/\$b
     done
+    mv -f $SITE/wfb_ng/protocols.py.new $SITE/wfb_ng/protocols.py
     # Stale interleav-fork config keys: the new python ignores unknown keys,
     # but warn so the operator can clean /etc/wifibroadcast.cfg.
-    grep -n "interleave_depth" /etc/wifibroadcast.cfg 2>/dev/null \
-        && echo "NOTE: stale interleave_depth keys in /etc/wifibroadcast.cfg (harmless, consider removing)" || true
-    # Explicit stop + settle + clear stale pidfile, then start — NOT `restart`.
-    # `restart` is stop;sleep 1;start: the 1s settle is too short and races.
+    grep -n \"interleave_depth\" /etc/wifibroadcast.cfg 2>/dev/null \
+        && echo \"NOTE: stale interleave_depth keys in /etc/wifibroadcast.cfg (harmless, consider removing)\" || true
+    # Explicit stop + settle + clear stale pidfile, then start — NOT \`restart\`.
+    # \`restart\` is stop;sleep 1;start: the 1s settle is too short and races.
     # Mirrors gs/deploy.sh fix (the documented restart race — observed live 2026-06-07).
     /etc/init.d/S99fpvd stop >/dev/null 2>&1 || true
     sleep 2
     rm -f /var/run/fpvd.pid
     /etc/init.d/S99fpvd start
-'
+"
 
 echo "==> verify"
 sleep 5
