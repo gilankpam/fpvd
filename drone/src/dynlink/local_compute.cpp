@@ -35,7 +35,6 @@ void applyLocalCompute(const DlRuntimeConfig& cfg, Decision& d) {
         d.bitrateKbps = computeBitrateKbps(wireTarget, k, n,
                                            b.minBitrateKbps, b.maxBitrateKbps);
     }
-    d.depth       = kInterleaveDepth;
     d.fps         = sat8(b.fps);
     d.txPowerDbm  = txpowerDbmForMcs(d.mcs);   // per-MCS PA-linearity backoff curve
 }

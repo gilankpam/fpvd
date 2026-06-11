@@ -125,18 +125,6 @@ TEST_CASE("validate: dynamicLink.safe k<n and both in [1,32]") {
     CHECK(errs3[0].path == "dynamicLink.safe.fec");
 }
 
-TEST_CASE("validate: dynamicLink.safe.depth in [1,8]") {
-    Config c{}; c.dynamicLink.safe.depth = 0;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.depth");
-
-    Config c2{}; c2.dynamicLink.safe.depth = 9;
-    auto errs2 = validate(c2);
-    REQUIRE(errs2.size() == 1);
-    CHECK(errs2[0].path == "dynamicLink.safe.depth");
-}
-
 TEST_CASE("validate: dynamicLink.safe.bandwidth must be 10, 20, or 40") {
     Config c{}; c.dynamicLink.safe.bandwidth = 80;
     auto errs = validate(c);

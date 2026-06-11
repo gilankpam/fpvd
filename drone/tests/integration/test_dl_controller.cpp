@@ -60,7 +60,7 @@ struct FakeWfbTx {
     std::vector<std::pair<uint8_t, uint8_t>> fec;     // (k, n)
     std::vector<std::pair<uint8_t, uint8_t>> radio;    // (mcs, bandwidth)
     std::vector<std::pair<uint8_t, bool>>    radioFlags; // (stbc, ldpc) per setRadio
-    std::vector<uint8_t> depth;
+    std::atomic<int> unknownCmds{0};
 
     FakeWfbTx() {
         fd = ::socket(AF_INET, SOCK_DGRAM, 0);
@@ -105,8 +105,9 @@ struct FakeWfbTx {
                                        req.u.set_radio.bandwidth);
                     radioFlags.emplace_back(req.u.set_radio.stbc,
                                             req.u.set_radio.ldpc);
-                } else if (req.cmd_id == fpvd::kWfbCmdSetInterleaveDepth) {
-                    depth.push_back(req.u.set_interleave_depth.depth);
+                } else {
+                    // interleave (cmd 5) is retired; any unlisted cmd is a regression.
+                    unknownCmds.fetch_add(1);
                 }
             }
 
@@ -232,7 +233,6 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     snap.minIdrIntervalMs      = 500;
     snap.applyStaggerMs        = 0;         // single-shot dispatch
     snap.applySubPaceMs        = 0;
-    snap.interleavingSupported = false;
     snap.osdEnabled            = false;
     snap.osdDebugLatency       = false;
     snap.debug                 = false;
@@ -242,7 +242,7 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     snap.linkBandwidth         = 40;        // A1: bandwidth from config, not wire
     snap.iface                 = "wlan-test-nonexistent";  // iw will fail, not hang
     snap.safe = SafeDefaults{
-        /*mcs=*/1, /*k=*/8, /*n=*/12, /*depth=*/0,
+        /*mcs=*/1, /*k=*/8, /*n=*/12,
         /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
@@ -264,7 +264,6 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     d.txPowerDbm  = 10;
     d.k           = 4;
     d.n           = 6;
-    d.depth       = 0;
     d.bitrateKbps = 6000;
     d.fps         = 60;
     // Resend until phase-1 dispatch is observed: the controller binds its
@@ -291,6 +290,10 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     // Both the decision and the safe push carried stbc=1/ldpc=1 — the loop
     // never overrides the operator's choice, even during recovery.
     CHECK(wfb.allRadioFlags(/*stbc=*/1, /*ldpc=*/true));
+
+    // Neither the apply path nor the watchdog-safe path may emit a retired
+    // (or otherwise unlisted) control command.
+    CHECK(wfb.unknownCmds.load() == 0);
 
     c.stop();
     CHECK(c.status().running == false);
@@ -319,13 +322,12 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
     snap.minIdrIntervalMs      = 500;
     snap.applyStaggerMs        = 120;       // non-zero -> staggered dispatch
     snap.applySubPaceMs        = 0;
-    snap.interleavingSupported = false;
     snap.osdEnabled            = false;
     snap.osdDebugLatency       = false;
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{1, 8, 12, 0, 20, 5, 2000};
+    snap.safe = SafeDefaults{1, 8, 12, 20, 5, 2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -335,7 +337,7 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
         d.magic = kWireMagic; d.version = kWireVersion;
         d.sequence = seq; d.timestampMs = 1;
         d.mcs = mcs; d.bandwidth = 20; d.txPowerDbm = 10;
-        d.k = 4; d.n = 6; d.depth = 0;
+        d.k = 4; d.n = 6;
         d.bitrateKbps = br; d.fps = 60;
         return d;
     };
@@ -410,13 +412,12 @@ TEST_CASE("controller IDR: datagram -> requestIdr; second immediate datagram is 
     snap.minIdrIntervalMs      = 500;       // 500 ms throttle window
     snap.applyStaggerMs        = 0;
     snap.applySubPaceMs        = 0;
-    snap.interleavingSupported = false;
     snap.osdEnabled            = false;
     snap.osdDebugLatency       = false;
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{1, 8, 12, 0, 20, 5, 2000};
+    snap.safe = SafeDefaults{1, 8, 12, 20, 5, 2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -476,14 +477,13 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     snap.minIdrIntervalMs      = 500;
     snap.applyStaggerMs        = 0;
     snap.applySubPaceMs        = 0;
-    snap.interleavingSupported = false;
     snap.osdEnabled            = false;
     snap.osdDebugLatency       = false;
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.iface                 = "wlan-test-nonexistent";
     snap.safe = SafeDefaults{
-        /*mcs=*/1, /*k=*/8, /*n=*/12, /*depth=*/0,
+        /*mcs=*/1, /*k=*/8, /*n=*/12,
         /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
@@ -497,7 +497,7 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
         d.magic = kWireMagic; d.version = kWireVersion;
         d.sequence = 1; d.timestampMs = 1;
         d.mcs = 3; d.bandwidth = 20; d.txPowerDbm = 10;
-        d.k = 4; d.n = 6; d.depth = 0;
+        d.k = 4; d.n = 6;
         d.bitrateKbps = 4000; d.fps = 60;
         // Wire k/n ignored (Phase 3a): mcs=3/bw=20 -> drone k=6, n=9.
         bool gotFec = waitFor([&] {
@@ -561,7 +561,6 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
     snap.minIdrIntervalMs = 500;
     snap.applyStaggerMs   = 0;
     snap.applySubPaceMs   = 0;
-    snap.interleavingSupported = false;     // (field removed in a later task)
     snap.osdEnabled = false; snap.osdDebugLatency = false; snap.debug = false;
     snap.roiQp = RoiCurve{6000, 2000, -24, 3};
     snap.stbc = true; snap.ldpc = true;
@@ -570,7 +569,7 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
     snap.swfec = true;
     snap.swfecOverheadPct = 50;
     snap.swfecDeadlineMs  = 30;
-    snap.safe = SafeDefaults{/*mcs=*/1, /*k=*/8, /*n=*/12, /*depth=*/0,
+    snap.safe = SafeDefaults{/*mcs=*/1, /*k=*/8, /*n=*/12,
                              /*bandwidth=*/20, /*txPowerDbm=*/5,
                              /*bitrateKbps=*/2000};
     snap.safe.overheadPct = 100;            // trailing NSDMI fields, set by name
@@ -594,6 +593,11 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
 
     // Watchdog silence -> safe push uses safe.overheadPct/deadlineMs.
     CHECK(waitFor([&] { return wfb.sawFec(100, 35); }, 2000));
+    CHECK_FALSE(wfb.sawFec(8, 12));  // rs tuple must NOT be pushed in swfec mode
+
+    // Neither the apply path nor the watchdog-safe path may emit a retired
+    // (or otherwise unlisted) control command.
+    CHECK(wfb.unknownCmds.load() == 0);
 
     c.stop();
 }

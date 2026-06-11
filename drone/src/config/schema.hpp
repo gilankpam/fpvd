@@ -116,14 +116,13 @@ struct DynamicLinkSafe {
     int n{12};
     int overheadPct{100};   // swfec-mode safe recovery: more repair at the low rung (0..255, uint8 wire)
     int deadlineMs{30};     // 1..255 (uint8 wire)
-    int depth{1};
     int bandwidth{20};
     int txPowerDbm{20};
     int bitrateKbps{2000};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkSafe, mcs, k, n,
                                                overheadPct, deadlineMs,
-                                               depth, bandwidth, txPowerDbm,
+                                               bandwidth, txPowerDbm,
                                                bitrateKbps)
 
 struct DynamicLinkOsd {
@@ -163,7 +162,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkFec,
 struct DynamicLink {
     bool enabled{false};
     int healthTimeoutMs{10000};
-    bool interleavingSupported{true};
     int minIdrIntervalMs{500};
     int applyStaggerMs{50};
     int applySubPaceMs{5};
@@ -175,7 +173,6 @@ struct DynamicLink {
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled,
                                                healthTimeoutMs,
-                                               interleavingSupported,
                                                minIdrIntervalMs, applyStaggerMs,
                                                applySubPaceMs,
                                                osd, roiQp, safe, bitrate, fec)

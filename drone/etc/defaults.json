@@ -55,7 +55,6 @@
   "dynamicLink": {
     "enabled": false,
     "healthTimeoutMs": 10000,
-    "interleavingSupported": true,
     "minIdrIntervalMs": 500,
     "applyStaggerMs": 50,
     "applySubPaceMs": 5,
@@ -75,7 +74,6 @@
       "n": 12,
       "overheadPct": 100,
       "deadlineMs": 30,
-      "depth": 1,
       "bandwidth": 20,
       "txPowerDbm": 20,
       "bitrateKbps": 2000

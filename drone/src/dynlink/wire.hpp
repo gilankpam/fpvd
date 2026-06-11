@@ -20,7 +20,6 @@ struct Decision {
     int8_t   txPowerDbm{};
     uint8_t  k{};
     uint8_t  n{};
-    uint8_t  depth{};
     uint16_t bitrateKbps{};
     uint8_t  fps{};
 };

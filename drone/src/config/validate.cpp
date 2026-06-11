@@ -128,8 +128,6 @@ std::vector<ValidationError> validate(const Config& c) {
             dl.safe.n < 1 || dl.safe.n > 32 ||
             dl.safe.k >= dl.safe.n)
             errs.push_back({"dynamicLink.safe.fec", "require 1<=k<n<=32"});
-        if (dl.safe.depth < 1 || dl.safe.depth > 8)
-            errs.push_back({"dynamicLink.safe.depth", "must be 1..8"});
         if (dl.safe.bandwidth != 10 && dl.safe.bandwidth != 20 &&
             dl.safe.bandwidth != 40)
             errs.push_back({"dynamicLink.safe.bandwidth", "must be 10, 20, or 40"});
