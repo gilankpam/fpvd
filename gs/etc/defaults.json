@@ -2,7 +2,7 @@
   "link": {
     "channel": 132,
     "width": 40,
-    "txpower": null,
+    "txPowerDbm": null,
     "region": "US",
     "linkId": 7669206,
     "beamforming": { "enabled": false },
