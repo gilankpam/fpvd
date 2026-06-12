@@ -75,7 +75,9 @@ public:
     int version() const { return version_; }
     const LastApply& lastApply() const { return lastApply_; }
     const RadioInfo& radio() const { return radio_; }
-    BfStatus beamformingStatus() const { return bf_.status(); }
+    BfStatus beamformingStatus() const {
+        return bf_.statusWithPrimary(radio_.iface.empty() ? "wlan0" : radio_.iface);
+    }
     dynlink::DlStatus dynamicLinkStatus() const { return dl_.status(); }
     std::chrono::steady_clock::time_point startedAt() const { return startedAt_; }
 

@@ -2,7 +2,7 @@
 # radio-tune.sh — apply ONE live radio change without restarting wfb.
 # Usage: radio-tune.sh <channel|txpower|mtu>
 # Inputs (env): FPVD_IFACE, FPVD_DRIVER, FPVD_CHANNEL, FPVD_WIDTH,
-#               FPVD_TXPOWER, FPVD_MTU
+#               FPVD_TXPOWER_DBM, FPVD_MTU
 set -eu
 
 action="${1:-}"
@@ -19,11 +19,9 @@ case "$action" in
         esac
         ;;
     txpower)
-        if [ "${FPVD_DRIVER:-}" = "88XXau" ]; then
-            iw "$iface" set txpower fixed $(( ${FPVD_TXPOWER:-1} * -100 ))
-        else
-            iw "$iface" set txpower fixed $(( ${FPVD_TXPOWER:-1} *  50 ))
-        fi
+        # FPVD_TXPOWER_DBM is dBm; iw wants fixed mBm (dBm * 100). Matches the
+        # adaptive-link radio path (radio_txpower.cpp).
+        iw "$iface" set txpower fixed $(( ${FPVD_TXPOWER_DBM:-20} * 100 ))
         ;;
     mtu)
         ip link set "$iface" mtu "${FPVD_MTU:-1500}"

@@ -4,7 +4,7 @@
 
 The server binds on `0.0.0.0:8080` by default (overridable with `--port`). There is no authentication — the API is reachable over the wfb-ng tunnel (`10.5.0.10/24`) and any LAN interface, all of which are assumed to be private networks. Clients include ground-station apps, `curl` scripts, and the `wfbng-dynamic-link` ground-station component.
 
-> **Two daemons.** This repo ships two `fpvd` builds: the **drone** daemon (C++, `drone/`) documented in the sections below, and the **ground-station** daemon (Python, `gs/`) documented in [Ground-station API (fpvd-GS)](#ground-station-api-fpvd-gs). They share most of the HTTP surface (`/config`, `/apply`, `/reset`, `/defaults`, `/status`, `/healthz`) and the stage→apply lifecycle, but the GS has a different config schema (radio-only, no encoder/telemetry/recording) and adds two GS-only endpoint groups: a `/link` coordinator and an opaque `/air/*` proxy to the drone. Unless a section is under that heading, it describes the **drone** daemon.
+> **Two daemons.** This repo ships two `fpvd` builds: the **drone** daemon (C++, `drone/`) documented in the sections below, and the **ground-station** daemon (Python, `gs/`) documented in [Ground-station API (fpvd-GS)](#ground-station-api-fpvd-gs). They share the stage→apply lifecycle and config-object conventions, but differ in routing: the drone serves its config tree at the root (`/config`, `/apply`, `/reset`, `/defaults`, `/status`), while the GS serves its own config tree under `/gs/*` (`/gs/config`, `/gs/apply`, `/gs/reset`, `/gs/defaults`, `/gs/status`) and adds an opaque `/air/*` proxy that forwards to the drone daemon. `GET /healthz` stays at the root on both. The GS also has a different config schema (radio-only, no encoder/telemetry/recording). Unless a section is under that heading, it describes the **drone** daemon.
 
 ---
 
@@ -93,7 +93,7 @@ curl http://127.0.0.1:8080/defaults
 
 ```json
 {
-  "link": {"channel": 161, "width": 20, "txpower": 1, "mcs": 2,
+  "link": {"channel": 161, "width": 20, "txPowerDbm": 20, "mcs": 2,
            "fec": {"k": 8, "n": 12}, "stbc": false, "ldpc": false,
            "linkId": 7669206, "mtu": 1500, "wlanAdapter": null},
   "video": {"codec": "h265", "resolution": "1920x1080", "fps": 60,
@@ -187,7 +187,7 @@ curl -X PATCH http://127.0.0.1:8080/config \
 
 ```jsonc
 {
-  "link": {"channel": 161, "width": 20, "txpower": 1, "mcs": 2,
+  "link": {"channel": 161, "width": 20, "txPowerDbm": 20, "mcs": 2,
            "fec": {"k": 8, "n": 12}, "stbc": false, "ldpc": false,
            "linkId": 7669206, "mtu": 1500, "wlanAdapter": null},
   "video": {"codec": "h265", "resolution": "1920x1080", "fps": 90,
@@ -387,7 +387,7 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 "link": {
   "channel": 161,       // integer, 1..200 — Wi-Fi channel number
   "width": 20,          // integer, 20 or 40 — channel width in MHz
-  "txpower": 1,         // integer, 1..63 — TX power (driver units)
+  "txPowerDbm": 20,     // integer, -10..30 — TX power in dBm (converted x100 to mBm at the radio edge)
   "mcs": 2,             // integer, 0..7 — MCS index
   "fec": {
     "k": 8,             // integer, 1..31 — FEC data shards (k < n, n ≤ 32)
@@ -406,7 +406,7 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 |-------|------|---------|--------------|
 | `channel` | integer | `161` | 1 – 200 |
 | `width` | integer | `20` | `20` or `40` |
-| `txpower` | integer | `1` | 1 – 63 |
+| `txPowerDbm` | integer | `20` | -10 – 30 |
 | `mcs` | integer | `2` | 0 – 7 |
 | `fec.k` | integer | `8` | 1 – 31, must be < `fec.n` |
 | `fec.n` | integer | `12` | 2 – 32, must be > `fec.k` |
@@ -601,7 +601,7 @@ An object whose keys are service names and whose values are service definitions.
 
 ## Ground-station adaptive link controller (`fpvdgs`)
 
-The adaptive link has two halves. The drone runs the **applier** — the [`dynamicLink`](#dynamiclink--adaptive-link-controller) block in the Config schema above — which receives decisions and applies them to the radio and encoder. The **controller** (the brain that *decides*) runs on the ground station as a separate daemon, `fpvdgs`, with its own HTTP+JSON API on the GS (same shapes as this document: `GET`/`PATCH /config`, `POST /apply`, `GET /status`, plus an opaque `/air/*` proxy to the drone fpvd).
+The adaptive link has two halves. The drone runs the **applier** — the [`dynamicLink`](#dynamiclink--adaptive-link-controller) block in the Config schema above — which receives decisions and applies them to the radio and encoder. The **controller** (the brain that *decides*) runs on the ground station as a separate daemon, `fpvdgs`, with its own HTTP+JSON API on the GS (same shapes as this document, but rooted under `/gs/*`: `GET`/`PATCH /gs/config`, `POST /gs/apply`, `GET /gs/status`, plus an opaque `/air/*` proxy to the drone fpvd).
 
 The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the dual-gate MCS selector + trailing FEC/bitrate loop, and emits decision packets over UDP to the drone applier (`droneAddr:dronePort`, default `:9999`). It is configured by the GS daemon's own `dynamicLink` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
 
@@ -619,8 +619,6 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
   "dronePort": 9999,           // integer, 1..65535 — drone dynamic-link UDP listener port
   "videoStreamId": "video",    // string — substring matched against the wfb stats record id to
                                //   select the VIDEO rx stream (mavlink/tunnel rx are ignored)
-  "idrForward": true,          // boolean — run the IDR-token relay while the controller is active
-  "idrPort": 11223,            // integer, 1..65535 — IDR relay port (127.0.0.1 listen + drone forward)
   "tuning": {}                 // object — opaque passthrough of advanced policy knobs (see below)
 }
 ```
@@ -636,11 +634,13 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
 | `droneAddr` | string \| null | `null` | UDP address; `null` ⇒ host parsed from `drone.endpoint` |
 | `dronePort` | integer | `9999` | 1 – 65535 |
 | `videoStreamId` | string | `"video"` | non-empty string |
-| `idrForward` | boolean | `true` | — |
-| `idrPort` | integer | `11223` | 1 – 65535 |
 | `tuning` | object | `{}` | see [Tuning passthrough](#tuning-passthrough) |
 
-**Operating model.** Enabling, disabling, or tuning is applied at runtime via `PATCH /config` + `POST /apply` with **no wfb restart** — the GS runner is never bounced for `dynamicLink`-only changes. The controller reads wfb-ng stats on `:8103` (fpvd renders `log_interval = 100` so the feed is 10 Hz). The drone side must be armed **independently** (its own `dynamicLink.enabled`, reachable via the GS `/air` proxy); `GET /status.dynamicLink` reports the controller state plus a `drone` sub-object (`reachable`, `dynamicLinkActive`, `hello`) so a GS-armed/drone-not mismatch is visible.
+> **The IDR-token relay moved out of `dynamicLink`.** It is now a top-level [`idrForward`](#idrforward--idr-token-relay) block that runs **independently** of the controller. The old `dynamicLink.idrForward` (bool) and `dynamicLink.idrPort` keys are gone.
+
+Note `txpower.min`/`.max` are the **controller's** dBm request range and are unrelated to the static [`link.txPowerDbm`](#gs-config-schema) key.
+
+**Operating model.** Enabling, disabling, or tuning is applied at runtime via `PATCH /gs/config` + `POST /gs/apply` with **no wfb restart** — the GS runner is never bounced for `dynamicLink`-only changes. The controller reads wfb-ng stats on `:8103` (fpvd renders `log_interval = 100` so the feed is 10 Hz). The drone side must be armed **independently** (its own `dynamicLink.enabled`, applied via the GS `/air` proxy — the client orchestrates both halves). `GET /gs/status.dynamicLink` reports the GS controller state only (no drone round-trip); to check the drone's own dynamic-link/adapter state and detect a GS-armed/drone-not mismatch, the client reads `GET /air/status`.
 
 **`videoStreamId`.** The wfb stats feed interleaves rx records for every service (`video rx`, `mavlink rx`, `tunnel rx`). The policy must be driven by the **video** stream only — the low-rate uplink streams would trip the starvation detector and pin MCS at the floor. The default `"video"` substring matches the video record id.
 
@@ -662,6 +662,26 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
 A complete, production-tuned example for the BL-M8812EU2 airframe ships at **`deploy/gs/config.json`** (installed as the GS overlay on first deploy). Unknown or legacy keys are ignored with a log warning.
 
 > **Tip:** the controller computes the FEC block size `k` from the target bitrate, so a high-bitrate (high-MCS) link uses larger FEC blocks, which raises block-fill latency. If steady latency matters more than FEC granularity, raise `tuning.fec.blocks_per_frame` and/or lower `tuning.fec.k_bounds.max`. Also ensure the link runs at the intended channel **width** — a 10 MHz channel has half the airtime of 20 MHz, so a bitrate sized for 20 MHz will saturate and bufferbloat at 10 MHz.
+
+## `idrForward` — IDR-token relay
+
+A top-level GS config block (a **sibling** of `dynamicLink` and `pixelpilot`) that runs the IDR/keyframe-token relay. It is **independent of `dynamicLink.enabled`**: it forwards PixelPilot keyframe/IDR tokens from `0.0.0.0:<port>` to `<droneHost>:<port>`, where `droneHost` is derived from `drone.endpoint`, bridging PixelPilot keyframe requests to the drone's `idr_listen`.
+
+```jsonc
+"idrForward": {
+  "enabled": true,   // boolean — run the relay (independent of dynamicLink)
+  "port": 11223      // integer, 1..65535 — UDP port (0.0.0.0 listen + drone forward)
+}
+```
+
+| Field | Type | Default | Valid values |
+|-------|------|---------|--------------|
+| `enabled` | boolean | `true` | — |
+| `port` | integer | `11223` | 1 – 65535 |
+
+**Runtime.** Toggle `idrForward.enabled` at runtime via `PATCH /gs/config` + `POST /gs/apply` (no wfb bounce). A `port` change takes effect on **daemon restart**.
+
+> **Migration:** the old `dynamicLink.idrForward` (bool) and `dynamicLink.idrPort` (int) keys are removed; their behavior now lives in this top-level block and no longer depends on the controller being armed.
 
 ---
 
@@ -772,7 +792,7 @@ To prevent this, `PATCH /config` rejects any body that touches the following pat
 | Locked path | Owned by |
 |-------------|----------|
 | `link.mcs` | MCS index sent via `CMD_SET_RADIO` |
-| `link.txpower` | TX power via `iw set txpower` |
+| `link.txPowerDbm` | TX power via `iw set txpower` |
 | `link.fec` | FEC shards `k` and `n` via `CMD_SET_FEC` (entire subtree) |
 | `link.width` | Channel width via `CMD_SET_RADIO` |
 | `video.bitrate` | Encoder bitrate via encoder HTTP API |
@@ -895,33 +915,38 @@ Binds `0.0.0.0:8080` (same posture as the drone). Source of truth: `/etc/fpvd/{d
 | | Drone | Ground station |
 |--|--|--|
 | Config schema | link + video + image + telemetry + recording + dynamicLink + services | **radio-only**: `link` + `wfb` + `drone` |
-| `link` fields | channel, width, txpower, **mcs, fec, stbc, ldpc**, mtu, … | channel, width, txpower, region, linkId, beamforming, wlans — **no mcs/fec/stbc/ldpc** (drone-owned for video; GS uplink uses wfb-ng defaults) |
-| `GET /healthz` body | `{}` | `{"ok": true}` |
+| `link` fields | channel, width, txPowerDbm, **mcs, fec, stbc, ldpc**, mtu, … | channel, width, txPowerDbm, region, linkId, beamforming, wlans — **no mcs/fec/stbc/ldpc** (drone-owned for video; GS uplink uses wfb-ng defaults) |
+| Config tree route | `/config`, `/apply`, … (root) | `/gs/config`, `/gs/apply`, … (`/gs/*`) |
+| `GET /healthz` body | `{}` | `{"ok": true}` (both at root) |
 | Error body | `{error, message, details}` | `{"error": "<message>"}` |
-| Mutating link params | `PATCH /config` | **`/link` only** (`/config` rejects `link.*`) |
-| Extra endpoints | — | `/link`, `/link/apply`, `/air/*` |
+| Mutating link params | `PATCH /config` | `PATCH /gs/config` (`link` is a normal mutable block) |
+| Extra endpoints | — | `/air/*` (opaque drone proxy) |
 
 ## Shared endpoints (GS behavior)
 
-`GET /healthz` → `200 {"ok": true}`. `GET /defaults` → the GS baseline. `GET /config[?pending=true]` → effective/pending GS config. `POST /reset` → `{"reset": true}` (drops the overlay, re-renders, bounces the runner).
+`GET /healthz` → `200 {"ok": true}` (root). `GET /gs/defaults` → the GS baseline. `GET /gs/config[?pending=true]` → effective/pending GS config. `POST /gs/reset` → `{"reset": true}` (drops the overlay, re-renders, bounces the runner).
 
-### PATCH /config (GS)
+### PATCH /gs/config
 
-Deep-merges a partial GS config into pending. **Rejects any `link.*` key** (those are mutated only via `/link`, to keep the radio from desyncing with the drone) and rejects unknown top-level keys.
+Deep-merges a partial GS config into pending. `link` is a **normal mutable block** — a `PATCH /gs/config {"link": {...}}` is accepted (it is no longer rejected). Unknown top-level keys are rejected.
 
 ```bash
-curl -X PATCH http://127.0.0.1:8080/config -H 'content-type: application/json' \
+curl -X PATCH http://127.0.0.1:8080/gs/config -H 'content-type: application/json' \
   -d '{"wfb":{"mavlink":{"peer":"connect://127.0.0.1:14550"}}}'
+
+# link is just another block:
+curl -X PATCH http://127.0.0.1:8080/gs/config -H 'content-type: application/json' \
+  -d '{"link":{"channel":100,"width":20}}'
 ```
 
 | Code | Meaning |
 |------|---------|
 | 200 | Patch accepted; body is the updated pending config. |
-| 400 | `{"error":"link.* is read-only via /config; use /link"}` or `{"error":"unknown config keys: [...]"}`. |
+| 400 | `{"error":"unknown config keys: [...]"}`, or a link validation error (e.g. enabling beamforming on a GS card without a `bf_monitor_conf` node). |
 
-### POST /apply (GS)
+### POST /gs/apply
 
-Validates pending, renders the cfg, and **bounces only the runner** (a brief RX drop), committing only after the runner is back; on failure it restores the last-good cfg and does not commit.
+Validates pending, renders the cfg, and applies. A link change applies with a **live `iw` retune** when possible (channel / width / `txPowerDbm` / region with no 40 MHz-class crossing); otherwise it **bounces the runner** (a brief RX drop). On failure it restores the last-good cfg and does not commit. The GS applies **only its own side** — it never pushes to the drone.
 
 ```jsonc
 {"applied": true}
@@ -929,11 +954,10 @@ Validates pending, renders the cfg, and **bounces only the runner** (a brief RX 
 
 | Code | Meaning |
 |------|---------|
-| 200 | `{"applied": true}` — committed; runner bounced and back up. |
-| 409 | `{"error":"link changed; use POST /link/apply"}` — pending has an un-applied `link` change; apply it via `/link/apply` so the drone stays coordinated. |
+| 200 | `{"applied": true}` — committed (live retune or runner bounce). |
 | 500 | `{"applied": false, "error":"runner failed; rolled back to last-good cfg"}`. |
 
-### GET /status (GS)
+### GET /gs/status
 
 ```jsonc
 {
@@ -944,60 +968,57 @@ Validates pending, renders the cfg, and **bounces only the runner** (a brief RX 
     {"wlan": "wlx84fc146c36e6", "type": "monitor", "channel": 132,
      "freqMhz": 5660, "widthMhz": 40, "txpowerDbm": 19.0}
   ],
-  "link":   {"linkId": 7669206, "droneReachable": true, "inSync": null}
+  "link":   {"linkId": 7669206},
+  "beamforming": {"enabled": false, "localMac": "84:fc:14:6c:36:e6"}
 }
 ```
 
+- **`/gs/status` is GS-local** — it makes no drone round-trip, so it stays fast even when the drone is slow/unreachable. For drone reachability and the drone's own dynamic-link/adapter state, the client calls **`GET /air/status`**.
 - `runner` — the supervised wfb runner: `restarts` counts operator bounces, `autoRestarts` counts crash auto-restarts, `fault` is the crash-loop guard.
 - `radio` — one entry per wlan, parsed from `iw dev <wlan> info`.
-- `link.droneReachable` — cached probe of the drone fpvd. `link.inSync` — best-effort: set after an `applyTo:"both"`; `null`/`false` after a GS-only apply even when the widths happen to match (compare against `GET /air/config` to confirm).
+- `beamforming.localMac` — the GS card MAC, read by the client during the beamforming handshake (see [Client orchestration](#client-orchestration-of-cross-device-link-changes)).
 
-## Link coordinator
+## Client orchestration of cross-device link changes
 
-The shared radio params — **channel, width, region, beamforming, linkId** — are owned here, not by `/config`. A change is **GS-local-first**: it always applies on the GS (that is how a link is *established* — e.g. set the GS to the drone's channel to connect), and best-effort pushes the shared subset (`channel`, `width`, `linkId`) to the drone when reachable. It is never gated on the drone.
+There is **no `/link` coordinator** — it was removed. `link` is a normal mutable block on both ends: on the GS via `PATCH /gs/config`, and on the drone via the `/air/*` proxy (`PATCH /air/config`). The GS applies only its own side and never pushes to the drone, so the **client** drives any change that must land on both ends.
 
-### GET /link
-
-Effective overlap params plus `droneReachable`.
-
-```jsonc
-{"channel": 132, "width": 20, "txpower": null, "region": "US",
- "linkId": 7669206, "beamforming": {"enabled": false}, "wlans": "auto",
- "droneReachable": true}
-```
-
-### PATCH /link
-
-Stages overlap params into pending. Accepts **only** `link.*`, only the known link keys; rejects others (`400 {"error":"only link.* allowed via /link"}` / `unknown link keys`).
-
-### POST /link/apply
-
-Applies the staged link change. Body: `{"applyTo": "gs" | "both"}` (default `"both"`).
-
-- `"gs"` — change only the GS (the "tune the GS to a drone state I already know" / recovery path; drone untouched).
-- `"both"` — also push `channel`/`width`/`linkId` to the drone fpvd (`PATCH /config` + `POST /apply` over `drone.endpoint`) when reachable. The drone ACKs then defers its retune; the GS follows. Drone unreachable → degrades to GS-only.
-
-```jsonc
-{"gsApplied": true, "droneApplied": false, "droneReachable": false, "inSync": false}
-```
-
-| Code | Meaning |
-|------|---------|
-| 200 | Applied. Body reports per-end outcome. A drone-unreachable on `applyTo:"both"` is **not** an error — the GS still applies with `droneApplied:false`. |
-| 400 | Value validation failed (e.g. `link.width` not in {20,40}). |
+### Shared link change (channel / width / linkId / region)
 
 ```bash
-# Set the GS to 20 MHz to match a drone already on 20 MHz (GS-only):
-curl -X PATCH http://127.0.0.1:8080/link -H 'content-type: application/json' \
-  -d '{"link":{"width":20}}'
-curl -X POST http://127.0.0.1:8080/link/apply -H 'content-type: application/json' \
-  -d '{"applyTo":"gs"}'
-# {"gsApplied":true,"droneApplied":false,"droneReachable":false,"inSync":false}
+curl -X PATCH http://127.0.0.1:8080/air/config -H 'content-type: application/json' \
+  -d '{"link":{"channel":100,"width":20}}'
+curl -X PATCH http://127.0.0.1:8080/gs/config  -H 'content-type: application/json' \
+  -d '{"link":{"channel":100,"width":20}}'
+curl -X POST  http://127.0.0.1:8080/air/apply        # drone first on a channel/width move
+curl -X POST  http://127.0.0.1:8080/gs/apply         # then GS retunes onto the moved link
 ```
+
+On a channel/width move, apply the **drone first** so the GS retunes onto the link the drone has already moved to. The GS applies its change with a live `iw` retune when possible (channel / width / `txPowerDbm` / region with no 40 MHz-class crossing), else a runner bounce.
+
+### Beamforming enable (client-owned MAC handshake)
+
+```bash
+# 1. read the GS card MAC
+GS_MAC=$(curl -s http://127.0.0.1:8080/gs/status | jq -r .beamforming.localMac)
+
+# 2. drone: point BF at the GS card MAC, and disable STBC
+#    (STBC and TX-beamforming are mutually exclusive on the drone)
+curl -X PATCH http://127.0.0.1:8080/air/config -H 'content-type: application/json' \
+  -d "{\"link\":{\"beamforming\":{\"enabled\":true,\"remoteMac\":\"$GS_MAC\"},\"stbc\":false}}"
+curl -X POST  http://127.0.0.1:8080/air/apply
+
+# 3. GS beamformee self-reconciles to link.beamforming.enabled
+#    (it reads the drone MAC read-only)
+curl -X PATCH http://127.0.0.1:8080/gs/config -H 'content-type: application/json' \
+  -d '{"link":{"beamforming":{"enabled":true}}}'
+curl -X POST  http://127.0.0.1:8080/gs/apply
+```
+
+**Disable:** set `beamforming.enabled:false` on both sides and restore the drone's `link.stbc = true`. Enabling beamforming on a GS card without a `bf_monitor_conf` node is rejected by `/gs/config` validation.
 
 ## Drone proxy — `/air/*`
 
-`GET/PATCH /air/config`, `POST /air/apply`, `GET /air/status` forward the request **opaquely** (no schema parsing) to the drone fpvd at `drone.endpoint`, relaying its response verbatim. This is the single front door for drone-only config (video bitrate, codec, ROI, …) — the GS daemon never models the drone schema.
+`GET/PATCH /air/config`, `POST /air/apply`, `GET /air/status` forward the request **opaquely** (no schema parsing) to the drone fpvd at `drone.endpoint`, relaying its response verbatim. This is the single front door for the drone's own config — both drone-only config (video bitrate, codec, ROI, …) and the drone's `link` block during a [client-orchestrated](#client-orchestration-of-cross-device-link-changes) shared-link or beamforming change. The GS daemon never models the drone schema.
 
 | Code | Meaning |
 |------|---------|
@@ -1017,10 +1038,12 @@ curl -X PATCH http://127.0.0.1:8080/air/config \            # drone-only config
   "link": {
     "channel": 132,          // integer — Wi-Fi channel (must be valid for region)
     "width": 40,             // integer, 20 or 40 — card width (HT20/HT40); must match the drone's video TX width to receive
-    "txpower": null,         // integer (mBm) or null — null keeps the driver default; wfb-ng treats this as mBm
+    "txPowerDbm": null,      // integer dBm, or null — TX power; null keeps the driver default.
+                             //   Converted x100 to mBm at the radio edge (wfb-ng wifi_txpower / iw txpower fixed).
+                             //   Useful range -10..30; the GS does not range-check it (the drone enforces -10..30).
     "region": "US",          // string — CRDA country code
     "linkId": 7669206,       // integer — informational; the actual id is derived from wfb-ng link_domain (matches the drone)
-    "beamforming": {"enabled": false},  // parsed; inert in v1 (future)
+    "beamforming": {"enabled": false},  // GS beamformee; self-reconciles to enabled (reads the drone MAC read-only)
     "wlans": "auto"          // "auto" -> wfb-nics autodetect, or an explicit list ["wlx..", ...]
   },
   "wfb": {
@@ -1028,8 +1051,13 @@ curl -X PATCH http://127.0.0.1:8080/air/config \            # drone-only config
     "mavlink": {"peer": "connect://127.0.0.1:14550"},
     "raw": {}                // passthrough: {section: {key: value}} merged verbatim into the rendered cfg
   },
+  "idrForward": {            // top-level IDR-token relay (sibling of dynamicLink/pixelpilot) — see idrForward section
+    "enabled": true,
+    "port": 11223
+  },
   "drone": {
-    "endpoint": "http://10.5.0.10:8080"  // where /link and /air reach the drone fpvd (over the wfb tunnel)
+    "endpoint": "http://10.5.0.10:8080"  // where the /air proxy reaches the drone fpvd (over the wfb tunnel);
+                                         //   also the source of droneHost for the idrForward relay
   }
 }
 ```
@@ -1038,21 +1066,25 @@ curl -X PATCH http://127.0.0.1:8080/air/config \            # drone-only config
 |-------|------|---------|-------|
 | `link.channel` | integer | `132` | required |
 | `link.width` | integer | `40` | `20` or `40` |
-| `link.txpower` | integer \| null | `null` | mBm; `null` = driver default |
+| `link.txPowerDbm` | integer \| null | `null` | dBm; `null` = driver default. Useful range -10..30 (not GS-range-checked; the drone enforces -10..30). Converted ×100 to mBm at the radio edge. |
 | `link.region` | string | `"US"` | required |
 | `link.linkId` | integer | `7669206` | informational (link_domain-derived) |
-| `link.beamforming.enabled` | boolean | `false` | inert in v1 |
+| `link.beamforming.enabled` | boolean | `false` | GS beamformee; rejected if the card has no `bf_monitor_conf` node |
 | `link.wlans` | `"auto"` \| array | `"auto"` | `wfb-nics` autodetect or explicit list |
 | `wfb.profile` | string | `"gs"` | — |
 | `wfb.mavlink.peer` | string | `connect://127.0.0.1:14550` | — |
 | `wfb.raw` | object | `{}` | passthrough escape hatch |
-| `drone.endpoint` | string | `http://10.5.0.10:8080` | drone fpvd base URL |
+| `idrForward.enabled` | boolean | `true` | run the relay — see [`idrForward`](#idrforward--idr-token-relay) |
+| `idrForward.port` | integer | `11223` | UDP relay port |
+| `drone.endpoint` | string | `http://10.5.0.10:8080` | drone fpvd base URL (and the source of the relay's droneHost) |
 
-There is intentionally **no** `mcs`/`fec`/`ldpc`/`stbc` on the GS: video downlink FEC/modulation is auto-detected by `wfb_rx` (drone-owned), and the GS uplink TX uses wfb-ng's defaults. There are also no `video`/`image`/`telemetry`/`recording`/`services` sections — those are drone-only. (`dynamicLink` and `pixelpilot` are GS-side sections — see below and the GS adaptive-link section above.)
+There is intentionally **no** `mcs`/`fec`/`ldpc`/`stbc` on the GS: video downlink FEC/modulation is auto-detected by `wfb_rx` (drone-owned), and the GS uplink TX uses wfb-ng's defaults. There are also no `video`/`image`/`telemetry`/`recording`/`services` sections — those are drone-only. (`dynamicLink`, `idrForward`, and `pixelpilot` are GS-side sections — see their dedicated sections.)
+
+> **Migration:** `link.txpower` was renamed `link.txPowerDbm` (now dBm, -10..30, not the old driver-unit mBm value). The same rename applies on the drone.
 
 ## PixelPilot managed service
 
-fpvd-GS spawns and supervises the `pixelpilot` display binary (PixelPilot FPV Decoder for Rockchip ≥1.3) as a first-class managed child alongside the wfb data plane. The `pixelpilot` config block models all GS-local launch knobs and flows through the standard `PATCH /config` + `POST /apply` lifecycle with **granular apply**: a `pixelpilot.*` change restarts PixelPilot only (the wfb runner and radio are untouched), and conversely a `link.*` or `wfb.*` change leaves PixelPilot running. Flag order in the rendered argv is canonical (stable); the getopt-style parser accepts any order.
+fpvd-GS spawns and supervises the `pixelpilot` display binary (PixelPilot FPV Decoder for Rockchip ≥1.3) as a first-class managed child alongside the wfb data plane. The `pixelpilot` config block models all GS-local launch knobs and flows through the standard `PATCH /gs/config` + `POST /gs/apply` lifecycle with **granular apply**: a `pixelpilot.*` change restarts PixelPilot only (the wfb runner and radio are untouched), and conversely a `link.*` or `wfb.*` change leaves PixelPilot running. Flag order in the rendered argv is canonical (stable); the getopt-style parser accepts any order.
 
 ### Config block
 
@@ -1088,7 +1120,7 @@ fpvd-GS spawns and supervises the `pixelpilot` display binary (PixelPilot FPV De
 
 | Key | CLI flag | Default | Notes |
 |---|---|---|---|
-| `enabled` | — | `true` | Toggle supervision via `PATCH /config` + `POST /apply`. |
+| `enabled` | — | `true` | Toggle supervision via `PATCH /gs/config` + `POST /gs/apply`. |
 | `bin` | — | `/usr/bin/pixelpilot` | Path to the binary. |
 | `env` | — | `{}` | Extra child-process environment (e.g. `{"LD_LIBRARY_PATH":"/usr/lib/pixelpilot95"}`). Merged over `os.environ` by the supervisor. |
 | `configPath` | `--config` | `/etc/pixelpilot.yaml` | Main pixelpilot config file. |
@@ -1114,21 +1146,21 @@ fpvd-GS spawns and supervises the `pixelpilot` display binary (PixelPilot FPV De
 
 ```bash
 # Change display scale and apply (restarts PixelPilot only):
-curl -X PATCH http://10.18.0.1:8080/config \
+curl -X PATCH http://10.18.0.1:8080/gs/config \
   -H 'content-type: application/json' \
   -d '{"pixelpilot":{"videoScale":1.5}}'
-curl -X POST http://10.18.0.1:8080/apply
+curl -X POST http://10.18.0.1:8080/gs/apply
 
 # Set LD_LIBRARY_PATH for a perf-build lib dir:
-curl -X PATCH http://10.18.0.1:8080/config \
+curl -X PATCH http://10.18.0.1:8080/gs/config \
   -H 'content-type: application/json' \
   -d '{"pixelpilot":{"env":{"LD_LIBRARY_PATH":"/usr/lib/pixelpilot95"}}}'
-curl -X POST http://10.18.0.1:8080/apply
+curl -X POST http://10.18.0.1:8080/gs/apply
 ```
 
 ### Status
 
-`GET /status` includes a `pixelpilot` block alongside `runner`, `radio`, and `link`:
+`GET /gs/status` includes a `pixelpilot` block alongside `runner`, `radio`, and `link`:
 
 ```jsonc
 {
@@ -1152,4 +1184,4 @@ When `enabled` is `false` the block is `{"enabled": false, "running": false}`. `
 
 ## Errors (GS)
 
-Error responses are a single field — `{"error": "<human message>"}` — with HTTP `400` (validation/schema), `404` (no route), `409` (link drift on `/apply`), `500` (apply/runner failure), or `502` (drone unreachable on `/air`).
+Error responses are a single field — `{"error": "<human message>"}` — with HTTP `400` (validation/schema), `404` (no route), `500` (apply/runner failure), or `502` (drone unreachable on `/air`).

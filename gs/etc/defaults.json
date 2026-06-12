@@ -2,7 +2,7 @@
   "link": {
     "channel": 132,
     "width": 40,
-    "txpower": null,
+    "txPowerDbm": null,
     "region": "US",
     "linkId": 7669206,
     "beamforming": { "enabled": false },
@@ -25,9 +25,11 @@
     "droneAddr": null,
     "dronePort": 9999,
     "videoStreamId": "video",
-    "idrForward": true,
-    "idrPort": 11223,
     "tuning": {}
+  },
+  "idrForward": {
+    "enabled": true,
+    "port": 11223
   },
   "pixelpilot": {
     "enabled": true,

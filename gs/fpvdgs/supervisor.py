@@ -25,7 +25,7 @@ from .config import ConfigStore
 from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot
-from .link import LinkCoordinator
+from .idr_relay import IdrRelay, drone_host_from_endpoint
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .probe.config_build import make_probe_snapshot
 from .probe.controller import ProbeController
@@ -34,7 +34,7 @@ from .runner_supervisor import RunnerSupervisor, ProcessSupervisor, resolve_wlan
 
 class App:
     def __init__(self, store, runner, http_server, api, dynlink,
-                 pixelpilot=None, probe=None, armer=None):
+                 pixelpilot=None, probe=None, armer=None, idr_relay=None):
         self.store = store
         self.runner = runner
         self.http = http_server
@@ -43,6 +43,7 @@ class App:
         self.pixelpilot = pixelpilot
         self.probe = probe
         self.armer = armer
+        self.idr_relay = idr_relay
 
     def start(self):
         self.runner.start()
@@ -51,6 +52,9 @@ class App:
         if (self.pixelpilot is not None
                 and self.store.effective().get("pixelpilot", {}).get("enabled", True)):
             self.pixelpilot.start()
+        if (self.idr_relay is not None
+                and self.store.effective().get("idrForward", {}).get("enabled", True)):
+            self.idr_relay.start()
         if self.store.effective().get("dynamicLink", {}).get("enabled"):
             self.dynlink.start()
         if (self.probe is not None
@@ -67,6 +71,8 @@ class App:
         self.dynlink.stop()
         if self.pixelpilot is not None:
             self.pixelpilot.shutdown()
+        if self.idr_relay is not None:
+            self.idr_relay.stop()
         if self.probe is not None:
             self.probe.stop()
         self.runner.shutdown()
@@ -88,7 +94,12 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
                               wlans=wlans, ready_port=ready_port,
                               ready_timeout=ready_timeout, log_path=log_path)
 
-    drone = DroneClient(effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080"))
+    endpoint = effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080")
+    drone = DroneClient(endpoint)
+
+    idr_cfg = effective.get("idrForward", {})
+    idr_relay = IdrRelay(drone_host_from_endpoint(endpoint),
+                         port=int(idr_cfg.get("port", 11223)))
 
     probe_ctrl = ProbeController(make_probe_snapshot(effective), spawn=probe_spawn)
 
@@ -102,47 +113,24 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         log_path="/tmp/pixelpilot.log")
 
     beamforming = BeamformingController()
+
+    def _bf_capable(cfg):
+        wlans = resolve_wlans(cfg)
+        primary = wlans[0] if wlans else None
+        return bool(primary and beamforming.supported(primary))
+    schema.set_bf_capable(_bf_capable)
+
     armer = BeamformingArmer(beamforming, drone, resolve_wlans,
                              lambda: store.effective())
 
-    def renderer_write(eff):
-        render_mod.write_cfg(cfg_out, render_mod.render_cfg(eff))
-
-    # live iw retune of the monitor cards (no process restart) for channel /
-    # 10<->20 width / txpower / region changes; the coordinator falls back to a
-    # runner bounce for changes that need a -B change (crossing 40 MHz) or that
-    # are structural (wlans, linkId, profile, …).
-    link = LinkCoordinator(store, renderer_write, runner, drone,
-                           validate=schema.validate_effective,
-                           retune=lambda lnk: radio.retune(wlans, lnk),
-                           beamforming=beamforming,
-                           wlans_resolver=resolve_wlans)
-
     started = time.monotonic()
 
-    _warned = {"adapter": False}
-
-    def _dynamic_link_status(reachable):
+    def _dynamic_link_status():
+        # GS-local controller state only — no drone round-trip. Clients read
+        # /air/status for the drone's own dynamic-link/adapter state.
         eff_dl = store.effective().get("dynamicLink", {})
         st = dynlink.status()
         st["enabled"] = bool(eff_dl.get("enabled"))
-        drone_active = None
-        adapter_id = None
-        try:
-            ds = drone.get_status()
-            drone_active = ds.get("link", {}).get("dynamicLinkActive")
-            adapter_id = ds.get("radio", {}).get("adapterId")
-        except Exception:
-            pass
-        prof = eff_dl.get("radioProfile", "m8812eu2")
-        if not adapter_matches_profile(adapter_id, prof) and not _warned["adapter"]:
-            log.warning("drone adapter_id %r does not match the configured "
-                        "radioProfile %r — the learned prior is per-card, so a "
-                        "mismatch means it may learn against the wrong profile; "
-                        "check config", adapter_id, prof)
-            _warned["adapter"] = True
-        st["drone"] = {"reachable": reachable,
-                       "dynamicLinkActive": drone_active}
         return st
 
     def _pixelpilot_status():
@@ -157,26 +145,30 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         return {"enabled": True, **probe_ctrl.status()}
 
     def status_fn():
-        wlan_info = {w: status_mod.iw_info(w) for w in resolve_wlans(store.effective())}
-        reachable = drone.healthz()
+        wlans = resolve_wlans(store.effective())
+        wlan_info = {w: status_mod.iw_info(w) for w in wlans}
         eff_link = store.effective().get("link", {})
-        probe = {"reachable": reachable, "linkId": eff_link.get("linkId"),
-                 "inSync": link.in_sync() if link else None}
+        link_info = {"linkId": eff_link.get("linkId")}
         uptime_ms = int((time.monotonic() - started) * 1000)
-        return status_mod.build_status(__version__, runner.state(), wlan_info, probe,
+        primary = wlans[0] if wlans else None
+        return status_mod.build_status(__version__, runner.state(), wlan_info, link_info,
                                        uptime_ms=uptime_ms,
-                                       dynamic_link=_dynamic_link_status(reachable),
+                                       dynamic_link=_dynamic_link_status(),
                                        pixelpilot=_pixelpilot_status(),
                                        probe=_probe_status(),
-                                       beamforming=beamforming.status())
+                                       beamforming=beamforming.status_with_primary(primary))
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
-              drone=drone, link=link, status_fn=status_fn, cfg_out=cfg_out,
-              dynlink=dynlink, pixelpilot=pixelpilot, probe=probe_ctrl)
+              drone=drone, status_fn=status_fn, cfg_out=cfg_out,
+              dynlink=dynlink, pixelpilot=pixelpilot, probe=probe_ctrl,
+              retune=lambda lnk: radio.retune(resolve_wlans(store.effective()), lnk),
+              wlans_resolver=resolve_wlans,
+              armer_tick=armer.tick, idr_relay=idr_relay)
 
     http_server = make_http_server(api, host, port)
     return App(store, runner, http_server, api, dynlink,
-               pixelpilot=pixelpilot, probe=probe_ctrl, armer=armer)
+               pixelpilot=pixelpilot, probe=probe_ctrl, armer=armer,
+               idr_relay=idr_relay)
 
 
 def main(argv=None):

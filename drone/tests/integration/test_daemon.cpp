@@ -350,7 +350,7 @@ TEST_CASE("daemon: txpower change takes hot path (tuneRadio, no rebuild)") {
     d.bootstrap(false);
 
     REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"link":{"txpower":5}})")).ok);
+        R"({"link":{"txPowerDbm":5}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
 
@@ -386,7 +386,7 @@ TEST_CASE("daemon: txpower is rejected while DL is enabled (curve owns power)") 
     // A txpower change is rejected under DL — the per-MCS power curve owns
     // tx power and would silently override a manual value.
     auto pr = d.patchPending(nlohmann::json::parse(
-        R"({"link":{"txpower":20}})"));
+        R"({"link":{"txPowerDbm":20}})"));
     CHECK_FALSE(pr.ok);
 
     fs::remove_all(tmp);

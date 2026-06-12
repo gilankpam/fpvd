@@ -1,13 +1,22 @@
-"""Validation rules. Link/overlap params are mutated ONLY via /link."""
+"""Validation rules. `link` is a normal mutable block in /config."""
 
 from pathlib import Path
 
-LINK_KEYS = {"channel", "width", "txpower", "region", "linkId", "beamforming", "wlans"}
-CONFIG_TOP_KEYS = {"wfb", "drone", "dynamicLink", "pixelpilot"}   # link is excluded on purpose
+LINK_KEYS = {"channel", "width", "txPowerDbm", "region", "linkId",
+             "beamforming", "wlans"}
+CONFIG_TOP_KEYS = {"link", "wfb", "drone", "dynamicLink", "pixelpilot",
+                   "idrForward"}
 DL_BANDWIDTHS = {20, 40}
 DL_PROFILES_DIR = Path(__file__).resolve().parent / "dynlink" / "profiles"
-ALL_TOP_KEYS = {"link"} | CONFIG_TOP_KEYS
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
+
+
+_bf_capable = None   # callable(cfg) -> bool; None => unknown => allow
+
+
+def set_bf_capable(fn) -> None:
+    global _bf_capable
+    _bf_capable = fn
 
 
 class SchemaError(ValueError):
@@ -15,24 +24,17 @@ class SchemaError(ValueError):
 
 
 def validate_config_patch(sparse: dict) -> None:
-    """A /config PATCH: any top-level key except `link`."""
-    if "link" in sparse:
-        raise SchemaError("link.* is read-only via /config; use /link")
+    """A /gs/config PATCH: any known top-level key, including `link`."""
     unknown = set(sparse) - CONFIG_TOP_KEYS
     if unknown:
         raise SchemaError(f"unknown config keys: {sorted(unknown)}")
-
-
-def validate_link_patch(sparse: dict) -> None:
-    """A /link PATCH: only `link.*`, only known link keys."""
-    if set(sparse) - {"link"}:
-        raise SchemaError("only link.* allowed via /link")
-    link = sparse.get("link", {})
-    if not isinstance(link, dict) or not link:
-        raise SchemaError("link patch must be a non-empty object")
-    unknown = set(link) - LINK_KEYS
-    if unknown:
-        raise SchemaError(f"unknown link keys: {sorted(unknown)}")
+    link = sparse.get("link")
+    if link is not None:
+        if not isinstance(link, dict):
+            raise SchemaError("link must be an object")
+        unknown_link = set(link) - LINK_KEYS
+        if unknown_link:
+            raise SchemaError(f"unknown link keys: {sorted(unknown_link)}")
 
 
 def validate_effective(cfg: dict) -> None:
@@ -48,12 +50,20 @@ def validate_effective(cfg: dict) -> None:
     bf = link.get("beamforming")
     if bf is not None:
         _validate_beamforming(bf)
+    if bf is not None and bf.get("enabled") and _bf_capable is not None:
+        if not _bf_capable(cfg):
+            raise SchemaError(
+                "beamforming requires a card with a bf_monitor_conf node "
+                "(GS driver lacks CONFIG_BEAMFORMING_MONITOR)")
     dl = cfg.get("dynamicLink")
     if dl is not None:
         _validate_dynamic_link(dl)
     pp = cfg.get("pixelpilot")
     if pp is not None:
         _validate_pixelpilot(pp)
+    idr = cfg.get("idrForward")
+    if idr is not None:
+        _validate_idr_forward(idr)
 
 
 def _validate_beamforming(bf: dict) -> None:
@@ -80,9 +90,6 @@ def _validate_dynamic_link(dl: dict) -> None:
     port = dl.get("dronePort", 9999)
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("dynamicLink.dronePort must be an int in 1..65535")
-    idr_port = dl.get("idrPort", 11223)
-    if not isinstance(idr_port, int) or not 1 <= idr_port <= 65535:
-        raise SchemaError("dynamicLink.idrPort must be an int in 1..65535")
     vid = dl.get("videoStreamId", "video")
     if not isinstance(vid, str) or not vid:
         raise SchemaError("dynamicLink.videoStreamId must be a non-empty string")
@@ -92,6 +99,14 @@ def _validate_dynamic_link(dl: dict) -> None:
         raise SchemaError(
             f"dynamicLink.radioProfile {profile!r} not found; available: {available}"
         )
+
+
+def _validate_idr_forward(idr: dict) -> None:
+    if not isinstance(idr.get("enabled", True), bool):
+        raise SchemaError("idrForward.enabled must be a bool")
+    port = idr.get("port", 11223)
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise SchemaError("idrForward.port must be an int in 1..65535")
 
 
 def _validate_pixelpilot(pp: dict) -> None:

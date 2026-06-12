@@ -66,6 +66,12 @@ public:
     void stop();                  // stop loop + reset driver state
     BfStatus status() const;
 
+    // status(), but with localMac resolved from `iface` when the beamformer
+    // isn't armed (status_.localMac is only set on reconcile). The GS armer
+    // reads the drone's localMac to arm its beamformee, so it must be reportable
+    // while BF is disabled. Never overrides an already-resolved armed MAC.
+    BfStatus statusWithPrimary(const std::string& iface) const;
+
 private:
     bool supported(const std::string& iface) const;  // bf_monitor_conf exists?
     bool writeNode(const std::string& iface, const std::string& node,

@@ -7,7 +7,7 @@ using nlohmann::json;
 
 TEST_CASE("schema: round-trip a minimal config through json") {
     json j = json::parse(R"({
-        "link":{"channel":161,"width":20,"txpower":1,"mcs":2,
+        "link":{"channel":161,"width":20,"txPowerDbm":20,"mcs":2,
                 "fec":{"mode":"rs","k":8,"n":12,"overheadPct":50,"deadlineMs":30},"stbc":false,"ldpc":false,
                 "linkId":7669206,"mtu":1500,"wlanAdapter":null,
                 "beamforming":{"enabled":false,"remoteMac":"","ackTimeout":255,"intervalMs":100}},
@@ -179,7 +179,7 @@ TEST_CASE("schema: dynamicLink.safe swfec keys default") {
 TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") {
     using nlohmann::json;
     json j = json::parse(R"({
-        "link": {"channel":161,"width":20,"txpower":1,"mcs":2,
+        "link": {"channel":161,"width":20,"txPowerDbm":20,"mcs":2,
                  "fec":{"k":8,"n":12},"stbc":false,"ldpc":false,
                  "linkId":7669206,"mtu":1500,"wlanAdapter":null},
         "video": {"codec":"h265","resolution":"1920x1080","fps":60,

@@ -239,4 +239,11 @@ BfStatus BeamformingController::status() const {
     return status_;
 }
 
+BfStatus BeamformingController::statusWithPrimary(const std::string& iface) const {
+    BfStatus s = status();   // takes the lock; copies the snapshot
+    if (s.localMac.empty() && !iface.empty())
+        s.localMac = resolveLocalMac(procBase_, sysBase_, iface);
+    return s;
+}
+
 } // namespace fpvd

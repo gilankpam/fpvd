@@ -38,26 +38,22 @@ std::string readAllText(const fs::path& p) {
 }
 } // namespace
 
-TEST_CASE("radio-tune.sh: txpower scaling sign per driver") {
+TEST_CASE("radio-tune.sh: txpower dBm -> mBm (driver-independent)") {
     auto tmp = fs::temp_directory_path() / "fpvd-rt-txpower";
     fs::remove_all(tmp);
     auto rec = setupStubs(tmp);
 
     fpvd::Config c{};
-    c.link.txpower = 5;
+    c.link.txPowerDbm = 20;          // 20 dBm -> 2000 mBm
 
-    // 88XXau driver: txpower * -100  => -500
     auto r1 = fpvd::tuneRadio("scripts/radio-tune.sh", "txpower", c, "wlan0", "88XXau");
     REQUIRE(r1.ok);
-    auto out1 = readAllText(rec);
-    CHECK(out1.find("iw wlan0 set txpower fixed -500") != std::string::npos);
+    CHECK(readAllText(rec).find("iw wlan0 set txpower fixed 2000") != std::string::npos);
 
-    // other driver: txpower * 50 => 250
     fs::remove(rec);
     auto r2 = fpvd::tuneRadio("scripts/radio-tune.sh", "txpower", c, "wlan0", "8812eu");
     REQUIRE(r2.ok);
-    auto out2 = readAllText(rec);
-    CHECK(out2.find("iw wlan0 set txpower fixed 250") != std::string::npos);
+    CHECK(readAllText(rec).find("iw wlan0 set txpower fixed 2000") != std::string::npos);
 
     fs::remove_all(tmp);
 }

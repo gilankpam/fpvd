@@ -28,25 +28,26 @@ def iw_args(wlan: str, channel: int, width: int) -> list[str]:
 def retune_commands(wlans, link: dict) -> list[list[str]]:
     """Ordered `iw` commands to apply the live-settable radio params from `link`:
     regulatory domain first (it gates the channel), then per-interface
-    channel/width, then txpower. txpower is mBm (wfb-ng's wifi_txpower units);
-    None means 'leave at the driver default' (we don't touch it), matching the
-    rendered cfg which omits wifi_txpower when null."""
+    channel/width, then txpower. txPowerDbm is dBm; it is converted to mBm
+    (wfb-ng's wifi_txpower units) before passing to `iw`. None means 'auto'
+    (driver default), so setting null reverts live power to the driver default."""
     cmds: list[list[str]] = []
     region = link.get("region")
     if region:
         cmds.append(["iw", "reg", "set", region])
     channel = link.get("channel")
     width = link.get("width", 20)
-    txpower = link.get("txpower")
+    txpower_dbm = link.get("txPowerDbm")
     for wlan in wlans:
         if channel is not None:
             cmds.append(iw_args(wlan, channel, width))
         # None => 'auto' (driver default), so lowering back to null reverts live;
-        # a value is fixed mBm (wfb-ng's wifi_txpower units).
-        if txpower is None:
+        # a value is dBm, converted to fixed mBm (wfb-ng's wifi_txpower units).
+        if txpower_dbm is None:
             cmds.append(["iw", "dev", wlan, "set", "txpower", "auto"])
         else:
-            cmds.append(["iw", "dev", wlan, "set", "txpower", "fixed", str(txpower)])
+            cmds.append(["iw", "dev", wlan, "set", "txpower", "fixed",
+                         str(round(txpower_dbm * 100))])
     return cmds
 
 

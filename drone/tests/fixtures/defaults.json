@@ -1,5 +1,5 @@
 {
-  "link": {"channel": 161, "width": 20, "txpower": 1, "mcs": 2,
+  "link": {"channel": 161, "width": 20, "txPowerDbm": 20, "mcs": 2,
            "fec": {"mode": "rs", "k": 8, "n": 12, "overheadPct": 50, "deadlineMs": 30}, "stbc": false, "ldpc": false,
            "linkId": 7669206, "mtu": 1500, "wlanAdapter": null,
            "beamforming": {"enabled": false, "remoteMac": "", "ackTimeout": 255, "intervalMs": 100}},

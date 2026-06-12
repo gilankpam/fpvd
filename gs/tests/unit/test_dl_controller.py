@@ -10,9 +10,6 @@ def _snapshot(drone_port, **over):
         "enabled": True, "maxMcs": 5, "bandwidth": 20,
         "txpower": {"min": 18, "max": 28}, "radioProfile": "m8812eu2",
         "droneAddr": "127.0.0.1", "dronePort": drone_port, "tuning": {},
-        # IDR relay off by default so unrelated tests don't contend for :11223;
-        # the dedicated relay test enables it on an ephemeral port.
-        "idrForward": False,
     }
     snap.update(over)
     return snap
@@ -219,28 +216,3 @@ def test_controller_forwards_probe_snapshot_to_policy():
     finally:
         c.stop()
         drone_sock.close()
-
-
-def test_idr_relay_binds_inaddr_any_so_it_can_forward_off_loopback():
-    # Regression: the relay reuses its listen socket to forward each token to
-    # the drone. If it binds 127.0.0.1, that forward sendto() fails with EINVAL
-    # for any non-loopback drone (the error is swallowed, so every IDR request
-    # is dropped silently). The listen socket MUST bind INADDR_ANY (0.0.0.0).
-    #
-    # We can't also assert delivery to a fake same-host drone: a 0.0.0.0:idrPort
-    # bind overlaps any 127.0.0.x:idrPort a fake drone would use (EADDRINUSE).
-    # Forwarding loopback->loopback works with either bind anyway, so it would
-    # never catch this bug — assert the bound listen address directly instead.
-    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    probe.bind(("127.0.0.1", 0))
-    idr_port = probe.getsockname()[1]
-    probe.close()
-
-    c = DynamicLinkController(
-        _snapshot(40010, droneAddr="10.255.255.1", idrForward=True, idrPort=idr_port),
-        stats_client_factory=_IdleStatsClient)
-    c.start()
-    try:
-        assert c.status()["idrListen"] == "0.0.0.0:%d" % idr_port
-    finally:
-        c.stop()
