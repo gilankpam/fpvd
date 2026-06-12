@@ -133,6 +133,10 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
     assert "dynamicLink" in body
     assert "pixelpilot" in body
     assert body["dynamicLink"]["running"] is False
+    # /gs/status is GS-local — it must NOT reach out to the drone (drone endpoint
+    # here is unreachable :1). No drone-derived fields are reported.
+    assert "droneReachable" not in body["link"]
+    assert "drone" not in body["dynamicLink"]
 
 
 def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):

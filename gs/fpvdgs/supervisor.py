@@ -125,29 +125,12 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
     started = time.monotonic()
 
-    _warned = {"adapter": False}
-
-    def _dynamic_link_status(reachable):
+    def _dynamic_link_status():
+        # GS-local controller state only — no drone round-trip. Clients read
+        # /air/status for the drone's own dynamic-link/adapter state.
         eff_dl = store.effective().get("dynamicLink", {})
         st = dynlink.status()
         st["enabled"] = bool(eff_dl.get("enabled"))
-        drone_active = None
-        adapter_id = None
-        try:
-            ds = drone.get_status()
-            drone_active = ds.get("link", {}).get("dynamicLinkActive")
-            adapter_id = ds.get("radio", {}).get("adapterId")
-        except Exception:
-            pass
-        prof = eff_dl.get("radioProfile", "m8812eu2")
-        if not adapter_matches_profile(adapter_id, prof) and not _warned["adapter"]:
-            log.warning("drone adapter_id %r does not match the configured "
-                        "radioProfile %r — the learned prior is per-card, so a "
-                        "mismatch means it may learn against the wrong profile; "
-                        "check config", adapter_id, prof)
-            _warned["adapter"] = True
-        st["drone"] = {"reachable": reachable,
-                       "dynamicLinkActive": drone_active}
         return st
 
     def _pixelpilot_status():
@@ -164,14 +147,13 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
     def status_fn():
         wlans = resolve_wlans(store.effective())
         wlan_info = {w: status_mod.iw_info(w) for w in wlans}
-        reachable = drone.healthz()
         eff_link = store.effective().get("link", {})
-        probe = {"reachable": reachable, "linkId": eff_link.get("linkId")}
+        link_info = {"linkId": eff_link.get("linkId")}
         uptime_ms = int((time.monotonic() - started) * 1000)
         primary = wlans[0] if wlans else None
-        return status_mod.build_status(__version__, runner.state(), wlan_info, probe,
+        return status_mod.build_status(__version__, runner.state(), wlan_info, link_info,
                                        uptime_ms=uptime_ms,
-                                       dynamic_link=_dynamic_link_status(reachable),
+                                       dynamic_link=_dynamic_link_status(),
                                        pixelpilot=_pixelpilot_status(),
                                        probe=_probe_status(),
                                        beamforming=beamforming.status_with_primary(primary))

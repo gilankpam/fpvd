@@ -1,4 +1,5 @@
-"""Assemble GET /status: runner state + per-wlan radio state + link/drone."""
+"""Assemble GET /gs/status: GS-local runner + per-wlan radio + link state.
+Drone state is intentionally excluded (clients read /air/status for that)."""
 
 import re
 import subprocess
@@ -30,7 +31,7 @@ def iw_info(wlan: str) -> dict:
 
 
 def build_status(version: str, runner_state: dict, wlans: dict,
-                 drone_probe: dict, link_stats: dict | None = None,
+                 link_info: dict, link_stats: dict | None = None,
                  uptime_ms: int | None = None,
                  dynamic_link: dict | None = None,
                  pixelpilot: dict | None = None,
@@ -39,11 +40,9 @@ def build_status(version: str, runner_state: dict, wlans: dict,
     radio = []
     for wlan, info in wlans.items():
         radio.append({"wlan": wlan, **info})
-    link = {
-        "linkId": drone_probe.get("linkId"),
-        "droneReachable": drone_probe.get("reachable", False),
-        "inSync": drone_probe.get("inSync"),
-    }
+    # GS-local link view only. Drone reachability / cross-device sync are NOT
+    # reported here — clients read /air/status for drone state.
+    link = {"linkId": link_info.get("linkId")}
     if link_stats:
         link["stats"] = link_stats
     fpvd = {"version": version}

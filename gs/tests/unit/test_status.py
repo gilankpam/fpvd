@@ -22,13 +22,16 @@ def test_build_status_shape():
         version="0.1.0",
         runner_state={"running": True, "pid": 591, "restarts": 0, "lastExit": None},
         wlans={"wlx84fc146c36e6": parse_iw_info(IW)},
-        drone_probe={"reachable": True, "inSync": True, "linkId": 7669206},
+        link_info={"linkId": 7669206},
     )
     assert s["runner"]["pid"] == 591
     assert s["radio"][0]["wlan"] == "wlx84fc146c36e6"
     assert s["radio"][0]["channel"] == 132
-    assert s["link"]["droneReachable"] is True
-    assert s["link"]["inSync"] is True
+    assert s["link"]["linkId"] == 7669206
+    # /gs/status is GS-local: drone reachability/sync is NOT reported here
+    # (clients read /air/status for drone state).
+    assert "droneReachable" not in s["link"]
+    assert "inSync" not in s["link"]
 
 
 def test_build_status_includes_dynamic_link_section():
@@ -36,13 +39,11 @@ def test_build_status_includes_dynamic_link_section():
     dl = {"enabled": True, "running": True, "statsConnected": True,
           "decision": {"mcs": 4, "k": 8, "n": 12, "depth": 1,
                        "txpowerDbm": 22, "bitrateKbps": 9000},
-          "lastEmitMs": 1234, "emitSeq": 5, "reason": "snr_margin",
-          "drone": {"reachable": True, "dynamicLinkActive": True}}
-    out = status.build_status("0.1.0", {"running": True}, {}, {"reachable": True},
+          "lastEmitMs": 1234, "emitSeq": 5, "reason": "snr_margin"}
+    out = status.build_status("0.1.0", {"running": True}, {}, {"linkId": 1},
                               dynamic_link=dl)
     assert out["dynamicLink"]["running"] is True
     assert out["dynamicLink"]["decision"]["mcs"] == 4
-    assert out["dynamicLink"]["drone"]["dynamicLinkActive"] is True
 
 
 def test_build_status_omits_dynamic_link_when_absent():
