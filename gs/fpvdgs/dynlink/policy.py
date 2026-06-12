@@ -417,9 +417,11 @@ class Policy:
         # pre-demote ahead of the reactive path. The probe still owns promotes;
         # the reactive Channel-B demote in select() remains the backstop.
         predict_reason = ""
+        slope = (None if signals.rssi is None
+                 else (0.0 if self._prev_rssi is None
+                       else signals.rssi - self._prev_rssi))
+        pc = None
         if (self.learned_prior is not None and signals.rssi is not None):
-            slope = (0.0 if self._prev_rssi is None
-                     else signals.rssi - self._prev_rssi)
             pc = self.learned_prior.predictive_ceiling(signals.rssi, slope)
             cur = self.leading.state.current_mcs
             if pc is not None and pc < cur:
@@ -480,6 +482,12 @@ class Policy:
                     > self.cfg.flightlog.flight_gap_s):
                 self.flightlog.roll()
             self._last_healthy_mono = _now_mono
+        # Compact per-rung probe view (per + ageMs only) so the record stays
+        # small at 10 Hz against the flight-log size cap.
+        probe_log = (None if probe_snap is None else {
+            m: {"per": v.get("per"), "ageMs": v.get("ageMs")}
+            for m, v in (probe_snap.get("mcs") or {}).items()
+        })
         self.flightlog.write({
             "ts": signals.timestamp,
             "rssi": signals.rssi,
@@ -491,6 +499,10 @@ class Policy:
             "link_starved": sustained_starved,
             "ceiling": (self.learned_prior.ceiling(signals.rssi)
                         if self.learned_prior and signals.rssi is not None else None),
+            "probe": probe_log,
+            "pc": pc,
+            "slope": slope,
+            "promote_clean": self.leading._promote_clean,
         })
         return Decision(
             timestamp=signals.timestamp,

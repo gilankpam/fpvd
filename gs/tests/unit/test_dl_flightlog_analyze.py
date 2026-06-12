@@ -26,3 +26,18 @@ def test_summarize_counts_mcs_and_demotes(tmp_path):
     assert s["time_at_mcs"][5] >= 1
     assert s["predictive_demotes"] == 1
     assert s["reactive_demotes"] == 1
+
+
+def test_probe_target_per_reads_current_plus_one_rung():
+    mod = _load_tool()
+    rec = {"mcs": 3, "probe": {"4": {"per": 0.02, "ageMs": 150.0},
+                               "5": {"per": 0.9, "ageMs": 9000.0}}}
+    assert mod.probe_target_per(rec) == 0.02
+
+
+def test_probe_target_per_none_when_absent():
+    mod = _load_tool()
+    assert mod.probe_target_per({"mcs": 3}) is None                   # pre-field log
+    assert mod.probe_target_per({"mcs": 3, "probe": None}) is None    # no probe_status
+    assert mod.probe_target_per({"mcs": 3, "probe": {}}) is None      # rung not heard
+    assert mod.probe_target_per({"probe": {"4": {"per": 0.1}}}) is None  # no mcs
