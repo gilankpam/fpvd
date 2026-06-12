@@ -38,6 +38,36 @@ TEST_CASE("beamforming: resolveLocalMac prefers proc mac_addr, falls back to sys
     fs::remove_all(tmp);
 }
 
+TEST_CASE("beamforming: statusWithPrimary reports card MAC when disarmed") {
+    // BF never reconciled (state Disabled, localMac empty), but the GS armer
+    // reads the drone's localMac from /status to arm its beamformee — so it must
+    // be reportable while BF is off, resolved from the current card.
+    auto tmp = fs::temp_directory_path() / "fpvd-bf-primary";
+    fs::remove_all(tmp);
+    auto proc = tmp / "proc"; auto sys = tmp / "sys";
+    fs::create_directories(sys / "wlan0");
+    std::ofstream(sys / "wlan0" / "address") << "84:fc:14:6c:36:e6\n";
+    fpvd::BeamformingController bf(proc.string(), sys.string());
+    auto s = bf.statusWithPrimary("wlan0");
+    CHECK(s.state == fpvd::BfState::Disabled);
+    CHECK(s.localMac == "84:fc:14:6c:36:e6");
+    CHECK(bf.status().localMac.empty());   // plain status() semantics unchanged
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("beamforming: statusWithPrimary keeps the armed localMac") {
+    auto tmp = fs::temp_directory_path() / "fpvd-bf-primary2";
+    fs::remove_all(tmp);
+    makeIface(tmp / "proc", "wlan0", /*withBfNode=*/true);   // proc mac_addr=00:c0:ca:11:22:33
+    fpvd::BeamformingController bf((tmp / "proc").string(),
+                                   (tmp / "sys").string());
+    fpvd::BfParams p; p.iface = "wlan0"; p.remoteMac = "00:11:22:33:44:55"; p.width = 20;
+    bf.reconcile(true, p);
+    auto s = bf.statusWithPrimary("wlan9");   // armed MAC wins; primary arg ignored
+    CHECK(s.localMac == "00:c0:ca:11:22:33");
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("beamforming: unsupported when bf_monitor_conf absent") {
     auto tmp = fs::temp_directory_path() / "fpvd-bf-unsup";
     fs::remove_all(tmp);
