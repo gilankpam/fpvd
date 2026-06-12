@@ -640,7 +640,7 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
 
 Note `txpower.min`/`.max` are the **controller's** dBm request range and are unrelated to the static [`link.txPowerDbm`](#gs-config-schema) key.
 
-**Operating model.** Enabling, disabling, or tuning is applied at runtime via `PATCH /gs/config` + `POST /gs/apply` with **no wfb restart** — the GS runner is never bounced for `dynamicLink`-only changes. The controller reads wfb-ng stats on `:8103` (fpvd renders `log_interval = 100` so the feed is 10 Hz). The drone side must be armed **independently** (its own `dynamicLink.enabled`, reachable via the GS `/air` proxy); `GET /gs/status.dynamicLink` reports the controller state plus a `drone` sub-object (`reachable`, `dynamicLinkActive`, `hello`) so a GS-armed/drone-not mismatch is visible.
+**Operating model.** Enabling, disabling, or tuning is applied at runtime via `PATCH /gs/config` + `POST /gs/apply` with **no wfb restart** — the GS runner is never bounced for `dynamicLink`-only changes. The controller reads wfb-ng stats on `:8103` (fpvd renders `log_interval = 100` so the feed is 10 Hz). The drone side must be armed **independently** (its own `dynamicLink.enabled`, applied via the GS `/air` proxy — the client orchestrates both halves). `GET /gs/status.dynamicLink` reports the GS controller state only (no drone round-trip); to check the drone's own dynamic-link/adapter state and detect a GS-armed/drone-not mismatch, the client reads `GET /air/status`.
 
 **`videoStreamId`.** The wfb stats feed interleaves rx records for every service (`video rx`, `mavlink rx`, `tunnel rx`). The policy must be driven by the **video** stream only — the low-rate uplink streams would trip the starvation detector and pin MCS at the floor. The default `"video"` substring matches the video record id.
 
@@ -968,14 +968,14 @@ Validates pending, renders the cfg, and applies. A link change applies with a **
     {"wlan": "wlx84fc146c36e6", "type": "monitor", "channel": 132,
      "freqMhz": 5660, "widthMhz": 40, "txpowerDbm": 19.0}
   ],
-  "link":   {"linkId": 7669206, "droneReachable": true},
+  "link":   {"linkId": 7669206},
   "beamforming": {"enabled": false, "localMac": "84:fc:14:6c:36:e6"}
 }
 ```
 
+- **`/gs/status` is GS-local** — it makes no drone round-trip, so it stays fast even when the drone is slow/unreachable. For drone reachability and the drone's own dynamic-link/adapter state, the client calls **`GET /air/status`**.
 - `runner` — the supervised wfb runner: `restarts` counts operator bounces, `autoRestarts` counts crash auto-restarts, `fault` is the crash-loop guard.
 - `radio` — one entry per wlan, parsed from `iw dev <wlan> info`.
-- `link.droneReachable` — cached probe of the drone fpvd.
 - `beamforming.localMac` — the GS card MAC, read by the client during the beamforming handshake (see [Client orchestration](#client-orchestration-of-cross-device-link-changes)).
 
 ## Client orchestration of cross-device link changes
