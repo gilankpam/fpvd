@@ -1,7 +1,7 @@
 {
   "link": {
     "channel": 132,
-    "width": 40,
+    "width": 20,
     "txPowerDbm": null,
     "region": "US",
     "linkId": 7669206,
@@ -41,7 +41,7 @@
     "videoScale": 1.0,
     "codec": "h265",
     "rtpPort": 5600,
-    "rtpJitterMs": 1,
+    "rtpJitterMs": 0,
     "dvr": {
       "framerate": 60,
       "dir": "/media/dvr",
