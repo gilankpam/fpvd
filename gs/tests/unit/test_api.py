@@ -125,7 +125,7 @@ def _api_with_dynlink(tmp_path):
     defaults = {"link": {"channel": 132, "width": 40, "region": "US"},
                 "wfb": {"profile": "gs", "raw": {}},
                 "drone": {"endpoint": "http://10.5.0.10:8080"},
-                "dynamicLink": {"enabled": False, "maxMcs": 5, "bandwidth": 20,
+                "dynamicLink": {"enabled": False, "maxMcs": 5,
                                 "txpower": {"min": 18, "max": 28},
                                 "radioProfile": "m8812eu2", "droneAddr": None,
                                 "dronePort": 9999, "tuning": {}}}
@@ -283,7 +283,7 @@ def _api_with_dl_and_probe(tmp_path):
                          "linkId": 7669206, "wlans": ["wlan0"]},
                 "wfb": {"profile": "gs", "raw": {}},
                 "drone": {"endpoint": "http://10.5.0.10:8080"},
-                "dynamicLink": {"enabled": False, "maxMcs": 5, "bandwidth": 20,
+                "dynamicLink": {"enabled": False, "maxMcs": 5,
                                 "txpower": {"min": 18, "max": 28},
                                 "radioProfile": "m8812eu2", "droneAddr": None,
                                 "dronePort": 9999, "tuning": {}}}

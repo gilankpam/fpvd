@@ -47,8 +47,7 @@ def test_validate_effective_ok():
 
 def _eff(**dl):
     base = {"link": {"channel": 132, "width": 40, "region": "US"},
-            "dynamicLink": {"enabled": False, "maxMcs": 5, "bandwidth": 20,
-                            "txpower": {"min": 18, "max": 28},
+            "dynamicLink": {"enabled": False, "maxMcs": 5,
                             "radioProfile": "m8812eu2", "dronePort": 9999,
                             "tuning": {}}}
     base["dynamicLink"].update(dl)
@@ -68,19 +67,9 @@ def test_effective_rejects_bad_max_mcs():
         schema.validate_effective(_eff(maxMcs=9))
 
 
-def test_effective_rejects_bad_bandwidth():
+def test_effective_rejects_empty_radio_profile():
     with pytest.raises(SchemaError):
-        schema.validate_effective(_eff(bandwidth=15))
-
-
-def test_effective_rejects_inverted_txpower():
-    with pytest.raises(SchemaError):
-        schema.validate_effective(_eff(txpower={"min": 30, "max": 10}))
-
-
-def test_effective_rejects_unknown_radio_profile():
-    with pytest.raises(SchemaError):
-        schema.validate_effective(_eff(radioProfile="nonexistent"))
+        schema.validate_effective(_eff(radioProfile=""))
 
 
 def test_effective_accepts_known_radio_profile():

@@ -19,8 +19,6 @@
   "dynamicLink": {
     "enabled": false,
     "maxMcs": 5,
-    "bandwidth": 20,
-    "txpower": { "min": 18, "max": 28 },
     "radioProfile": "m8812eu2",
     "droneAddr": null,
     "dronePort": 9999,

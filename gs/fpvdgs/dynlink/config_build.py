@@ -10,36 +10,21 @@ from __future__ import annotations
 
 import copy
 import logging
-from pathlib import Path
 from urllib.parse import urlparse
 
 from .flightlog import FlightLogConfig
 from .learned_prior import LearnedPriorConfig
-from .policy import (
-    GateConfig, LeadingLoopConfig,
-    PolicyConfig, ProfileSelectionConfig,
-)
-from .profile import RadioProfile, load_profile
+from .policy import GateConfig, PolicyConfig, ProfileSelectionConfig
 from .signals import RssiNormConfig, SignalAggregator
 
 log = logging.getLogger("fpvdgs.dynlink")
-
-PROFILES_DIR = Path(__file__).resolve().parent / "profiles"
 
 
 def _raw_from_block(block: dict) -> dict:
     """Build a gs.yaml-shaped `raw` dict: tuning is the base, curated keys
     are overlaid so they always win over any tuning attempt."""
     raw = copy.deepcopy(block.get("tuning") or {})
-    leading = raw.setdefault("leading_loop", {})
     gate = raw.setdefault("gate", {})
-    if "bandwidth" in block:
-        leading["bandwidth"] = int(block["bandwidth"])
-    tx = block.get("txpower") or {}
-    if "min" in tx:
-        leading["tx_power_min_dBm"] = float(tx["min"])
-    if "max" in tx:
-        leading["tx_power_max_dBm"] = float(tx["max"])
     if "maxMcs" in block:
         gate["max_mcs"] = int(block["maxMcs"])
     return raw
@@ -51,11 +36,6 @@ def build_policy_config(block: dict) -> PolicyConfig:
 
 def build_aggregator(block: dict) -> SignalAggregator:
     return _build_aggregator(_raw_from_block(block))
-
-
-def resolve_profile(block: dict) -> RadioProfile:
-    name = block.get("radioProfile", "m8812eu2")
-    return load_profile(name, [PROFILES_DIR])
 
 
 def make_dl_snapshot(effective: dict) -> dict:
@@ -75,9 +55,12 @@ _DEPRECATED_LEADING_KEYS = {
     "snr_margin_db", "snr_up_guard_db", "snr_up_hold_ms", "snr_down_hold_ms",
     "loss_margin_weight", "fec_margin_weight", "forced_drop_inhibit_ms",
     "mcs_max",  # moved to gate.max_mcs
+    "bandwidth",  # row table removed — selection is probe-driven
     # Old RSSI closed loop / closed-loop power knobs — fully retired.
+    # TX power is drone-local (txpower_curve.hpp).
     "rssi_margin_db", "rssi_up_guard_db", "rssi_up_hold_ms",
     "rssi_down_hold_ms", "rssi_target_dBm", "rssi_deadband_db",
+    "tx_power_min_dBm", "tx_power_max_dBm",
     "tx_power_cooldown_ms", "tx_power_freeze_after_mcs_ms",
     "tx_power_step_max_db", "tx_power_gain_up_db", "tx_power_gain_down_db",
 }
@@ -126,43 +109,6 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
             "Migrate to the `gate:` / `profile_selection:` sections.",
             ", ".join(deprecated_present),
         )
-
-    leading = LeadingLoopConfig(
-        bandwidth=int(leading_raw.get("bandwidth", 20)),
-        tx_power_min_dBm=float(leading_raw.get("tx_power_min_dBm", 5.0)),
-        tx_power_max_dBm=float(leading_raw.get("tx_power_max_dBm", 23.0)),
-        # Deprecated keys: parse-and-store so they round-trip but the
-        # selector ignores them. Defaults match the old values so any
-        # in-tree consumer relying on them still gets sensible numbers.
-        mcs_max=int(leading_raw.get("mcs_max", 7)),
-        snr_margin_db=float(leading_raw.get("snr_margin_db", 3.0)),
-        snr_up_guard_db=float(leading_raw.get("snr_up_guard_db", 2.0)),
-        snr_up_hold_ms=float(leading_raw.get("snr_up_hold_ms", 2000.0)),
-        snr_down_hold_ms=float(leading_raw.get("snr_down_hold_ms", 500.0)),
-        loss_margin_weight=float(leading_raw.get("loss_margin_weight", 20.0)),
-        fec_margin_weight=float(leading_raw.get("fec_margin_weight", 20.0)),
-        forced_drop_inhibit_ms=float(
-            leading_raw.get("forced_drop_inhibit_ms", 5000.0)
-        ),
-        rssi_up_guard_db=float(leading_raw.get("rssi_up_guard_db", 3.0)),
-        rssi_up_hold_ms=float(leading_raw.get("rssi_up_hold_ms", 2000.0)),
-        rssi_down_hold_ms=float(leading_raw.get("rssi_down_hold_ms", 500.0)),
-        rssi_target_dBm=float(leading_raw.get("rssi_target_dBm", -60.0)),
-        rssi_deadband_db=float(leading_raw.get("rssi_deadband_db", 3.0)),
-        tx_power_cooldown_ms=float(
-            leading_raw.get("tx_power_cooldown_ms", 1000.0)
-        ),
-        tx_power_freeze_after_mcs_ms=float(
-            leading_raw.get("tx_power_freeze_after_mcs_ms", 2000.0)
-        ),
-        tx_power_step_max_db=float(
-            leading_raw.get("tx_power_step_max_db", 3.0)
-        ),
-        tx_power_gain_up_db=float(leading_raw.get("tx_power_gain_up_db", 1.0)),
-        tx_power_gain_down_db=float(
-            leading_raw.get("tx_power_gain_down_db", 1.0)
-        ),
-    )
 
     dep_gate = sorted(k for k in _DEPRECATED_GATE_KEYS if k in gate_raw)
     if dep_gate:
@@ -233,7 +179,6 @@ def _build_policy_config(raw: dict) -> PolicyConfig:
     )
 
     return PolicyConfig(
-        leading=leading,
         gate=gate,
         selection=selection,
         starvation_windows=int(policy_raw.get("starvation_windows", 5)),

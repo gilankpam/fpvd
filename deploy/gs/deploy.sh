@@ -30,11 +30,17 @@ remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 # import without any sys.path/PYTHONPATH hacks.
 SITE="$(remote 'python3 -c "import site; print(site.getsitepackages()[0])"')"
 echo "[push] fpvdgs -> $TARGET:$SITE/fpvdgs  (+ init + defaults)"
-remote "mkdir -p /etc/fpvd '$SITE/fpvdgs' '$SITE/fpvdgs/dynlink/profiles' '$SITE/fpvdgs/probe'"
+remote "mkdir -p /etc/fpvd '$SITE/fpvdgs' '$SITE/fpvdgs/dynlink' '$SITE/fpvdgs/probe'"
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs"/*.py "$TARGET:$SITE/fpvdgs/"
-# dynlink subpackage (in-process GS dynamic-link controller) + JSON radio profiles
+# dynlink subpackage (in-process GS dynamic-link controller)
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/dynlink"/*.py "$TARGET:$SITE/fpvdgs/dynlink/"
-scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/dynlink/profiles"/*.json "$TARGET:$SITE/fpvdgs/dynlink/profiles/"
+# stale modules from older deploys (profile.py + JSON radio profiles) are
+# harmless leftovers; remove the profiles dir so imports can't resolve it.
+remote "rm -rf '$SITE/fpvdgs/dynlink/profiles' '$SITE/fpvdgs/dynlink/profile.py'"
+# learned-prior key migration: the prior was keyed by the profile's display
+# name (BL-M8812EU2); it is now keyed by dynamicLink.radioProfile (m8812eu2).
+# One-time rename preserves the learned curve; -n never clobbers a newer file.
+remote "[ -f /etc/fpvd/learned/BL-M8812EU2.json ] && mv -n /etc/fpvd/learned/BL-M8812EU2.json /etc/fpvd/learned/m8812eu2.json || true"
 # probe subpackage (in-process GS probe-link measurement: spawns FEC-off wfb_rx
 # per probe radio_port, parses stdout for per-MCS PER/RSSI — observe-only)
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/probe"/*.py "$TARGET:$SITE/fpvdgs/probe/"

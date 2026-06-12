@@ -1,13 +1,9 @@
 """Validation rules. `link` is a normal mutable block in /config."""
 
-from pathlib import Path
-
 LINK_KEYS = {"channel", "width", "txPowerDbm", "region", "linkId",
              "beamforming", "wlans"}
 CONFIG_TOP_KEYS = {"link", "wfb", "drone", "dynamicLink", "pixelpilot",
                    "idrForward"}
-DL_BANDWIDTHS = {20, 40}
-DL_PROFILES_DIR = Path(__file__).resolve().parent / "dynlink" / "profiles"
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
@@ -80,25 +76,17 @@ def _validate_dynamic_link(dl: dict) -> None:
     max_mcs = dl.get("maxMcs", 5)
     if not isinstance(max_mcs, int) or not 0 <= max_mcs <= 7:
         raise SchemaError("dynamicLink.maxMcs must be an int in 0..7")
-    bw = dl.get("bandwidth", 20)
-    if bw not in DL_BANDWIDTHS:
-        raise SchemaError(f"dynamicLink.bandwidth must be one of {sorted(DL_BANDWIDTHS)}")
-    tx = dl.get("txpower", {}) or {}
-    lo, hi = tx.get("min", 0), tx.get("max", 30)
-    if lo > hi:
-        raise SchemaError("dynamicLink.txpower.min must be <= max")
     port = dl.get("dronePort", 9999)
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("dynamicLink.dronePort must be an int in 1..65535")
     vid = dl.get("videoStreamId", "video")
     if not isinstance(vid, str) or not vid:
         raise SchemaError("dynamicLink.videoStreamId must be a non-empty string")
+    # radioProfile is a free identifier now (no profile files): it keys the
+    # learned-prior persistence and the drone adapter-match warning.
     profile = dl.get("radioProfile", "m8812eu2")
-    if not (DL_PROFILES_DIR / f"{profile}.json").is_file():
-        available = sorted(p.stem for p in DL_PROFILES_DIR.glob("*.json"))
-        raise SchemaError(
-            f"dynamicLink.radioProfile {profile!r} not found; available: {available}"
-        )
+    if not isinstance(profile, str) or not profile:
+        raise SchemaError("dynamicLink.radioProfile must be a non-empty string")
 
 
 def _validate_idr_forward(idr: dict) -> None:

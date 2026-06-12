@@ -13,7 +13,7 @@ import logging
 import threading
 import time
 
-from .config_build import build_aggregator, build_policy_config, resolve_profile
+from .config_build import build_aggregator, build_policy_config
 from .policy import Policy
 from .return_link import ReturnLink
 from .stats_client import RxEvent, SessionEvent, StatsClient
@@ -109,8 +109,8 @@ class DynamicLinkController:
     async def _run(self):
         with self._lock:
             snap = dict(self._snapshot)
-        profile = resolve_profile(snap)
-        policy = Policy(build_policy_config(snap), profile,
+        profile_name = str(snap.get("radioProfile") or "m8812eu2")
+        policy = Policy(build_policy_config(snap), profile_name,
                         probe_status=self._probe_status)
         aggregator = build_aggregator(snap)
         return_link = ReturnLink(snap["droneAddr"], int(snap["dronePort"]))
