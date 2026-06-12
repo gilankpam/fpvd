@@ -36,7 +36,7 @@ scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs"/*.py "$TARGET:$SITE/fpvdgs/"
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/dynlink"/*.py "$TARGET:$SITE/fpvdgs/dynlink/"
 # stale modules from older deploys (profile.py + JSON radio profiles) are
 # harmless leftovers; remove the profiles dir so imports can't resolve it.
-remote "rm -rf '$SITE/fpvdgs/dynlink/profiles' '$SITE/fpvdgs/dynlink/profile.py'"
+remote "rm -rf '$SITE/fpvdgs/dynlink/profiles' '$SITE/fpvdgs/dynlink/profile.py'* '$SITE/fpvdgs/dynlink/__pycache__/profile.'*"
 # learned-prior key migration: the prior was keyed by the profile's display
 # name (BL-M8812EU2); it is now keyed by dynamicLink.radioProfile (m8812eu2).
 # One-time rename preserves the learned curve; -n never clobbers a newer file.
