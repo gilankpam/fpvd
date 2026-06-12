@@ -81,6 +81,36 @@ def test_write_failure_reports_error(tmp_path):
     assert st["state"] == "error"
 
 
+def test_status_with_primary_reports_mac_when_disarmed(tmp_path):
+    # BF never armed (state=disabled, _iface=""), but a client must still be able
+    # to read the GS card MAC to set the drone's remoteMac before enabling BF.
+    sysd = _sys(tmp_path, "wlan0", "84:fc:14:6c:36:e6")
+    bf = BeamformingController(proc_base=str(tmp_path / "proc"), sys_base=sysd)
+    st = bf.status_with_primary("wlan0")
+    assert st["localMac"] == "84:fc:14:6c:36:e6"
+    assert st["iface"] == "wlan0"
+    assert st["state"] == "disabled"
+
+
+def test_status_with_primary_preserves_armed_iface(tmp_path):
+    # When already armed, the armed iface/MAC win over the primary arg.
+    proc, _ = _node(tmp_path, "wlan0")
+    sysd = _sys(tmp_path, "wlan0", "84:fc:14:6c:36:e6")
+    bf = BeamformingController(proc_base=proc, sys_base=sysd)
+    bf.reconcile(True, "wlan0", "00:c0:ca:dd:ee:ff")
+    st = bf.status_with_primary("wlan1")
+    assert st["iface"] == "wlan0"
+    assert st["localMac"] == "84:fc:14:6c:36:e6"
+
+
+def test_status_with_primary_none_is_plain_status(tmp_path):
+    bf = BeamformingController(proc_base=str(tmp_path / "proc"),
+                              sys_base=str(tmp_path / "sys"))
+    st = bf.status_with_primary(None)
+    assert st["localMac"] == ""
+    assert st["iface"] == ""
+
+
 def test_disable_write_failure_reports_error(tmp_path, monkeypatch):
     proc, conf = _node(tmp_path, "wlan0")
     bf = BeamformingController(proc_base=proc)

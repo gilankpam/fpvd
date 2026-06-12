@@ -162,17 +162,19 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
         return {"enabled": True, **probe_ctrl.status()}
 
     def status_fn():
-        wlan_info = {w: status_mod.iw_info(w) for w in resolve_wlans(store.effective())}
+        wlans = resolve_wlans(store.effective())
+        wlan_info = {w: status_mod.iw_info(w) for w in wlans}
         reachable = drone.healthz()
         eff_link = store.effective().get("link", {})
         probe = {"reachable": reachable, "linkId": eff_link.get("linkId")}
         uptime_ms = int((time.monotonic() - started) * 1000)
+        primary = wlans[0] if wlans else None
         return status_mod.build_status(__version__, runner.state(), wlan_info, probe,
                                        uptime_ms=uptime_ms,
                                        dynamic_link=_dynamic_link_status(reachable),
                                        pixelpilot=_pixelpilot_status(),
                                        probe=_probe_status(),
-                                       beamforming=beamforming.status())
+                                       beamforming=beamforming.status_with_primary(primary))
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=drone, status_fn=status_fn, cfg_out=cfg_out,

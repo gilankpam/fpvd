@@ -83,3 +83,15 @@ class BeamformingController:
             "localMac": self.local_mac(self._iface) if self._iface else "",
             "peerMac": self._peer,
         }
+
+    def status_with_primary(self, primary_iface) -> dict:
+        """status(), but with iface/localMac filled from the primary card when
+        the beamformee isn't armed yet. The GS card MAC is what the drone needs
+        as link.beamforming.remoteMac, so a client must be able to read it from
+        status BEFORE enabling BF (the armer only learns its iface on reconcile)."""
+        st = self.status()
+        if not st["localMac"] and primary_iface:
+            st["localMac"] = self.local_mac(primary_iface)
+            if not st["iface"]:
+                st["iface"] = primary_iface
+        return st
