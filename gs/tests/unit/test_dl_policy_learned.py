@@ -1,19 +1,14 @@
 """Phase 4 integration: warm-start + predictive-demote + regression."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from fpvdgs.dynlink.policy import Policy, PolicyConfig
 from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
 from fpvdgs.dynlink.flightlog import FlightLogConfig
-from fpvdgs.dynlink.profile import load_profile
 from fpvdgs.dynlink.signals import Signals
-
-PROFILES = Path(__file__).resolve().parents[2] / "fpvdgs" / "dynlink" / "profiles"
 
 
 def _profile():
-    return load_profile("m8812eu2", [PROFILES])
+    return "m8812eu2"   # Policy takes the radioProfile string (learned-prior key)
 
 
 def _cfg(tmp_path, **lp):

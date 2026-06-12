@@ -1,26 +1,19 @@
 """Tests for the probe-driven LeadingSelector: probe-promote (climb one
 MCS step when the current+1 probe rung reads clean+fresh for
 promote_debounce_windows consecutive ticks) + reactive demote (Channel-B
-emergency loss/fec/starvation, or a video-PER breach) + inverse
-MCS<->TX-power coupling."""
+emergency loss/fec/starvation, or a video-PER breach)."""
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 
 from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
 from fpvdgs.dynlink.policy import (
     GateConfig,
-    LeadingLoopConfig,
     LeadingSelector,
     Policy,
     PolicyConfig,
     ProfileSelectionConfig,
 )
-from fpvdgs.dynlink.profile import load_profile
-
-PACKAGED_DIR = Path(__file__).resolve().parents[2] / "fpvdgs" / "dynlink" / "profiles"
 
 # Defaults below are deliberately friendly to testing — timing knobs are
 # small (<= the 1000 ms tick spacing the promote tests use) so the climb
@@ -29,10 +22,6 @@ PACKAGED_DIR = Path(__file__).resolve().parents[2] / "fpvdgs" / "dynlink" / "pro
 
 
 def _selector(*,
-              # leading
-              tx_power_min_dBm: float = 18.0,
-              tx_power_max_dBm: float = 28.0,
-              bandwidth: int = 20,
               # gate overrides (probe-driven)
               probe_viable_threshold: float = 0.99,
               probe_freshness_ms: float = 500.0,
@@ -50,12 +39,6 @@ def _selector(*,
               fast_downgrade: bool = True,
               upward_confidence_loops: int = 1,
               ) -> LeadingSelector:
-    profile = load_profile("m8812eu2", [PACKAGED_DIR])
-    leading = LeadingLoopConfig(
-        bandwidth=bandwidth,
-        tx_power_min_dBm=tx_power_min_dBm,
-        tx_power_max_dBm=tx_power_max_dBm,
-    )
     gate = GateConfig(
         probe_viable_threshold=probe_viable_threshold,
         probe_freshness_ms=probe_freshness_ms,
@@ -73,7 +56,7 @@ def _selector(*,
         fast_downgrade=fast_downgrade,
         upward_confidence_loops=upward_confidence_loops,
     )
-    return LeadingSelector(leading, gate, sel, profile)
+    return LeadingSelector(gate, sel)
 
 
 def _probe(viable_mcs, *, per=0.0, age_ms=0.0):
@@ -112,11 +95,6 @@ def test_starts_at_safe_default_mcs1():
     assert s.state.current_mcs == 1
 
 
-def test_initial_tx_power_at_max():
-    s = _selector(tx_power_min_dBm=18.0, tx_power_max_dBm=28.0)
-    assert s.state.tx_power_dBm == 28.0
-
-
 def test_max_mcs_too_low_raises():
     with pytest.raises(ValueError, match="max_mcs"):
         _selector(max_mcs=-1)
@@ -134,7 +112,7 @@ def test_promotes_one_step_when_next_rung_clean_after_debounce():
     # need debounce windows of clean current+1, with rate limit satisfied
     for _ in range(8):
         ts += 1000.0
-        mcs, _, _ = _select(s, probe=_probe(5), ts_ms=ts)
+        mcs, _ = _select(s, probe=_probe(5), ts_ms=ts)
         last = mcs
     assert last == start + 1 or last > start   # climbed at least one rung
 
@@ -142,7 +120,7 @@ def test_promotes_one_step_when_next_rung_clean_after_debounce():
 def test_does_not_promote_on_single_clean_blip():
     s = _selector(max_mcs=5, promote_debounce_windows=3)
     start = s.state.current_mcs
-    mcs, _, changed = _select(s, probe=_probe(5), ts_ms=1000.0)  # 1 window only
+    mcs, changed = _select(s, probe=_probe(5), ts_ms=1000.0)  # 1 window only
     assert mcs == start and not changed
 
 
@@ -151,7 +129,7 @@ def test_stops_climbing_at_ceiling():
     ts = 0.0
     for _ in range(20):
         ts += 1000.0
-        mcs, _, _ = _select(s, probe=_probe(3), ts_ms=ts)
+        mcs, _ = _select(s, probe=_probe(3), ts_ms=ts)
     assert s.state.current_mcs == 3   # cliffed above 3, won't exceed
 
 
@@ -161,7 +139,7 @@ def test_no_promote_when_probe_stale():
     ts = 0.0
     for _ in range(5):
         ts += 1000.0
-        mcs, _, _ = _select(s, probe=_probe(5, age_ms=999.0), ts_ms=ts)  # stale
+        mcs, _ = _select(s, probe=_probe(5, age_ms=999.0), ts_ms=ts)  # stale
     assert s.state.current_mcs == start
 
 
@@ -183,7 +161,7 @@ def test_no_promote_without_probe():
     ts = 0.0
     for _ in range(5):
         ts += 1000.0
-        mcs, _, changed = s.select(
+        mcs, changed = s.select(
             probe=None, loss_rate=0.0, fec_pressure=0.0,
             link_starved=False, ts_ms=ts,
         )
@@ -197,7 +175,7 @@ def test_emergency_loss_still_demotes_one_step():
     s = _selector(emergency_loss_rate=0.05, max_mcs=5, promote_debounce_windows=1)
     _drive_to_mcs_probe(s, 5)
     pre = s.state.current_mcs
-    mcs, _, changed = _select(s, loss=0.06, ts_ms=99999.0)
+    mcs, changed = _select(s, loss=0.06, ts_ms=99999.0)
     assert changed and mcs == pre - 1
 
 
@@ -206,7 +184,7 @@ def test_emergency_fec_pressure_demotes_one_step():
                   promote_debounce_windows=1)
     _drive_to_mcs_probe(s, 5)
     pre = s.state.current_mcs
-    mcs, _, changed = _select(s, fec=0.85, ts_ms=99999.0)
+    mcs, changed = _select(s, fec=0.85, ts_ms=99999.0)
     assert changed and mcs == pre - 1
 
 
@@ -214,7 +192,7 @@ def test_emergency_link_starved_demotes_one_step():
     s = _selector(max_mcs=5, promote_debounce_windows=1)
     _drive_to_mcs_probe(s, 5)
     pre = s.state.current_mcs
-    mcs, _, changed = _select(s, link_starved=True, ts_ms=99999.0)
+    mcs, changed = _select(s, link_starved=True, ts_ms=99999.0)
     assert changed and mcs == pre - 1
 
 
@@ -225,7 +203,7 @@ def test_emergency_below_threshold_no_demote():
                   promote_debounce_windows=1)
     _drive_to_mcs_probe(s, 5)
     pre = s.state.current_mcs
-    mcs, _, changed = _select(s, loss=0.04, ts_ms=99999.0)
+    mcs, changed = _select(s, loss=0.04, ts_ms=99999.0)
     assert not changed
     assert mcs == pre
 
@@ -238,7 +216,7 @@ def test_emergency_at_mcs0_cannot_force_below():
         ts += 1000.0
         _select(s, link_starved=True, ts_ms=ts)
     ts += 1000.0
-    mcs, _, changed = _select(s, link_starved=True, ts_ms=ts)
+    mcs, changed = _select(s, link_starved=True, ts_ms=ts)
     assert not changed
     assert mcs == 0
 
@@ -255,43 +233,8 @@ def test_video_per_breach_demotes():
     pre = s.state.current_mcs
     # loss between video_demote_per (0.03) and emergency_loss_rate (0.50):
     # emergency stays inactive, video-PER breach fires.
-    mcs, _, changed = _select(s, loss=0.04, ts_ms=99999.0)
+    mcs, changed = _select(s, loss=0.04, ts_ms=99999.0)
     assert changed and mcs == pre - 1
-
-
-# ── Inverse MCS<->TX power coupling ─────────────────────────────────────────
-
-
-def test_tx_power_at_mcs0_is_max():
-    s = _selector(tx_power_min_dBm=18.0, tx_power_max_dBm=28.0, max_mcs=5,
-                  promote_debounce_windows=1)
-    ts = 0.0
-    while s.state.current_mcs > 0:
-        ts += 1000.0
-        _select(s, link_starved=True, ts_ms=ts)
-    assert s.state.current_mcs == 0
-    assert int(round(s.state.tx_power_dBm)) == 28
-
-
-def test_tx_power_at_max_mcs_is_min():
-    s = _selector(tx_power_min_dBm=18.0, tx_power_max_dBm=28.0, max_mcs=5,
-                  promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
-    assert s.state.current_mcs == 5
-    assert int(round(s.state.tx_power_dBm)) == 18
-
-
-def test_tx_power_jumps_atomically_on_emergency_drop():
-    s = _selector(tx_power_min_dBm=18.0, tx_power_max_dBm=28.0, max_mcs=5,
-                  promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
-    assert int(round(s.state.tx_power_dBm)) == 18
-    # Single emergency tick → MCS 5 → 4 → power follows in same tick.
-    _, _, changed = _select(s, loss=0.10, ts_ms=99999.0)
-    assert changed
-    assert s.state.current_mcs == 4
-    # MCS4 with cap=5, range [18,28]: power = 28 - (4/5)*10 = 20.
-    assert int(round(s.state.tx_power_dBm)) == 20
 
 
 def test_strong_rssi_does_not_raise_mcs_without_probe_or_prior():
@@ -301,15 +244,11 @@ def test_strong_rssi_does_not_raise_mcs_without_probe_or_prior():
     stays at the boot MCS (1); in production the probe climbs from there."""
     from fpvdgs.dynlink.signals import Signals
 
-    profile = load_profile("m8812eu2", [PACKAGED_DIR])
-    cfg = PolicyConfig(
-        leading=LeadingLoopConfig(tx_power_min_dBm=5.0, tx_power_max_dBm=30.0),
-        learned_prior=LearnedPriorConfig(enabled=False),
-    )
+    cfg = PolicyConfig(learned_prior=LearnedPriorConfig(enabled=False))
     # No probe_status → selector can never promote; learned prior off → no
     # warm-start seed. Any MCS > boot would have to come from the removed
     # RSSI cold-start.
-    policy = Policy(cfg, profile)
+    policy = Policy(cfg)
 
     strong_signals = Signals(
         rssi=-50.0, rssi_min_w=-50.0, rssi_max_w=-50.0,

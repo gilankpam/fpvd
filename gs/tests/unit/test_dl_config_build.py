@@ -1,12 +1,12 @@
 from fpvdgs.dynlink.config_build import (
-    build_aggregator, build_policy_config, make_dl_snapshot, resolve_profile,
+    build_aggregator, build_policy_config, make_dl_snapshot,
 )
 
 
 def _block(**over):
     blk = {
-        "enabled": True, "maxMcs": 5, "bandwidth": 20,
-        "txpower": {"min": 18, "max": 28}, "radioProfile": "m8812eu2",
+        "enabled": True, "maxMcs": 5,
+        "radioProfile": "m8812eu2",
         "droneAddr": None, "dronePort": 9999, "tuning": {},
     }
     blk.update(over)
@@ -16,9 +16,6 @@ def _block(**over):
 def test_curated_keys_map_into_policy_config():
     cfg = build_policy_config(_block())
     assert cfg.gate.max_mcs == 5
-    assert cfg.leading.bandwidth == 20
-    assert cfg.leading.tx_power_min_dBm == 18
-    assert cfg.leading.tx_power_max_dBm == 28
 
 
 def test_tuning_passthrough_overrides_defaults():
@@ -27,11 +24,6 @@ def test_tuning_passthrough_overrides_defaults():
     # curated key still wins over any tuning attempt at the same field
     cfg2 = build_policy_config(_block(maxMcs=3, tuning={"gate": {"max_mcs": 7}}))
     assert cfg2.gate.max_mcs == 3
-
-
-def test_resolve_profile_uses_packaged_json():
-    prof = resolve_profile(_block(radioProfile="m8812eu2"))
-    assert prof.name == "BL-M8812EU2"
 
 
 def test_build_aggregator_reads_tuning_smoothing():

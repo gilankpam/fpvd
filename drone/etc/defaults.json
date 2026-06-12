@@ -1,11 +1,11 @@
 {
   "link": {
-    "channel": 161,
+    "channel": 132,
     "width": 20,
     "txPowerDbm": 20,
     "mcs": 2,
     "fec": {
-      "mode": "rs",
+      "mode": "swfec",
       "k": 8,
       "n": 12,
       "overheadPct": 50,

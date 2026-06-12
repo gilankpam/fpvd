@@ -119,8 +119,7 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
         "link": {"channel": 132, "width": 40, "region": "US"},
         "wfb": {"profile": "gs", "raw": {}},
         "drone": {"endpoint": "http://127.0.0.1:1"},
-        "dynamicLink": {"enabled": False, "maxMcs": 5, "bandwidth": 20,
-                        "txpower": {"min": 18, "max": 28},
+        "dynamicLink": {"enabled": False, "maxMcs": 5,
                         "radioProfile": "m8812eu2", "droneAddr": None,
                         "dronePort": 9999, "tuning": {}}}))
     cfg_out = tmp_path / "wfb.cfg"
@@ -173,8 +172,7 @@ def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
         "wfb": {"profile": "gs", "raw": {}},
         "drone": {"endpoint": "http://127.0.0.1:1"},
         "pixelpilot": {"enabled": False},
-        "dynamicLink": {"enabled": True, "maxMcs": 5, "bandwidth": 20,
-                        "txpower": {"min": 18, "max": 28},
+        "dynamicLink": {"enabled": True, "maxMcs": 5,
                         "radioProfile": "m8812eu2", "dronePort": 9999,
                         "tuning": {}}}))
     cfg_out = tmp_path / "wfb.cfg"

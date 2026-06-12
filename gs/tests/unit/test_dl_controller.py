@@ -7,8 +7,8 @@ from fpvdgs.dynlink.stats_client import RxAnt, RxEvent, SessionInfo
 
 def _snapshot(drone_port, **over):
     snap = {
-        "enabled": True, "maxMcs": 5, "bandwidth": 20,
-        "txpower": {"min": 18, "max": 28}, "radioProfile": "m8812eu2",
+        "enabled": True, "maxMcs": 5,
+        "radioProfile": "m8812eu2",
         "droneAddr": "127.0.0.1", "dronePort": drone_port, "tuning": {},
     }
     snap.update(over)
