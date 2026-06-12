@@ -24,6 +24,16 @@ def _records(path):
                     continue
 
 
+def probe_target_per(rec) -> float | None:
+    """PER of the probed rung (operating MCS + 1) from one record, or None
+    (pre-field logs, no probe_status, or the rung was never heard)."""
+    mcs = rec.get("mcs")
+    if mcs is None:
+        return None
+    entry = (rec.get("probe") or {}).get(str(mcs + 1)) or {}
+    return entry.get("per")
+
+
 def summarize(path) -> dict:
     recs = list(_records(path))
     time_at_mcs = Counter()
@@ -68,12 +78,15 @@ def _plot(path, out):
         return
     recs = list(_records(path))
     ts = [r.get("ts") for r in recs]
-    fig, ax = plt.subplots(2, 1, sharex=True)
+    fig, ax = plt.subplots(3, 1, sharex=True)
     ax[0].plot(ts, [r.get("rssi") for r in recs], label="rssi")
     ax[0].plot(ts, [r.get("ceiling") for r in recs], label="ceiling")
     ax[0].legend(); ax[0].set_ylabel("RSSI / ceiling")
     ax[1].plot(ts, [r.get("mcs") for r in recs], label="mcs")
-    ax[1].legend(); ax[1].set_ylabel("MCS"); ax[1].set_xlabel("ts")
+    ax[1].plot(ts, [r.get("pc") for r in recs], label="pc")
+    ax[1].legend(); ax[1].set_ylabel("MCS")
+    ax[2].plot(ts, [probe_target_per(r) for r in recs], label="probe per (mcs+1)")
+    ax[2].legend(); ax[2].set_ylabel("PER"); ax[2].set_xlabel("ts")
     fig.savefig(out)
     print(f"wrote {out}")
 
