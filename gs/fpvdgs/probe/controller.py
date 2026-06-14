@@ -24,8 +24,9 @@ class ProbeController:
     def __init__(self, snapshot, *, spawn=None, ewma_alpha: float = 0.25):
         self._snap = dict(snapshot)
         self._spawn = spawn or _default_spawn   # cmd(list[str]) -> proc (await or sync in tests)
-        # Measurement tuning rides in the snapshot (config-driven); the kwarg is
-        # the fallback default for callers that don't supply it.
+        # Measurement tuning comes from the snapshot (frozen constants from
+        # config_build.PROBE_*); the kwarg is a fallback for tests that supply
+        # a bare snapshot without ewmaAlpha.
         self._alpha = float(snapshot.get("ewmaAlpha", ewma_alpha))
         self._blackout = int(snapshot.get("blackoutWindows", 10))
         self._lock = threading.RLock()

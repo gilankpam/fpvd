@@ -15,6 +15,8 @@ def test_snapshot_uses_frozen_probe_constants():
     assert snap["rxL"] == PROBE_RX_L == 50
     assert snap["ewmaAlpha"] == PROBE_EWMA_ALPHA
     assert snap["blackoutWindows"] == PROBE_BLACKOUT_WINDOWS
+    assert snap["linkId"] == 7669206
+    assert snap["wlans"] == ["wlan0"]
 
 
 def test_snapshot_ignores_orphaned_probe_block():

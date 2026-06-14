@@ -79,15 +79,6 @@ def test_retune_followed_via_rx_ant_key():
     finally:
         c.stop()
 
-def test_snapshot_tuning_defaults():
-    from fpvdgs.probe.config_build import make_probe_snapshot
-    eff = {"link": {"linkId": 7, "wlans": ["wlanA"]}}
-    snap = make_probe_snapshot(eff)
-    assert snap["rxL"] == 50
-    assert snap["blackoutWindows"] == 10
-    assert snap["ewmaAlpha"] == 0.25
-
-
 def test_controller_honors_blackout_windows_from_snapshot():
     # blackoutWindows=2 → a run of 2 empty windows pins per=1.0
     def spawn(cmd):

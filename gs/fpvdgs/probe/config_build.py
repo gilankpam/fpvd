@@ -1,6 +1,7 @@
 """Build the self-contained snapshot the ProbeController consumes. One fixed
 probe wfb_rx on kProbePort (matching the drone's probe radio_port). No probe
-config — the probe lifecycle follows dynamicLink."""
+config — the probe lifecycle follows dynamicLink. Measurement knobs
+(rxL/ewmaAlpha/blackoutWindows) are frozen module constants — no config path."""
 from __future__ import annotations
 
 from ..runner_supervisor import resolve_wlans
