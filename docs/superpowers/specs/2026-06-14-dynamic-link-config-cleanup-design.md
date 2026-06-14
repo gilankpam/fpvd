@@ -49,7 +49,7 @@ same first-class validation the drone already has.
 |---|---|---|---|
 | scalars | `enabled, healthTimeoutMs, applyStaggerMs, applySubPaceMs` | defaults.json | Tier 1 `enabled`; Tier 2 rest |
 | `roiQp` | `thresholdKbps, lowAnchorKbps, floor, step` | defaults.json | Tier 2 |
-| `safe` | `mcs, k, n, overheadPct, deadlineMs, bandwidth, txPowerDbm, bitrateKbps` | defaults.json | Tier 1 (keep self-contained) |
+| `safe` | `mcs, k, n, overheadPct, deadlineMs, bitrateKbps` | defaults.json | Tier 1; `bandwidth`/`txPowerDbm` **removed → derived** (B5) |
 | `bitrate` | `minBitrateKbps, maxBitrateKbps` | schema-only | **merge → `compute`** (Tier 2) |
 | `fec` | `baseRedundancyRatio, blocksPerFrame, kMin, kMax` | schema-only | **merge → `compute`** (Tier 2) |
 
@@ -122,10 +122,24 @@ the GS tuple matches — replacing the "keep in sync by hand" coupling with a te
 (`rssi_norm.enabled` rollback toggle is dropped; flip the constant + redeploy if
 rollback is ever needed.)
 
-**B5. `safe` — considered, keep as-is**
-A failsafe must not derive values from the curve / `link.fec`, so `safe` stays
-self-contained and fully explicit. (The only arguable cut — deriving
-`safe.txPowerDbm` from the frozen curve at `safe.mcs` — is rejected here.)
+**B5. Slim `safe`: derive `bandwidth` and `txPowerDbm`**
+Drop `dynamicLink.safe.bandwidth` and `dynamicLink.safe.txPowerDbm` from config
+(schema + defaults.json + `validate.cpp` checks).
+
+- `txPowerDbm` is **already dead**: `dispatchTxSafe` pushes
+  `txpowerDbmForMcs(safe.mcs)` (the frozen Tier-3 curve) and never reads the
+  configured value — so removal is zero behavior change.
+- `bandwidth` is derived from the operating `link.width`
+  (`modulationWidth(link.width)`, identical to `linkBandwidth`). The safe rung
+  must not change bandwidth — a NIC retune drops the link — so sourcing it from
+  the operating width is both dedup and a correctness fix.
+
+`SafeDefaults` shrinks to `{mcs, k, n, overheadPct, deadlineMs, bitrateKbps}`;
+`dispatchTxSafe` uses `cfg.linkBandwidth` + `txpowerDbmForMcs(cfg.safe.mcs)`.
+The remaining fields stay explicit — a failsafe's k/n/overhead/deadline/bitrate
+are deliberate recovery values, not derived. (Drone overlays are nlohmann-
+tolerant, so a stale `safe.bandwidth`/`safe.txPowerDbm` is silently ignored, not
+fatal; clean them out anyway.)
 
 ## Section C — Retier + formalize the GS surface
 
