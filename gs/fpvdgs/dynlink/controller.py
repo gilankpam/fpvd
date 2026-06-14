@@ -121,7 +121,7 @@ class DynamicLinkController:
         # the low/zero-rate uplink streams would trip link_starved and pin MCS at
         # the floor, and pollute the session/loss/fec signals. Match the video
         # stream by id substring (records are e.g. "video rx").
-        video_id = (snap.get("videoStreamId") or "video").lower()
+        video_id = "video"   # frozen: the wfb video stream id
 
         def _is_video(ev):
             return ev.id is not None and video_id in ev.id.lower()

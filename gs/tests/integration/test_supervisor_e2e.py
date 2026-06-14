@@ -120,7 +120,7 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
         "drone": {"endpoint": "http://127.0.0.1:1"},
         "dynamicLink": {"enabled": False, "maxMcs": 5,
                         "radioProfile": "m8812eu2", "droneAddr": None,
-                        "dronePort": 9999, "tuning": {}}}))
+                        "dronePort": 9999}}))
     cfg_out = tmp_path / "wfb.cfg"
 
     app = supervisor.build_app(str(config_json),
@@ -172,8 +172,7 @@ def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
         "drone": {"endpoint": "http://127.0.0.1:1"},
         "pixelpilot": {"enabled": False},
         "dynamicLink": {"enabled": True, "maxMcs": 5,
-                        "radioProfile": "m8812eu2", "dronePort": 9999,
-                        "tuning": {}}}))
+                        "radioProfile": "m8812eu2", "dronePort": 9999}}))
     cfg_out = tmp_path / "wfb.cfg"
     api_port = _free_port()
     app = supervisor.build_app(str(config_json),

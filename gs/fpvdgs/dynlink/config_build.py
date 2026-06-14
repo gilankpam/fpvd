@@ -1,41 +1,62 @@
 # gs/fpvdgs/dynlink/config_build.py
-"""Translate fpvd's `dynamicLink` config block into the policy/aggregator
-objects the lifted control core expects, and build the controller snapshot.
+"""Map fpvd's `dynamicLink` config block onto the policy/aggregator objects
+the controller consumes, and build the controller snapshot.
 
-The lifted `_build_policy_config(raw)` / `_build_aggregator(raw)` consume a
-dict shaped like the old gs.yaml. We construct that `raw` from the opaque
-`tuning` passthrough, then overlay the curated top-level keys so they always
-win."""
+The block is explicit (no opaque `tuning` passthrough): `selector` and
+`smoothing` carry the tunable knobs; `flightlog`/`rssiNorm` expose only an
+`enabled` toggle (their internals are frozen code constants); learned-prior
+internals are frozen entirely. camelCase JSON maps to the dataclasses'
+snake_case fields."""
 from __future__ import annotations
 
-import copy
-import logging
 from urllib.parse import urlparse
 
 from .flightlog import FlightLogConfig
 from .learned_prior import LearnedPriorConfig
-from .policy import GateConfig, PolicyConfig, ProfileSelectionConfig
+from .policy import PolicyConfig, SelectorConfig
 from .signals import RssiNormConfig, SignalAggregator
-
-log = logging.getLogger("fpvdgs.dynlink")
-
-
-def _raw_from_block(block: dict) -> dict:
-    """Build a gs.yaml-shaped `raw` dict: tuning is the base, curated keys
-    are overlaid so they always win over any tuning attempt."""
-    raw = copy.deepcopy(block.get("tuning") or {})
-    gate = raw.setdefault("gate", {})
-    if "maxMcs" in block:
-        gate["max_mcs"] = int(block["maxMcs"])
-    return raw
 
 
 def build_policy_config(block: dict) -> PolicyConfig:
-    return _build_policy_config(_raw_from_block(block))
+    sel = block.get("selector", {}) or {}
+    d = SelectorConfig()
+    selector = SelectorConfig(
+        probe_viable_threshold=float(sel.get("probeViableThreshold", d.probe_viable_threshold)),
+        probe_freshness_ms=float(sel.get("probeFreshnessMs", d.probe_freshness_ms)),
+        promote_debounce_windows=int(sel.get("promoteDebounceWindows", d.promote_debounce_windows)),
+        video_demote_per=float(sel.get("videoDemotePer", d.video_demote_per)),
+        emergency_loss_rate=float(sel.get("emergencyLossRate", d.emergency_loss_rate)),
+        emergency_fec_pressure=float(sel.get("emergencyFecPressure", d.emergency_fec_pressure)),
+        max_mcs=int(block.get("maxMcs", d.max_mcs)),
+        hold_modes_down_ms=int(sel.get("holdModesDownMs", d.hold_modes_down_ms)),
+        min_between_changes_ms=int(sel.get("minBetweenChangesMs", d.min_between_changes_ms)),
+        starvation_windows=int(sel.get("starvationWindows", d.starvation_windows)),
+    )
+    fl = block.get("flightlog", {}) or {}
+    # flightlog internals are frozen — read only `enabled`.
+    flightlog = FlightLogConfig(enabled=bool(fl.get("enabled", True)))
+    return PolicyConfig(
+        selector=selector,
+        learned_prior=LearnedPriorConfig(),   # frozen: always-on, internal defaults
+        flightlog=flightlog,
+    )
 
 
 def build_aggregator(block: dict) -> SignalAggregator:
-    return _build_aggregator(_raw_from_block(block))
+    s = block.get("smoothing", {}) or {}
+    rn = block.get("rssiNorm", {}) or {}
+    d = SignalAggregator()
+    dn = RssiNormConfig()
+    # rssiNorm curve is frozen — read only `enabled` (the rollback toggle).
+    rssi_norm = RssiNormConfig(enabled=bool(rn.get("enabled", dn.enabled)))
+    return SignalAggregator(
+        ewma_alpha_rssi=float(s.get("ewmaAlphaRssi", d.ewma_alpha_rssi)),
+        ewma_alpha_fec=float(s.get("ewmaAlphaFec", d.ewma_alpha_fec)),
+        ewma_alpha_burst=float(s.get("ewmaAlphaBurst", d.ewma_alpha_burst)),
+        starvation_threshold_pps=float(
+            s.get("starvationThresholdPps", d.starvation_threshold_pps)),
+        rssi_norm=rssi_norm,
+    )
 
 
 def make_dl_snapshot(effective: dict) -> dict:
@@ -48,163 +69,3 @@ def make_dl_snapshot(effective: dict) -> dict:
     block["droneAddr"] = block.get("droneAddr") or host
     block["dronePort"] = int(block.get("dronePort") or 9999)
     return block
-
-
-_DEPRECATED_LEADING_KEYS = {
-    # Old hysteresis / inhibit knobs — superseded by gate / profile_selection.
-    "snr_margin_db", "snr_up_guard_db", "snr_up_hold_ms", "snr_down_hold_ms",
-    "loss_margin_weight", "fec_margin_weight", "forced_drop_inhibit_ms",
-    "mcs_max",  # moved to gate.max_mcs
-    "bandwidth",  # row table removed — selection is probe-driven
-    # Old RSSI closed loop / closed-loop power knobs — fully retired.
-    # TX power is drone-local (txpower_curve.hpp).
-    "rssi_margin_db", "rssi_up_guard_db", "rssi_up_hold_ms",
-    "rssi_down_hold_ms", "rssi_target_dBm", "rssi_deadband_db",
-    "tx_power_min_dBm", "tx_power_max_dBm",
-    "tx_power_cooldown_ms", "tx_power_freeze_after_mcs_ms",
-    "tx_power_step_max_db", "tx_power_gain_up_db", "tx_power_gain_down_db",
-}
-
-_DEPRECATED_GATE_KEYS = {
-    "snr_ema_alpha", "snr_slope_alpha", "snr_predict_horizon_ticks",
-    "snr_safety_margin", "loss_margin_weight", "fec_margin_weight",
-    "hysteresis_up_db", "hysteresis_down_db",
-}
-
-_DEPRECATED_PHASE3A_KEYS = {
-    # bitrate/FEC/predictor knobs moved to the drone in Phase 3a.
-    "utilization_factor", "min_bitrate_kbps", "max_bitrate_kbps",
-    "base_redundancy_ratio", "max_redundancy_ratio", "blocks_per_frame",
-    "depth_max", "n_loss_threshold", "n_loss_windows", "n_loss_step",
-    "n_recover_windows", "n_recover_step", "max_n_escalation",
-    "per_packet_airtime_us", "max_latency_ms",
-}
-
-
-def _build_policy_config(raw: dict) -> PolicyConfig:
-    leading_raw = raw.get("leading_loop", {})
-    gate_raw = raw.get("gate", {})
-    selection_raw = raw.get("profile_selection", {})
-
-    bitrate_raw = raw.get("policy", {}).get("bitrate", {})
-    fec_raw = raw.get("fec", {})
-    video_raw = raw.get("video", {})
-    retired_present = sorted(
-        {k for raw_sub in (bitrate_raw, fec_raw, video_raw)
-         for k in _DEPRECATED_PHASE3A_KEYS
-         if k in (raw_sub or {})}
-    )
-    if retired_present:
-        log.warning(
-            "bitrate/FEC/predictor knobs are now drone-local (Phase 3a) and "
-            "ignored on the GS: %s", ", ".join(retired_present)
-        )
-
-    deprecated_present = sorted(
-        k for k in _DEPRECATED_LEADING_KEYS if k in leading_raw
-    )
-    if deprecated_present:
-        log.warning(
-            "leading_loop has deprecated keys (ignored): %s. "
-            "Migrate to the `gate:` / `profile_selection:` sections.",
-            ", ".join(deprecated_present),
-        )
-
-    dep_gate = sorted(k for k in _DEPRECATED_GATE_KEYS if k in gate_raw)
-    if dep_gate:
-        log.warning(
-            "gate has deprecated SNR knobs (ignored): %s. "
-            "MCS is now probe-driven.", ", ".join(dep_gate)
-        )
-
-    gate = GateConfig(
-        probe_viable_threshold=float(gate_raw.get("probe_viable_threshold", 0.99)),
-        probe_freshness_ms=float(gate_raw.get("probe_freshness_ms", 500.0)),
-        promote_debounce_windows=int(gate_raw.get("promote_debounce_windows", 3)),
-        video_demote_per=float(gate_raw.get("video_demote_per", 0.05)),
-        emergency_loss_rate=float(gate_raw.get("emergency_loss_rate", 0.05)),
-        emergency_fec_pressure=float(
-            gate_raw.get("emergency_fec_pressure", 0.80)
-        ),
-        max_mcs=int(gate_raw.get("max_mcs", 7)),
-        max_mcs_step_up=int(gate_raw.get("max_mcs_step_up", 1)),
-    )
-
-    if "hold_fallback_mode_ms" in selection_raw:
-        log.warning(
-            "profile_selection.hold_fallback_mode_ms is deprecated and no "
-            "longer affects controller behavior — MCS=0 → 1 climbs now use "
-            "the unified confidence-loop gate. Remove the key from gs.yaml."
-        )
-
-    selection = ProfileSelectionConfig(
-        hold_fallback_mode_ms=int(
-            selection_raw.get("hold_fallback_mode_ms", 1000)
-        ),
-        hold_modes_down_ms=int(selection_raw.get("hold_modes_down_ms", 2000)),
-        min_between_changes_ms=int(
-            selection_raw.get("min_between_changes_ms", 200)
-        ),
-        fast_downgrade=bool(selection_raw.get("fast_downgrade", True)),
-        upward_confidence_loops=int(
-            selection_raw.get("upward_confidence_loops", 4)
-        ),
-    )
-
-    policy_raw = raw.get("policy", {})
-
-    lp_raw = raw.get("learned_prior", {}) or {}
-    fl_raw = lp_raw.get("flightlog", {}) or {}
-    learned_prior = LearnedPriorConfig(
-        enabled=bool(lp_raw.get("enabled", True)),
-        bin_width_db=float(lp_raw.get("bin_width_db", 2.0)),
-        rssi_min=float(lp_raw.get("rssi_min", -90.0)),
-        rssi_max=float(lp_raw.get("rssi_max", -30.0)),
-        ewma_alpha=float(lp_raw.get("ewma_alpha", 0.1)),
-        viable_threshold=float(lp_raw.get("viable_threshold", 0.99)),
-        min_samples_warmstart=int(lp_raw.get("min_samples_warmstart", 20)),
-        min_samples_predictive=int(lp_raw.get("min_samples_predictive", 40)),
-        warmstart_margin=int(lp_raw.get("warmstart_margin", 0)),
-        predictive_horizon_ticks=int(lp_raw.get("predictive_horizon_ticks", 3)),
-        predictive_debounce_windows=int(lp_raw.get("predictive_debounce_windows", 3)),
-        flush_interval_observations=int(lp_raw.get("flush_interval_observations", 50)),
-        persist_dir=str(lp_raw.get("persist_dir", "/etc/fpvd/learned")),
-    )
-    flightlog = FlightLogConfig(
-        enabled=bool(fl_raw.get("enabled", True)),
-        dir=str(fl_raw.get("dir", "/media/dvr/log/dynamic-link/")),
-        max_files=int(fl_raw.get("max_files", 8)),
-        max_mb=float(fl_raw.get("max_mb", 4.0)),
-        flight_gap_s=float(fl_raw.get("flight_gap_s", 15.0)),
-    )
-
-    return PolicyConfig(
-        gate=gate,
-        selection=selection,
-        starvation_windows=int(policy_raw.get("starvation_windows", 5)),
-        learned_prior=learned_prior,
-        flightlog=flightlog,
-    )
-
-
-def _build_aggregator(raw: dict) -> SignalAggregator:
-    s = raw.get("smoothing", {})
-    starv = s.get("starvation_threshold_pps", 50.0)
-    rn = raw.get("rssi_norm", {}) or {}
-    # Defer to the dataclass for default values so the drone-mirror curve
-    # lives in exactly one place (signals.RssiNormConfig).
-    d = RssiNormConfig()
-    rssi_norm = RssiNormConfig(
-        enabled=bool(rn.get("enabled", d.enabled)),
-        p_ref_dbm=int(rn.get("p_ref_dbm", d.p_ref_dbm)),
-        tx_power_dbm_by_mcs=tuple(
-            int(x) for x in rn.get("tx_power_dbm_by_mcs", d.tx_power_dbm_by_mcs)
-        ),
-    )
-    return SignalAggregator(
-        ewma_alpha_rssi=float(s.get("ewma_alpha_rssi", 0.2)),
-        ewma_alpha_fec=float(s.get("ewma_alpha_fec", 0.2)),
-        ewma_alpha_burst=float(s.get("ewma_alpha_burst", 0.1)),
-        starvation_threshold_pps=float(starv),
-        rssi_norm=rssi_norm,
-    )

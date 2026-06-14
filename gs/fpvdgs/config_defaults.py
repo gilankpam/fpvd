@@ -4,6 +4,37 @@ Mirrors the drone: code holds every default; config.json is the full effective
 config, merged onto these defaults. `--dump-config` materializes this tree."""
 from __future__ import annotations
 
+from .dynlink.policy import SelectorConfig
+from .dynlink.signals import SignalAggregator
+
+
+def _dynamic_link_defaults() -> dict:
+    sel = SelectorConfig()
+    agg = SignalAggregator()
+    return {
+        "enabled": False, "maxMcs": 5, "radioProfile": "m8812eu2",
+        "droneAddr": None, "dronePort": 9999,
+        "selector": {
+            "probeViableThreshold": sel.probe_viable_threshold,
+            "probeFreshnessMs": sel.probe_freshness_ms,
+            "promoteDebounceWindows": sel.promote_debounce_windows,
+            "videoDemotePer": sel.video_demote_per,
+            "emergencyLossRate": sel.emergency_loss_rate,
+            "emergencyFecPressure": sel.emergency_fec_pressure,
+            "holdModesDownMs": sel.hold_modes_down_ms,
+            "minBetweenChangesMs": sel.min_between_changes_ms,
+            "starvationWindows": sel.starvation_windows,
+        },
+        "smoothing": {
+            "ewmaAlphaRssi": agg.ewma_alpha_rssi,
+            "ewmaAlphaFec": agg.ewma_alpha_fec,
+            "ewmaAlphaBurst": agg.ewma_alpha_burst,
+            "starvationThresholdPps": agg.starvation_threshold_pps,
+        },
+        "flightlog": {"enabled": True},
+        "rssiNorm": {"enabled": True},
+    }
+
 
 def default_config() -> dict:
     return {
@@ -17,11 +48,7 @@ def default_config() -> dict:
             "raw": {},
         },
         "drone": {"endpoint": "http://10.5.0.10:8080"},
-        "dynamicLink": {
-            "enabled": False, "maxMcs": 5, "radioProfile": "m8812eu2",
-            "droneAddr": None, "dronePort": 9999, "videoStreamId": "video",
-            "tuning": {},
-        },
+        "dynamicLink": _dynamic_link_defaults(),
         "idrForward": {"enabled": True, "port": 11223},
         "pixelpilot": {
             "enabled": True, "bin": "/usr/bin/pixelpilot", "env": {},

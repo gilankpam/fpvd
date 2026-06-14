@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 log = logging.getLogger("fpvdgs.dynlink")
 
-MAX_MCS = 7   # rung ceiling (matches GateConfig.max_mcs default and the drone)
+MAX_MCS = 7   # rung ceiling (matches SelectorConfig.max_mcs default and the drone)
 
 
 @dataclass

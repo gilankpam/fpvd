@@ -8,11 +8,10 @@ import pytest
 
 from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
 from fpvdgs.dynlink.policy import (
-    GateConfig,
     LeadingSelector,
     Policy,
     PolicyConfig,
-    ProfileSelectionConfig,
+    SelectorConfig,
 )
 
 # Defaults below are deliberately friendly to testing — timing knobs are
@@ -22,7 +21,6 @@ from fpvdgs.dynlink.policy import (
 
 
 def _selector(*,
-              # gate overrides (probe-driven)
               probe_viable_threshold: float = 0.99,
               probe_freshness_ms: float = 500.0,
               promote_debounce_windows: int = 3,
@@ -30,16 +28,11 @@ def _selector(*,
               emergency_loss_rate: float = 0.05,
               emergency_fec_pressure: float = 0.80,
               max_mcs: int = 7,
-              max_mcs_step_up: int = 1,
-              # selection overrides — kept small so promotes aren't
-              # rate-limited across 1000 ms-spaced ticks.
-              hold_fallback_mode_ms: int = 0,
               hold_modes_down_ms: int = 0,
               min_between_changes_ms: int = 0,
-              fast_downgrade: bool = True,
-              upward_confidence_loops: int = 1,
+              starvation_windows: int = 5,
               ) -> LeadingSelector:
-    gate = GateConfig(
+    return LeadingSelector(SelectorConfig(
         probe_viable_threshold=probe_viable_threshold,
         probe_freshness_ms=probe_freshness_ms,
         promote_debounce_windows=promote_debounce_windows,
@@ -47,16 +40,10 @@ def _selector(*,
         emergency_loss_rate=emergency_loss_rate,
         emergency_fec_pressure=emergency_fec_pressure,
         max_mcs=max_mcs,
-        max_mcs_step_up=max_mcs_step_up,
-    )
-    sel = ProfileSelectionConfig(
-        hold_fallback_mode_ms=hold_fallback_mode_ms,
         hold_modes_down_ms=hold_modes_down_ms,
         min_between_changes_ms=min_between_changes_ms,
-        fast_downgrade=fast_downgrade,
-        upward_confidence_loops=upward_confidence_loops,
-    )
-    return LeadingSelector(gate, sel)
+        starvation_windows=starvation_windows,
+    ))
 
 
 def _probe(viable_mcs, *, per=0.0, age_ms=0.0):
