@@ -257,10 +257,8 @@ class Policy:
         # glitches). At 10 Hz, starvation_windows=5 = 0.5 s of below-
         # threshold packet rate before declaring blackout.
         self._starvation_count: int = 0
-        # Phase 4: learned per-card prior + flight log. Keyed by the
-        # operator-set dynamicLink.radioProfile string. GS-local; the live
-        # probe stays authoritative.
-        # Always-on: the learned prior is an unconditional part of the loop.
+        # Learned per-card prior (always-on), keyed by the operator-set
+        # dynamicLink.radioProfile; GS-local, the live probe stays authoritative.
         self.learned_prior = LearnedPrior(profile_name, cfg.learned_prior)
         self._prev_rssi: float | None = None
         self._predict_demote_count = 0

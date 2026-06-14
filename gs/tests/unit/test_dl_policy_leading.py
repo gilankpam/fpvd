@@ -236,7 +236,7 @@ def test_strong_rssi_does_not_raise_mcs_without_probe_or_prior(tmp_path):
     # No probe_status → selector can never promote; cold prior (empty dir) →
     # no warm-start seed. Any MCS > boot would have to come from the removed
     # RSSI cold-start.
-    policy = Policy(cfg)
+    policy = Policy(cfg, "test-cold-prior")  # cold: persist_dir is an empty tmp_path, so no warm-start seed
 
     strong_signals = Signals(
         rssi=-50.0, rssi_min_w=-50.0, rssi_max_w=-50.0,
