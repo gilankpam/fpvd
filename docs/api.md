@@ -916,13 +916,13 @@ curl -X PATCH http://127.0.0.1:8080/config \
 
 The ground-station `fpvd` (Python, `gs/fpvdgs/`) owns the **GS** wfb radio config and supervises the GS wfb data plane, replacing the stock `wfb-server`/`S98wifibroadcast`. A supervisor process owns the config + this HTTP API; a runner child imports the `wfb_ng` library to run `wfb_rx`/`wfb_tx` and continues to serve the wfb stats APIs on `:8103` (JSON) / `:8003` (MsgPack), so `dynamic-link-gs` and `wfb-cli` are unaffected.
 
-Binds `0.0.0.0:8080` (same posture as the drone). Source of truth: `/etc/fpvd/{defaults,config}.json`; the daemon renders these to `/etc/wifibroadcast.cfg` (a generated artifact — do not edit). The stage→apply lifecycle (effective vs pending, `?pending=true`) is identical to the drone's.
+Binds `0.0.0.0:8080` (same posture as the drone). Source of truth: `/etc/fpvd/config.json`; the daemon renders these to `/etc/wifibroadcast.cfg` (a generated artifact — do not edit). The stage→apply lifecycle (effective vs pending, `?pending=true`) is identical to the drone's.
 
 ### Differences from the drone API at a glance
 
 | | Drone | Ground station |
 |--|--|--|
-| Config schema | link + video + image + telemetry + recording + dynamicLink + services | **radio-only**: `link` + `wfb` + `drone` |
+| Config schema | link + video + image + telemetry + recording + dynamicLink + services | `link` + `wfb` + `drone` + `dynamicLink` + `idrForward` + `pixelpilot` |
 | `link` fields | channel, width, txPowerDbm, **mcs, fec, stbc, ldpc**, mtu, … | channel, width, txPowerDbm, region, linkId, beamforming, wlans — **no mcs/fec/stbc/ldpc** (drone-owned for video; GS uplink uses wfb-ng defaults) |
 | Config tree route | `/config`, `/apply`, … (root) | `/gs/config`, `/gs/apply`, … (`/gs/*`) |
 | `GET /healthz` body | `{}` | `{"ok": true}` (both at root) |

@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
-# Config dataclasses — mirror the §6 gs.yaml layout.
+# Config dataclasses for the probe-driven selector + smoothing/learned-prior/flightlog.
 # ------------------------------------------------------------------
 
 @dataclass

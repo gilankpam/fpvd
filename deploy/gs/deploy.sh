@@ -89,6 +89,10 @@ remote '
     killall -q pixelpilot pixelpilot.sh 2>/dev/null || true
     sleep 1
     : > /tmp/fpvd.log
+    # Seed /etc/fpvd/config.json from code defaults on first deploy only;
+    # never clobbers operator edits. Must run after /usr/bin/fpvd is installed
+    # (above) and before the daemon starts (below) — mirrors the drone deploy.
+    [ -f /etc/fpvd/config.json ] || { /usr/bin/fpvd --dump-config > /etc/fpvd/config.json.tmp && mv /etc/fpvd/config.json.tmp /etc/fpvd/config.json; }
     # Explicit stop + settle + clear stale pidfile, then start — NOT `restart`.
     # `restart` is stop;sleep 1;start: the 1s settle is too short, so the new fpvd
     # races the old one for its ports and dies just after "Starting fpvd: OK",
@@ -100,15 +104,6 @@ remote '
     rm -f /var/run/fpvd.pid
     /etc/init.d/S99fpvd start
 '
-
-# initial config.json — generated from the code defaults (fpvd --dump-config),
-# installed ONLY on first deploy; never clobbers operator edits.
-if remote 'test -e /etc/fpvd/config.json'; then
-    echo "[skip] /etc/fpvd/config.json exists — operator config preserved"
-else
-    echo "[seed] config.json <- fpvd --dump-config"
-    remote 'fpvd --dump-config > /etc/fpvd/config.json.tmp && mv /etc/fpvd/config.json.tmp /etc/fpvd/config.json'
-fi
 
 echo "[verify]"
 sleep 5
