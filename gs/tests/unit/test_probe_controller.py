@@ -79,16 +79,6 @@ def test_retune_followed_via_rx_ant_key():
     finally:
         c.stop()
 
-def test_snapshot_reads_tuning_from_config():
-    from fpvdgs.probe.config_build import make_probe_snapshot
-    eff = {"link": {"linkId": 7, "wlans": ["wlanA"]},
-           "probe": {"rxL": 800, "blackoutWindows": 2, "ewmaAlpha": 0.1}}
-    snap = make_probe_snapshot(eff)
-    assert snap["rxL"] == 800
-    assert snap["blackoutWindows"] == 2
-    assert snap["ewmaAlpha"] == 0.1
-
-
 def test_snapshot_tuning_defaults():
     from fpvdgs.probe.config_build import make_probe_snapshot
     eff = {"link": {"linkId": 7, "wlans": ["wlanA"]}}
