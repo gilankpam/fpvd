@@ -22,7 +22,6 @@ MAX_MCS = 7   # rung ceiling (matches SelectorConfig.max_mcs default and the dro
 
 @dataclass
 class LearnedPriorConfig:
-    enabled: bool = True
     bin_width_db: float = 2.0
     rssi_min: float = -90.0
     rssi_max: float = -30.0

@@ -260,10 +260,8 @@ class Policy:
         # Phase 4: learned per-card prior + flight log. Keyed by the
         # operator-set dynamicLink.radioProfile string. GS-local; the live
         # probe stays authoritative.
-        self.learned_prior = (
-            LearnedPrior(profile_name, cfg.learned_prior)
-            if cfg.learned_prior.enabled else None
-        )
+        # Always-on: the learned prior is an unconditional part of the loop.
+        self.learned_prior = LearnedPrior(profile_name, cfg.learned_prior)
         self._prev_rssi: float | None = None
         self._predict_demote_count = 0
         self._last_healthy_mono = None   # monotonic ts of last non-starved tick (flight-gap roll)
@@ -289,8 +287,7 @@ class Policy:
         # cold the probe climbs safely from the boot MCS. Only raises the boot
         # MCS, runs before select().
         if not self._cold_started and signals.rssi is not None:
-            seed = (self.learned_prior.warmstart_seed(signals.rssi)
-                    if self.learned_prior is not None else None)
+            seed = self.learned_prior.warmstart_seed(signals.rssi)
             if seed is not None and seed > self.leading.state.current_mcs:
                 self.leading.state.current_mcs = min(seed, self.leading._cap_mcs)
             self._cold_started = True
@@ -304,7 +301,7 @@ class Policy:
                  else (0.0 if self._prev_rssi is None
                        else signals.rssi - self._prev_rssi))
         pc = None
-        if (self.learned_prior is not None and signals.rssi is not None):
+        if signals.rssi is not None:
             pc = self.learned_prior.predictive_ceiling(signals.rssi, slope)
             cur = self.leading.state.current_mcs
             if pc is not None and pc < cur:
@@ -332,7 +329,7 @@ class Policy:
 
         # Ingest one observation for the learned prior (spec §4): the probe
         # rung verdict (current+1) and the operating-rung health.
-        if self.learned_prior is not None and signals.rssi is not None:
+        if signals.rssi is not None:
             target = self.leading.state.current_mcs + 1
             rung = probe_snap or {}
             rung = rung.get("mcs", {}).get(str(target)) if target <= self.leading._cap_mcs else None
@@ -378,7 +375,7 @@ class Policy:
             "fec_work": signals.fec_work,
             "link_starved": sustained_starved,
             "ceiling": (self.learned_prior.ceiling(signals.rssi)
-                        if self.learned_prior and signals.rssi is not None else None),
+                        if signals.rssi is not None else None),
             "probe": probe_log,
             "pc": pc,
             "slope": slope,
@@ -401,6 +398,5 @@ class Policy:
     def close(self) -> None:
         """Flush the learned prior + close the flight log. Called by the
         controller when the dynamicLink loop tears down."""
-        if self.learned_prior is not None:
-            self.learned_prior.flush()
+        self.learned_prior.flush()
         self.flightlog.close()

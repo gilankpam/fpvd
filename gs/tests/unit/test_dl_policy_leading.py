@@ -224,16 +224,17 @@ def test_video_per_breach_demotes():
     assert changed and mcs == pre - 1
 
 
-def test_strong_rssi_does_not_raise_mcs_without_probe_or_prior():
+def test_strong_rssi_does_not_raise_mcs_without_probe_or_prior(tmp_path):
     """The RSSI cold-start seed was removed: a strong RSSI alone must NOT
     raise the operating MCS. With no probe data (select() cannot promote on
-    its own) and the learned prior disabled (no warm-start), the first tick
-    stays at the boot MCS (1); in production the probe climbs from there."""
+    its own) and a cold prior (empty persist_dir → no warm-start seed), the
+    first tick stays at the boot MCS (1); in production the probe climbs from
+    there."""
     from fpvdgs.dynlink.signals import Signals
 
-    cfg = PolicyConfig(learned_prior=LearnedPriorConfig(enabled=False))
-    # No probe_status → selector can never promote; learned prior off → no
-    # warm-start seed. Any MCS > boot would have to come from the removed
+    cfg = PolicyConfig(learned_prior=LearnedPriorConfig(persist_dir=str(tmp_path)))
+    # No probe_status → selector can never promote; cold prior (empty dir) →
+    # no warm-start seed. Any MCS > boot would have to come from the removed
     # RSSI cold-start.
     policy = Policy(cfg)
 

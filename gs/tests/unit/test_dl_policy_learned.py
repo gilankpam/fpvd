@@ -156,7 +156,7 @@ def test_predictive_demote_does_not_misfire_on_detrended_rssi(tmp_path):
     and does NOT demote."""
     from fpvdgs.dynlink.learned_prior import LearnedPrior, LearnedPriorConfig
 
-    cfg = LearnedPriorConfig(enabled=True, persist_dir=str(tmp_path))
+    cfg = LearnedPriorConfig(persist_dir=str(tmp_path))
     lp = LearnedPrior("test-misfire", cfg)
 
     # White-box: prime the internal cell table directly to isolate

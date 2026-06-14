@@ -72,8 +72,10 @@ def test_record_carries_pc_and_slope(tmp_path):
     assert recs[1]["pc"] == 5
 
 
-def test_record_pc_and_slope_none_when_prior_disabled_or_no_rssi(tmp_path):
-    p = Policy(_cfg(tmp_path, enabled=False), _profile())
+def test_record_pc_and_slope_none_when_prior_cold_or_no_rssi(tmp_path):
+    # Cold prior (empty persist_dir, no learned data) → pc is None even with
+    # RSSI present; no RSSI → pc is always None.
+    p = Policy(_cfg(tmp_path), _profile())
     p.tick(_sig(-50.0))
     p.tick(_sig(None, ts=1.1))
     p.close()
