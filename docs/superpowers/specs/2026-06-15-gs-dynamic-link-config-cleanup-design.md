@@ -53,9 +53,10 @@ define a default.
    link runs); the 12 internals become code constants. The block leaves
    `config.json` entirely.
 4. **Probe knobs frozen.** `rxL` / `ewmaAlpha` / `blackoutWindows` become code
-   constants; the orphaned `effective['probe']` read is deleted. The one true
-   `rxL` value (code says 50, field-tuned memory says 800) is settled during
-   implementation.
+   constants; the orphaned `effective['probe']` read is deleted. `rxL` is frozen
+   at **50 ms** (the current code constant) — consistent with the exposed
+   `selector.probeFreshnessMs` = 500 ms, so a probed rung never reads stale
+   between `wfb_rx` stats batches.
 5. **`flightlog` and `rssiNorm` expose only their `enabled` toggle**, freezing
    the rest (storage paths/caps for flightlog; the EIRP curve for rssiNorm).
 
@@ -95,7 +96,7 @@ dataclasses.
 | Disposition | Knobs |
 |---|---|
 | **EXPOSE** (in `config.json`, validated, GET-visible) | `enabled, maxMcs, radioProfile, droneAddr, dronePort`; **`selector`{}** = `probeViableThreshold, probeFreshnessMs, promoteDebounceWindows, videoDemotePer, emergencyLossRate, emergencyFecPressure, holdModesDownMs, minBetweenChangesMs, starvationWindows`; **`smoothing`{}** = `ewmaAlphaRssi, ewmaAlphaFec, ewmaAlphaBurst, starvationThresholdPps`; **`flightlog`{}** = `enabled`; **`rssiNorm`{}** = `enabled` |
-| **FREEZE** (code constant; documented in the reference doc) | `videoStreamId` = `"video"`; `rssiNorm` curve (`pRefDbm` = 29, `txPowerDbmByMcs` = `(29,28,25,23,19,19,19,19)` — drone-mirror calibration); **all `learnedPrior`** (`enabled` = true + the 12 internals: `binWidthDb, rssiMin, rssiMax, ewmaAlpha, viableThreshold, minSamplesWarmstart, minSamplesPredictive, warmstartMargin, predictiveHorizonTicks, predictiveDebounceWindows, flushIntervalObservations, persistDir`); **all `probe`** (`rxL` ⚠ confirm 50 vs 800, `ewmaAlpha` = 0.25, `blackoutWindows` = 10, `port` = 50); `flightlog.{dir, maxFiles, maxMb, flightGapS}`; `stats_endpoint` = `tcp://127.0.0.1:8103`, `WINDOW_S` = 0.1, `MAX_MCS` = 7 |
+| **FREEZE** (code constant; documented in the reference doc) | `videoStreamId` = `"video"`; `rssiNorm` curve (`pRefDbm` = 29, `txPowerDbmByMcs` = `(29,28,25,23,19,19,19,19)` — drone-mirror calibration); **all `learnedPrior`** (`enabled` = true + the 12 internals: `binWidthDb, rssiMin, rssiMax, ewmaAlpha, viableThreshold, minSamplesWarmstart, minSamplesPredictive, warmstartMargin, predictiveHorizonTicks, predictiveDebounceWindows, flushIntervalObservations, persistDir`); **all `probe`** (`rxL` = 50, `ewmaAlpha` = 0.25, `blackoutWindows` = 10, `port` = 50); `flightlog.{dir, maxFiles, maxMb, flightGapS}`; `stats_endpoint` = `tcp://127.0.0.1:8103`, `WINDOW_S` = 0.1, `MAX_MCS` = 7 |
 | **DELETE** (dead/deprecated → gone) | the opaque `tuning` block + `_raw_from_block` reshape; the 3 `_DEPRECATED_*` lists + their warning code; dead parse branches (`leading_loop`, `policy.bitrate`, `fec`, `video`, `cooldown`, `safe_defaults`); dead dataclass fields (`GateConfig.max_mcs_step_up`, `ProfileSelectionConfig.{hold_fallback_mode_ms, fast_downgrade, upward_confidence_loops}`); dead seeded-overlay keys (`dynamicLink.{bandwidth, txpower, idrForward, idrPort}`); stale `api.md` DL section + stale `gs/build/lib/.../profiles/*.json` artifact |
 | **MERGE** | `ProfileSelectionConfig` → folded into a single `SelectorConfig` (its two live timing knobs `holdModesDownMs`/`minBetweenChangesMs`) + `starvationWindows` absorbed from `PolicyConfig`; the `selection` and `policy` blocks vanish. Net: the `tuning`
 sub-block sprawl collapses to **2** multi-knob config blocks (`selector`,
@@ -184,8 +185,8 @@ fields exactly as `maxMcs`→`max_mcs` does today.
   … else None` branch and collapse the `learned_prior is not None` guards).
 - **`probe`:** delete the `effective.get("probe")` read in
   `probe/config_build.make_probe_snapshot`; `rxL`/`ewmaAlpha`/`blackoutWindows`
-  come from the `PROBE_*` module constants (fix `PROBE_RX_L` to the settled
-  value). `port` is already `PROBE_PORT`.
+  come from the `PROBE_*` module constants (`PROBE_RX_L` stays 50). `port` is
+  already `PROBE_PORT`.
 - **`flightlog` internals / `rssiNorm` curve:** `config_build` reads only
   `flightlog.enabled` and `rssiNorm.enabled`; the rest of `FlightLogConfig` /
   `RssiNormConfig` defaults are the frozen source.
@@ -248,8 +249,6 @@ partial refactors go red. Run `cd gs && .venv/bin/python -m pytest tests/ -q`.
   learned-prior internals, probe window, rssi-norm curve, and flightlog storage
   are calibration/internal, and freezes are reversible (re-expose later) if field
   experience demands.
-- **The `rxL` value must be settled** (50 vs 800) before freezing, or the frozen
-  constant is wrong. Confirm against the bench during implementation.
 - **No human-readable shipped baseline file** after dropping `defaults.json` —
   mitigated by `GET /gs/config` (full effective), `--dump-config`, and the Change
   5 reference doc.
