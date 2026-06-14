@@ -135,37 +135,30 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkRoiQp,
                                                thresholdKbps, lowAnchorKbps,
                                                floor, step)
 
-struct DynamicLinkBitrate {
-    int minBitrateKbps{1000};
-    int maxBitrateKbps{24000};
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkBitrate,
-                                               minBitrateKbps, maxBitrateKbps)
-
-struct DynamicLinkFec {
-    double baseRedundancyRatio{0.5};   // n/k = 1 + ratio = 1.5 (= 8/12 data fraction)
+struct DynamicLinkCompute {
+    int    minBitrateKbps{1000};
+    int    maxBitrateKbps{24000};
+    double baseRedundancyRatio{0.5};   // n/k = 1 + ratio (= 8/12 data fraction)
     double blocksPerFrame{2.0};
     int    kMin{2};
     int    kMax{50};
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkFec,
-                                               baseRedundancyRatio,
-                                               blocksPerFrame, kMin, kMax)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkCompute,
+    minBitrateKbps, maxBitrateKbps, baseRedundancyRatio, blocksPerFrame, kMin, kMax)
 
 struct DynamicLink {
     bool enabled{false};
     int healthTimeoutMs{10000};
     int applyStaggerMs{50};
     int applySubPaceMs{5};
-    DynamicLinkRoiQp roiQp{};
-    DynamicLinkSafe safe{};
-    DynamicLinkBitrate bitrate{};
-    DynamicLinkFec     fec{};
+    DynamicLinkRoiQp  roiQp{};
+    DynamicLinkSafe   safe{};
+    DynamicLinkCompute compute{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled,
                                                healthTimeoutMs, applyStaggerMs,
                                                applySubPaceMs,
-                                               roiQp, safe, bitrate, fec)
+                                               roiQp, safe, compute)
 
 // OSD overlay (msposd message file). Top-level: the OSD is rendered whether or
 // not the dynamic link is enabled, so its enable flag lives outside dynamicLink.

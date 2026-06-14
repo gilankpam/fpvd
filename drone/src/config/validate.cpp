@@ -156,6 +156,17 @@ std::vector<ValidationError> validate(const Config& c) {
             errs.push_back({"dynamicLink.roiQp.floor", "must be <= 0"});
         if (dl.roiQp.step < 1)
             errs.push_back({"dynamicLink.roiQp.step", "must be >= 1"});
+
+        if (dl.compute.minBitrateKbps <= 0 ||
+            dl.compute.maxBitrateKbps <= dl.compute.minBitrateKbps)
+            errs.push_back({"dynamicLink.compute",
+                            "require 0 < minBitrateKbps < maxBitrateKbps"});
+        if (dl.compute.baseRedundancyRatio <= 0.0)
+            errs.push_back({"dynamicLink.compute.baseRedundancyRatio", "must be > 0"});
+        if (dl.compute.blocksPerFrame <= 0.0)
+            errs.push_back({"dynamicLink.compute.blocksPerFrame", "must be > 0"});
+        if (dl.compute.kMin < 1 || dl.compute.kMax < dl.compute.kMin)
+            errs.push_back({"dynamicLink.compute.k", "require 1 <= kMin <= kMax"});
     }
 
     return errs;

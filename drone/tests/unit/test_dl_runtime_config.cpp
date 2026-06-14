@@ -102,12 +102,12 @@ TEST_CASE("buildDlSnapshot maps the Phase-3a bitrate-engine knobs") {
     fpvd::Config c{};
     c.link.mtu  = 1400;
     c.video.fps = 90;
-    c.dynamicLink.bitrate.minBitrateKbps = 1500;
-    c.dynamicLink.bitrate.maxBitrateKbps = 20000;
-    c.dynamicLink.fec.baseRedundancyRatio = 0.5;
-    c.dynamicLink.fec.blocksPerFrame      = 2.0;
-    c.dynamicLink.fec.kMin = 3;
-    c.dynamicLink.fec.kMax = 40;
+    c.dynamicLink.compute.minBitrateKbps = 1500;
+    c.dynamicLink.compute.maxBitrateKbps = 20000;
+    c.dynamicLink.compute.baseRedundancyRatio = 0.5;
+    c.dynamicLink.compute.blocksPerFrame      = 2.0;
+    c.dynamicLink.compute.kMin = 3;
+    c.dynamicLink.compute.kMax = 40;
 
     auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
 
@@ -154,4 +154,21 @@ TEST_CASE("buildDlSnapshot: rs mode -> swfec false") {
     fpvd::Config c{};
     auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
     CHECK_FALSE(s.swfec);
+}
+
+TEST_CASE("buildDlSnapshot maps dynamicLink.compute -> BitrateEngineConfig") {
+    Config c{};
+    c.dynamicLink.compute.minBitrateKbps      = 1500;
+    c.dynamicLink.compute.maxBitrateKbps      = 20000;
+    c.dynamicLink.compute.baseRedundancyRatio = 0.4;
+    c.dynamicLink.compute.blocksPerFrame      = 3.0;
+    c.dynamicLink.compute.kMin                = 4;
+    c.dynamicLink.compute.kMax                = 40;
+    auto s = buildDlSnapshot(c, "wlan0");
+    CHECK(s.bitrate.minBitrateKbps     == 1500);
+    CHECK(s.bitrate.maxBitrateKbps     == 20000);
+    CHECK(s.bitrate.baseRedundancyRatio == doctest::Approx(0.4));
+    CHECK(s.bitrate.blocksPerFrame     == doctest::Approx(3.0));
+    CHECK(s.bitrate.kMin               == 4);
+    CHECK(s.bitrate.kMax               == 40);
 }
