@@ -543,7 +543,7 @@ void Daemon::reset() {
     std::lock_guard<std::mutex> g(mu_);
     std::error_code ec;
     std::filesystem::remove(paths_.configPath, ec);
-    pending_ = loadEffective("/no/such/path");   // falls back to code defaults
+    pending_ = Config{};   // reset to code defaults
 }
 
 } // namespace fpvd

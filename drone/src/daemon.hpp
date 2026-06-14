@@ -76,7 +76,7 @@ public:
     Daemon(const Daemon&) = delete;
     Daemon& operator=(const Daemon&) = delete;
 
-    // Load defaults and overlay, write initial /etc/waybeam.json,
+    // Load the config file (merged onto code defaults), write initial /etc/waybeam.json,
     // configure orchestrator, optionally start processes.
     void bootstrap(bool startProcesses);
 

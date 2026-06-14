@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
             std::cout << nlohmann::json(fpvd::Config{}).dump(2) << "\n";
             return 0;
         }
-        else if ((a == "--config" || a == "--overlay") && i + 1 < argc)
+        else if (a == "--config" && i + 1 < argc)
             configPath = argv[++i];
         else if (a == "--radio-up" && i + 1 < argc) radioUp = argv[++i];
         else if (a == "--radio-tune" && i + 1 < argc) radioTune = argv[++i];
