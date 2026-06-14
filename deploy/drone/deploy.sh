@@ -127,7 +127,7 @@ if [ "$MODE" = install ]; then
         mv -f /usr/libexec/fpvd/probe-feeder.new /usr/libexec/fpvd/probe-feeder
         # Seed /etc/fpvd/config.json from code defaults on first install only;
         # never clobber an existing operator config.
-        [ -f /etc/fpvd/config.json ] || /usr/bin/fpvd --dump-config > /etc/fpvd/config.json
+        [ -f /etc/fpvd/config.json ] || { /usr/bin/fpvd --dump-config > /etc/fpvd/config.json.tmp && mv /etc/fpvd/config.json.tmp /etc/fpvd/config.json; }
         : > /tmp/fpvd.log
         /etc/init.d/S99fpvd start
     '
@@ -140,7 +140,7 @@ else
         mv -f /usr/libexec/fpvd/probe-feeder.new /usr/libexec/fpvd/probe-feeder
         # Seed /etc/fpvd/config.json from code defaults if absent (e.g. first
         # deploy after the defaults.json model was removed).
-        [ -f /etc/fpvd/config.json ] || /usr/bin/fpvd --dump-config > /etc/fpvd/config.json
+        [ -f /etc/fpvd/config.json ] || { /usr/bin/fpvd --dump-config > /etc/fpvd/config.json.tmp && mv /etc/fpvd/config.json.tmp /etc/fpvd/config.json; }
         # start-stop-daemon -K signals but does not remove the pidfile; a stale
         # /var/run/fpvd.pid makes the subsequent -S fail ("Starting fpvd: FAIL").
         # Clear it after the stop+settle so the start is clean (the documented race).
