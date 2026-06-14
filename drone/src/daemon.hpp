@@ -22,8 +22,7 @@
 namespace fpvd {
 
 struct DaemonPaths {
-    std::string defaultsPath;    // /rom/etc/fpvd/defaults.json
-    std::string overlayPath;     // /etc/fpvd/config.json
+    std::string configPath;      // /etc/fpvd/config.json (the full config)
     std::string radioUpScript;   // /usr/libexec/fpvd/radio-up.sh
     std::string waybeamJsonPath; // /etc/waybeam.json
     std::string radioTuneScript{}; // /usr/libexec/fpvd/radio-tune.sh (optional)
@@ -97,7 +96,7 @@ public:
     void reset();
 
     Orchestrator& orchestrator() { return orch_; }
-    nlohmann::json defaultsJson();   // returns parsed defaults file
+    nlohmann::json defaultsJson();   // returns the code-default config (Config{})
 
 private:
     void seedOrchestrator();

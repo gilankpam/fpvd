@@ -24,13 +24,9 @@ namespace fs = std::filesystem;
 TEST_CASE("daemon: bootstraps from defaults file when no overlay") {
     auto tmp = fs::temp_directory_path() / "fpvd-test-bootstrap";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
 
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -46,13 +42,9 @@ TEST_CASE("daemon: bootstraps from defaults file when no overlay") {
 TEST_CASE("daemon: PATCH then apply updates effective and overlay file") {
     auto tmp = fs::temp_directory_path() / "fpvd-test-apply";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
 
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -69,11 +61,13 @@ TEST_CASE("daemon: PATCH then apply updates effective and overlay file") {
     CHECK(d.effective().video.bitrate == 12345);
     CHECK(d.version() == 1);
 
-    // Overlay written; should contain only the diff.
-    std::ifstream f(paths.overlayPath);
+    // Full config written: the changed field plus the rest of the config.
+    std::ifstream f(paths.configPath);
     nlohmann::json saved;
     f >> saved;
-    CHECK(saved == nlohmann::json{{"video", {{"bitrate", 12345}}}});
+    CHECK(saved["video"]["bitrate"] == 12345);
+    CHECK(saved.contains("link"));        // full config, not a sparse overlay
+    CHECK(saved.contains("dynamicLink"));
 
     // /etc/waybeam.json rewritten.
     std::ifstream wf(paths.waybeamJsonPath);
@@ -87,13 +81,9 @@ TEST_CASE("daemon: PATCH then apply updates effective and overlay file") {
 TEST_CASE("daemon: PATCH video.sensorBin applies end-to-end (overlay + waybeam + encoder)") {
     auto tmp = fs::temp_directory_path() / "fpvd-test-sensorbin";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
 
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -107,10 +97,11 @@ TEST_CASE("daemon: PATCH video.sensorBin applies end-to-end (overlay + waybeam +
     REQUIRE(ar.ok);
     CHECK(d.effective().video.sensorBin == "2x2");
 
-    // Overlay is sparse: only the changed field (proves defaults carry "").
-    std::ifstream f(paths.overlayPath);
+    // Full config persisted: the changed field is present in the full tree.
+    std::ifstream f(paths.configPath);
     nlohmann::json saved; f >> saved;
-    CHECK(saved == nlohmann::json{{"video", {{"sensorBin", "2x2"}}}});
+    CHECK(saved["video"]["sensorBin"] == "2x2");
+    CHECK(saved.contains("link"));   // full config, not a sparse overlay
 
     // waybeam.json carries the value under isp.sensorBin.
     std::ifstream wf(paths.waybeamJsonPath);
@@ -124,19 +115,38 @@ TEST_CASE("daemon: PATCH video.sensorBin applies end-to-end (overlay + waybeam +
     fs::remove_all(tmp);
 }
 
+TEST_CASE("apply persists the FULL config, not a sparse overlay") {
+    auto tmp = fs::temp_directory_path() / "fpvd-fullcfg";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fpvd::DaemonPaths paths{
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths); d.bootstrap(false);
+    auto ar = d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})"));
+    REQUIRE(ar.ok);
+    auto r = d.apply(false);
+    REQUIRE(r.ok);
+    std::ifstream f(paths.configPath);
+    auto written = nlohmann::json::parse(f);
+    CHECK(written.contains("link"));
+    CHECK(written.contains("video"));
+    CHECK(written["dynamicLink"]["enabled"] == true);
+    CHECK(written["dynamicLink"].contains("safe"));
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("daemon: reset clears overlay") {
     auto tmp = fs::temp_directory_path() / "fpvd-test-reset";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
     // Pre-existing overlay.
     std::ofstream(tmp / "etc" / "fpvd" / "config.json")
         << R"({"video":{"bitrate":11111}})";
 
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -147,7 +157,7 @@ TEST_CASE("daemon: reset clears overlay") {
 
     d.reset();
     CHECK(d.pending().video.bitrate == 8192);
-    CHECK_FALSE(fs::exists(paths.overlayPath));
+    CHECK_FALSE(fs::exists(paths.configPath));
 
     fs::remove_all(tmp);
 }
@@ -155,13 +165,8 @@ TEST_CASE("daemon: reset clears overlay") {
 TEST_CASE("daemon: dl_applier never in orchestrator (DynamicLinkController is in-process)") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-seed";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
-                  fs::copy_options::overwrite_existing);
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -189,13 +194,8 @@ TEST_CASE("daemon: dl_applier never in orchestrator (DynamicLinkController is in
 TEST_CASE("daemon: dynamicLink in restarted-list when safe.* changes while DL is enabled") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-restarted";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
-                  fs::copy_options::overwrite_existing);
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -221,13 +221,8 @@ TEST_CASE("daemon: dynamicLink in restarted-list when safe.* changes while DL is
 TEST_CASE("daemon: dynamicLink NOT in restarted-list when safe.* changes while DL is disabled") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-not-restarted";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
-                  fs::copy_options::overwrite_existing);
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -249,13 +244,8 @@ TEST_CASE("daemon: dynamicLink NOT in restarted-list when safe.* changes while D
 TEST_CASE("daemon: dynamicLink IN restarted-list when DL is being disabled (transition)") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-disable-restart";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
-                  fs::copy_options::overwrite_existing);
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -280,13 +270,9 @@ TEST_CASE("daemon: dynamicLink IN restarted-list when DL is being disabled (tran
 TEST_CASE("daemon: apply reports beamforming when its config changes") {
     auto tmp = fs::temp_directory_path() / "fpvd-test-bf-apply";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
 
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -294,7 +280,9 @@ TEST_CASE("daemon: apply reports beamforming when its config changes") {
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
-    nlohmann::json patch = {{"link", {{"beamforming",
+    // beamforming requires link.stbc=false; the code default is stbc=true, so
+    // clear it explicitly in the same patch.
+    nlohmann::json patch = {{"link", {{"stbc", false}, {"beamforming",
         {{"enabled", true}, {"remoteMac", "00:c0:ca:dd:ee:ff"}}}}}};
     auto pr = d.patchPending(patch);
     REQUIRE(pr.ok);
@@ -309,12 +297,8 @@ TEST_CASE("daemon: apply reports beamforming when its config changes") {
 TEST_CASE("status: includes beamforming block") {
     auto tmp = fs::temp_directory_path() / "fpvd-test-bf-status";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -332,15 +316,11 @@ TEST_CASE("status: includes beamforming block") {
 TEST_CASE("daemon: txpower change takes hot path (tuneRadio, no rebuild)") {
     auto tmp = fs::temp_directory_path() / "fpvd-hot-txpower";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
     auto rec = tmp / "tune-record.txt";
     ::setenv("FPVD_TEST_RECORD", rec.string().c_str(), 1);
 
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string(),
@@ -365,12 +345,8 @@ TEST_CASE("daemon: txpower change takes hot path (tuneRadio, no rebuild)") {
 TEST_CASE("daemon: txpower is rejected while DL is enabled (curve owns power)") {
     auto tmp = fs::temp_directory_path() / "fpvd-dl-txpower";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -395,15 +371,11 @@ TEST_CASE("daemon: txpower is rejected while DL is enabled (curve owns power)") 
 TEST_CASE("daemon: width change defers channel retune via tune script") {
     auto tmp = fs::temp_directory_path() / "fpvd-hot-width";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
     auto rec = tmp / "tune-record.txt";
     ::setenv("FPVD_TEST_RECORD", rec.string().c_str(), 1);
 
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string(),
@@ -443,15 +415,10 @@ TEST_CASE("daemon: width change defers channel retune via tune script") {
 // Build a DaemonPaths whose dlEndpoints use harmless ephemeral test ports.
 static fpvd::DaemonPaths makeRoutingPaths(const fs::path& tmp, uint16_t listenPort) {
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
-                  fs::copy_options::overwrite_existing);
 
     fpvd::DaemonPaths paths{};
-    paths.defaultsPath = (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string();
-    paths.overlayPath = (tmp / "etc" / "fpvd" / "config.json").string();
+    paths.configPath = (tmp / "etc" / "fpvd" / "config.json").string();
     paths.radioUpScript = "tests/fixtures/fake_radio_up_ok.sh";
     paths.waybeamJsonPath = (tmp / "etc" / "waybeam.json").string();
     paths.radioTuneScript = "tests/fixtures/fake_radio_tune.sh";
@@ -550,7 +517,7 @@ TEST_CASE("apply: DL disable restates swfec fec as (overheadPct,deadlineMs), not
 
     // Seed swfec via the overlay BEFORE bootstrap: a fec.mode flip through
     // apply() is full-restart-class (real process churn the harness can't run).
-    std::ofstream(paths.overlayPath)
+    std::ofstream(paths.configPath)
         << R"({"link":{"fec":{"mode":"swfec","overheadPct":77,"deadlineMs":44}}})";
 
     // Fake wfb_tx control server on the fixed video control port.
@@ -900,13 +867,16 @@ TEST_CASE("apply: hot-path reconcileBeamforming fires when beamforming enabled")
     // reconcile() ran and processed the request.
     auto tmp = fs::temp_directory_path() / "fpvd-bf-hot-apply";
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json");
+
+    // Seed stbc=false (code default is true) BEFORE bootstrap so the enable
+    // patch below is beamforming-only: a videoRadiotap (stbc) change in the same
+    // apply would push a setRadio to the video control port, which has no
+    // listener in this test and would fail the apply.
+    std::ofstream(tmp / "etc" / "fpvd" / "config.json")
+        << R"({"link":{"stbc":false}})";
 
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string(),
@@ -918,7 +888,7 @@ TEST_CASE("apply: hot-path reconcileBeamforming fires when beamforming enabled")
     // Confirm initial state is Disabled (bf never driven).
     CHECK(d.beamformingStatus().state == fpvd::BfState::Disabled);
 
-    // Enable beamforming (stbc=false is the default, so no extra patch needed).
+    // Enable beamforming (stbc already false from the seeded config).
     auto pr = d.patchPending(nlohmann::json::parse(
         R"({"link":{"beamforming":{"enabled":true,"remoteMac":"00:c0:ca:dd:ee:ff"}}})"));
     REQUIRE(pr.ok);

@@ -47,12 +47,11 @@ Daemon::~Daemon() {
 }
 
 nlohmann::json Daemon::defaultsJson() {
-    std::ifstream f(paths_.defaultsPath);
-    return nlohmann::json::parse(f);
+    return nlohmann::json(Config{});
 }
 
 void Daemon::bootstrap(bool startProcesses) {
-    effective_ = loadEffective(paths_.defaultsPath, paths_.overlayPath);
+    effective_ = loadEffective(paths_.configPath);
     pending_ = effective_;
     auto errs = validate(effective_);
     if (!errs.empty()) {
@@ -326,11 +325,9 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         }
     }
 
-    // Persist overlay (sparse diff vs defaults).
-    auto defaultsJ = defaultsJson();
-    auto pendingJ = nlohmann::json(pending_);
-    auto overlay = computeOverlay(defaultsJ, pendingJ);
-    atomicWriteJson(paths_.overlayPath, overlay);
+    // Persist the full config (code defaults are the implicit baseline; the
+    // on-disk file is the complete config, not a sparse overlay).
+    atomicWriteJson(paths_.configPath, nlohmann::json(pending_));
 
     effective_ = pending_;
     osd_.setEnabled(effective_.osd.enabled);   // hot-reconcile top-level osd.enabled (gates both lines)
@@ -545,8 +542,8 @@ ApplyResult Daemon::apply(bool reallyRestart) {
 void Daemon::reset() {
     std::lock_guard<std::mutex> g(mu_);
     std::error_code ec;
-    std::filesystem::remove(paths_.overlayPath, ec);
-    pending_ = loadEffective(paths_.defaultsPath, "/no/such/path");
+    std::filesystem::remove(paths_.configPath, ec);
+    pending_ = loadEffective("/no/such/path");   // falls back to code defaults
 }
 
 } // namespace fpvd
