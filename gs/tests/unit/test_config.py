@@ -92,3 +92,18 @@ def test_load_patch_commit_reload_roundtrip(tmp_path):
     s2 = ConfigStore.load(path)         # reload from the persisted full config
     assert s2.effective()["link"]["channel"] == 100
     assert s2.effective()["drone"] == default_config()["drone"]  # unchanged keys survive
+
+
+def test_load_warns_on_unknown_keys(tmp_path, caplog):
+    import logging
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({
+        "bogusTop": 1,
+        "dynamicLink": {"tuning": {"gate": {}}, "selector": {}},
+    }))
+    with caplog.at_level(logging.WARNING):
+        s = ConfigStore.load(str(cfg))      # must not raise
+    msgs = " ".join(r.message for r in caplog.records)
+    assert "bogusTop" in msgs
+    assert "tuning" in msgs                 # stale dynamicLink key warned
+    assert s.effective()["link"]["channel"] == default_config()["link"]["channel"]

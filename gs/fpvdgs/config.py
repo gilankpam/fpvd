@@ -7,10 +7,27 @@ full effective config (no sparse overlay)."""
 
 import copy
 import json
+import logging
 import os
 import threading
 
 from .config_defaults import default_config
+from .schema import DYNAMIC_LINK_KEYS
+
+log = logging.getLogger("fpvdgs.config")
+
+
+def _warn_unknown(loaded: dict, defaults: dict) -> None:
+    """Warn (never fail) on keys in the loaded config absent from the code
+    defaults. Scoped to the top level + the dynamicLink subtree — the blocks
+    this cleanup restructured. Other blocks (pixelpilot/wfb/link) hold open
+    maps (env, raw) and are left to value-validation, not key-walking."""
+    for key in set(loaded) - set(defaults):
+        log.warning("ignoring unknown config key: %s", key)
+    dl = loaded.get("dynamicLink")
+    if isinstance(dl, dict):
+        for key in set(dl) - DYNAMIC_LINK_KEYS:
+            log.warning("ignoring unknown dynamicLink key: %s", key)
 
 
 def deep_merge(base: dict, overlay: dict) -> dict:
@@ -40,6 +57,7 @@ class ConfigStore:
         if config_path and os.path.exists(config_path):
             with open(config_path) as f:
                 loaded = json.load(f)
+            _warn_unknown(loaded, defaults)
         return cls(defaults, loaded, config_path)
 
     def defaults(self) -> dict:

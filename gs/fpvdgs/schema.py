@@ -4,6 +4,14 @@ LINK_KEYS = {"channel", "width", "txPowerDbm", "region", "linkId",
              "beamforming", "wlans"}
 CONFIG_TOP_KEYS = {"link", "wfb", "drone", "dynamicLink", "pixelpilot",
                    "idrForward"}
+DYNAMIC_LINK_KEYS = {"enabled", "maxMcs", "radioProfile", "droneAddr",
+                     "dronePort", "selector", "smoothing", "flightlog", "rssiNorm"}
+SELECTOR_KEYS = {"probeViableThreshold", "probeFreshnessMs",
+                 "promoteDebounceWindows", "videoDemotePer", "emergencyLossRate",
+                 "emergencyFecPressure", "holdModesDownMs", "minBetweenChangesMs",
+                 "starvationWindows"}
+SMOOTHING_KEYS = {"ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst",
+                  "starvationThresholdPps"}
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
@@ -31,6 +39,13 @@ def validate_config_patch(sparse: dict) -> None:
         unknown_link = set(link) - LINK_KEYS
         if unknown_link:
             raise SchemaError(f"unknown link keys: {sorted(unknown_link)}")
+    dl = sparse.get("dynamicLink")
+    if dl is not None:
+        if not isinstance(dl, dict):
+            raise SchemaError("dynamicLink must be an object")
+        unknown_dl = set(dl) - DYNAMIC_LINK_KEYS
+        if unknown_dl:
+            raise SchemaError(f"unknown dynamicLink keys: {sorted(unknown_dl)}")
 
 
 def validate_effective(cfg: dict) -> None:
@@ -73,20 +88,74 @@ def _validate_beamforming(bf: dict) -> None:
 
 
 def _validate_dynamic_link(dl: dict) -> None:
+    unknown = set(dl) - DYNAMIC_LINK_KEYS
+    if unknown:
+        raise SchemaError(f"unknown dynamicLink keys: {sorted(unknown)}")
     max_mcs = dl.get("maxMcs", 5)
-    if not isinstance(max_mcs, int) or not 0 <= max_mcs <= 7:
+    if not isinstance(max_mcs, int) or isinstance(max_mcs, bool) or not 0 <= max_mcs <= 7:
         raise SchemaError("dynamicLink.maxMcs must be an int in 0..7")
     port = dl.get("dronePort", 9999)
-    if not isinstance(port, int) or not 1 <= port <= 65535:
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("dynamicLink.dronePort must be an int in 1..65535")
-    vid = dl.get("videoStreamId", "video")
-    if not isinstance(vid, str) or not vid:
-        raise SchemaError("dynamicLink.videoStreamId must be a non-empty string")
-    # radioProfile is a free identifier now (no profile files): it keys the
-    # learned-prior persistence and the drone adapter-match warning.
+    # radioProfile is a free identifier: it keys the learned-prior persistence
+    # and the drone adapter-match warning.
     profile = dl.get("radioProfile", "m8812eu2")
     if not isinstance(profile, str) or not profile:
         raise SchemaError("dynamicLink.radioProfile must be a non-empty string")
+    sel = dl.get("selector", {})
+    if sel:
+        _validate_block_keys("dynamicLink.selector", sel, SELECTOR_KEYS)
+        for k in ("probeViableThreshold", "videoDemotePer", "emergencyLossRate",
+                  "emergencyFecPressure"):
+            _validate_prob(f"dynamicLink.selector.{k}", sel.get(k))
+        for k in ("promoteDebounceWindows", "starvationWindows"):
+            _validate_pos_int(f"dynamicLink.selector.{k}", sel.get(k))
+        for k in ("probeFreshnessMs", "holdModesDownMs", "minBetweenChangesMs"):
+            _validate_non_neg_num(f"dynamicLink.selector.{k}", sel.get(k))
+    sm = dl.get("smoothing", {})
+    if sm:
+        _validate_block_keys("dynamicLink.smoothing", sm, SMOOTHING_KEYS)
+        for k in ("ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst"):
+            _validate_alpha(f"dynamicLink.smoothing.{k}", sm.get(k))
+        _validate_non_neg_num("dynamicLink.smoothing.starvationThresholdPps",
+                              sm.get("starvationThresholdPps"))
+    for sub in ("flightlog", "rssiNorm"):
+        blk = dl.get(sub, {})
+        if blk:
+            _validate_block_keys(f"dynamicLink.{sub}", blk, {"enabled"})
+            if not isinstance(blk.get("enabled", True), bool):
+                raise SchemaError(f"dynamicLink.{sub}.enabled must be a bool")
+
+
+def _validate_block_keys(name: str, blk: dict, known: set) -> None:
+    if not isinstance(blk, dict):
+        raise SchemaError(f"{name} must be an object")
+    unknown = set(blk) - known
+    if unknown:
+        raise SchemaError(f"unknown {name} keys: {sorted(unknown)}")
+
+
+def _validate_prob(name: str, v) -> None:
+    if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))
+                          or not 0.0 <= v <= 1.0):
+        raise SchemaError(f"{name} must be a number in 0..1")
+
+
+def _validate_alpha(name: str, v) -> None:
+    if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))
+                          or not 0.0 < v <= 1.0):
+        raise SchemaError(f"{name} must be a number in (0,1]")
+
+
+def _validate_pos_int(name: str, v) -> None:
+    if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v <= 0):
+        raise SchemaError(f"{name} must be a positive int")
+
+
+def _validate_non_neg_num(name: str, v) -> None:
+    if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))
+                          or v < 0):
+        raise SchemaError(f"{name} must be a non-negative number")
 
 
 def _validate_idr_forward(idr: dict) -> None:

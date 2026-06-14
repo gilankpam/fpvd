@@ -48,8 +48,7 @@ def test_validate_effective_ok():
 def _eff(**dl):
     base = {"link": {"channel": 132, "width": 40, "region": "US"},
             "dynamicLink": {"enabled": False, "maxMcs": 5,
-                            "radioProfile": "m8812eu2", "dronePort": 9999,
-                            "tuning": {}}}
+                            "radioProfile": "m8812eu2", "dronePort": 9999}}
     base["dynamicLink"].update(dl)
     return base
 
@@ -176,3 +175,37 @@ def test_enable_bf_on_capable_card_ok():
                                             "beamforming": {"enabled": True}}})
     finally:
         schema.set_bf_capable(None)
+
+
+def _dl(**over):
+    base = {"enabled": True, "maxMcs": 5, "radioProfile": "m8812eu2",
+            "droneAddr": None, "dronePort": 9999}
+    base.update(over)
+    return {"link": {"channel": 132, "region": "US", "width": 20},
+            "dynamicLink": base}
+
+
+def test_validate_effective_accepts_flat_dynamic_link():
+    schema.validate_effective(_dl(selector={"probeViableThreshold": 0.9},
+                                  smoothing={"ewmaAlphaRssi": 0.3},
+                                  flightlog={"enabled": True},
+                                  rssiNorm={"enabled": True}))  # no raise
+
+
+def test_selector_probability_out_of_range_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(_dl(selector={"probeViableThreshold": 1.5}))
+
+
+def test_smoothing_alpha_out_of_range_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(_dl(smoothing={"ewmaAlphaRssi": 0}))
+
+
+def test_patch_rejects_unknown_dynamic_link_subkey():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_config_patch({"dynamicLink": {"bogusKnob": 1}})
+
+
+def test_patch_accepts_known_dynamic_link_keys():
+    schema.validate_config_patch({"dynamicLink": {"selector": {}, "maxMcs": 4}})

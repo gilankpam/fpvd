@@ -126,9 +126,8 @@ def _api_with_dynlink(tmp_path):
                 "wfb": {"profile": "gs", "raw": {}},
                 "drone": {"endpoint": "http://10.5.0.10:8080"},
                 "dynamicLink": {"enabled": False, "maxMcs": 5,
-                                "txpower": {"min": 18, "max": 28},
                                 "radioProfile": "m8812eu2", "droneAddr": None,
-                                "dronePort": 9999, "tuning": {}}}
+                                "dronePort": 9999}}
     store = ConfigStore(defaults)
     ctrl = _FakeController()
     runner = _FakeRunner()
@@ -284,9 +283,8 @@ def _api_with_dl_and_probe(tmp_path):
                 "wfb": {"profile": "gs", "raw": {}},
                 "drone": {"endpoint": "http://10.5.0.10:8080"},
                 "dynamicLink": {"enabled": False, "maxMcs": 5,
-                                "txpower": {"min": 18, "max": 28},
                                 "radioProfile": "m8812eu2", "droneAddr": None,
-                                "dronePort": 9999, "tuning": {}}}
+                                "dronePort": 9999}}
     store = ConfigStore(defaults)
     ctrl = _FakeController()     # existing fake dynlink controller in this file
     probe = _FakeProbe()
