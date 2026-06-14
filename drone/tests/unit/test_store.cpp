@@ -78,3 +78,10 @@ TEST_CASE("store: code defaults carry dynamicLink section") {
     CHECK(c.dynamicLink.safe.mcs == 1);
     CHECK(c.dynamicLink.roiQp.thresholdKbps == 6000);
 }
+
+TEST_CASE("loadEffective: wrong-typed known key throws StoreError") {
+    auto tmp = std::filesystem::temp_directory_path() / "fpvd-cfg-wrongtype.json";
+    std::ofstream(tmp) << R"({"link":{"channel":"not-a-number"}})";
+    CHECK_THROWS_AS(fpvd::loadEffective(tmp.string()), fpvd::StoreError);
+    std::filesystem::remove(tmp);
+}

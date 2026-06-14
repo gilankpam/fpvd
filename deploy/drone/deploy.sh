@@ -66,23 +66,25 @@ if remote 'test -f /etc/init.d/S99fpvd'; then MODE=update; else MODE=install; fi
 echo "[mode]  $MODE  ($TARGET)"
 
 # ---- 3. push artifacts (binary to a .new staging name to dodge ETXTBSY) --
-echo "[push]  binary, radio scripts, defaults, init script…"
+echo "[push]  binary, radio scripts, init script…"
 remote 'mkdir -p /etc/fpvd /usr/libexec/fpvd'
 copy "$STRIPPED"                   /usr/bin/fpvd.new
 copy "$CPP/scripts/radio-up.sh"   /usr/libexec/fpvd/radio-up.sh
 copy "$CPP/scripts/radio-tune.sh" /usr/libexec/fpvd/radio-tune.sh
 copy "$PROBE_FEEDER"              /usr/libexec/fpvd/probe-feeder.new   # staged: live feeders hold the old inode (ETXTBSY); mv on switchover
-copy "$CPP/etc/defaults.json"     /etc/fpvd/defaults.json   # baseline; overlay /etc/fpvd/config.json (user edits) is untouched
+# Note: there is no defaults.json file to push. The daemon uses code-baked
+# defaults + a single /etc/fpvd/config.json. A seed step below materialises
+# /etc/fpvd/config.json on first install (without clobbering operator edits).
 
-# init script: manual-deploy variant — /rom is read-only on a live system, so
-# point --defaults at the writable /etc/fpvd/defaults.json.
+# init script: daemon reads /etc/fpvd/config.json (default --config path);
+# no --defaults flag — it was removed when defaults.json was dropped.
 cat > "$INIT" <<'EOF'
 #!/bin/sh
 DAEMON=fpvd
 DAEMON_PATH=/usr/bin/fpvd
 PIDFILE=/var/run/fpvd.pid
 LOG=/tmp/fpvd.log
-DAEMON_ARGS="--log $LOG --defaults /etc/fpvd/defaults.json"
+DAEMON_ARGS="--log $LOG --config /etc/fpvd/config.json"
 
 start() {
     printf 'Starting %s: ' "$DAEMON"
@@ -123,6 +125,9 @@ if [ "$MODE" = install ]; then
         rm -f /etc/init.d/S95waybeam /etc/init.d/S98wifibroadcast /etc/init.d/S99dynamic-link-applier
         mv -f /usr/bin/fpvd.new /usr/bin/fpvd
         mv -f /usr/libexec/fpvd/probe-feeder.new /usr/libexec/fpvd/probe-feeder
+        # Seed /etc/fpvd/config.json from code defaults on first install only;
+        # never clobber an existing operator config.
+        [ -f /etc/fpvd/config.json ] || /usr/bin/fpvd --dump-config > /etc/fpvd/config.json
         : > /tmp/fpvd.log
         /etc/init.d/S99fpvd start
     '
@@ -133,6 +138,9 @@ else
         sleep 2
         mv -f /usr/bin/fpvd.new /usr/bin/fpvd
         mv -f /usr/libexec/fpvd/probe-feeder.new /usr/libexec/fpvd/probe-feeder
+        # Seed /etc/fpvd/config.json from code defaults if absent (e.g. first
+        # deploy after the defaults.json model was removed).
+        [ -f /etc/fpvd/config.json ] || /usr/bin/fpvd --dump-config > /etc/fpvd/config.json
         # start-stop-daemon -K signals but does not remove the pidfile; a stale
         # /var/run/fpvd.pid makes the subsequent -S fail ("Starting fpvd: FAIL").
         # Clear it after the stop+settle so the start is clean (the documented race).

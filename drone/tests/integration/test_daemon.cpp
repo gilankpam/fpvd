@@ -21,6 +21,26 @@
 
 namespace fs = std::filesystem;
 
+TEST_CASE("daemon: defaultsJson returns the code defaults") {
+    auto tmp = fs::temp_directory_path() / "fpvd-defaults-json";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fpvd::DaemonPaths paths{
+        (tmp / "etc" / "fpvd" / "config.json").string(),
+        "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string()
+    };
+    fpvd::Daemon d(paths);
+    d.bootstrap(/*startProcesses=*/false);
+
+    auto j = d.defaultsJson();
+    CHECK(j == nlohmann::json(fpvd::Config{}));
+    // Spot-check a couple of known default values.
+    CHECK(j["link"]["channel"] == 132);
+    CHECK(j["video"]["bitrate"] == 8192);
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("daemon: bootstraps from defaults file when no overlay") {
     auto tmp = fs::temp_directory_path() / "fpvd-test-bootstrap";
     fs::remove_all(tmp);

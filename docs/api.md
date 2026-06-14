@@ -37,7 +37,7 @@ The daemon maintains two views of the configuration:
 
 `GET /config` returns effective by default and pending with `?pending=true`.
 
-`POST /apply` validates pending, persists it as a sparse overlay over the firmware baseline, and restarts only the affected subsystems.
+`POST /apply` validates pending, persists the full config to `/etc/fpvd/config.json`, and restarts only the affected subsystems.
 
 ---
 
@@ -222,7 +222,7 @@ curl -X PATCH http://127.0.0.1:8080/config \
 
 ### POST /apply
 
-Commits the pending configuration to effective, persists the user overlay, and restarts only the subsystems affected by the change. This is the single action that makes staged changes take effect on the drone.
+Commits the pending configuration to effective, persists the full config to `/etc/fpvd/config.json`, and restarts only the subsystems affected by the change. This is the single action that makes staged changes take effect on the drone.
 
 Affected subsystems are determined by which fields changed:
 
@@ -275,7 +275,7 @@ curl -X POST http://127.0.0.1:8080/apply
 
 ### POST /reset
 
-Discards the user overlay file and resets pending to the firmware baseline (same as `GET /defaults`). Does **not** call `POST /apply` — the effective configuration and running processes are unchanged until the client calls apply.
+Removes `/etc/fpvd/config.json` and resets pending to the code defaults (same as `GET /defaults`). Does **not** call `POST /apply` — the effective configuration and running processes are unchanged until the client calls apply.
 
 **Request body:** none
 
@@ -289,7 +289,7 @@ Discards the user overlay file and resets pending to the firmware baseline (same
 
 | Code | Meaning |
 |------|---------|
-| 200  | Overlay discarded; pending is now the firmware baseline. |
+| 200  | `/etc/fpvd/config.json` removed; pending is now the code defaults. |
 
 **Example**
 
