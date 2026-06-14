@@ -157,6 +157,7 @@ TEST_CASE("schema: link.fec swfec keys default and round-trip") {
 }
 
 TEST_CASE("schema: legacy fec object without swfec keys parses with defaults") {
+    // no "mode" key -> code default (swfec) fills in
     auto j = nlohmann::json::parse(R"({"link":{"fec":{"k":3,"n":5}}})");
     auto c = j.get<fpvd::Config>();
     CHECK(c.link.fec.k == 3);

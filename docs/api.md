@@ -73,7 +73,7 @@ curl http://127.0.0.1:8080/healthz
 
 ### GET /defaults
 
-Returns the firmware baseline configuration — the values burned into `/rom/etc/fpvd/defaults.json` at build time. This is the starting point before any user overlay is applied. Use it to show "reset to defaults" previews or to build a diff display.
+Returns the code-default configuration — the values baked into the `Config{}` struct at compile time. There is no `/rom/etc/fpvd/defaults.json` file; the daemon serialises `Config{}` directly and returns it. This is the starting point before any user overlay is applied. Use it to show "reset to defaults" previews or to build a diff display.
 
 **Request body:** none
 
@@ -93,24 +93,26 @@ curl http://127.0.0.1:8080/defaults
 
 ```json
 {
-  "link": {"channel": 161, "width": 20, "txPowerDbm": 20, "mcs": 2,
-           "fec": {"k": 8, "n": 12}, "stbc": false, "ldpc": false,
+  "link": {"channel": 132, "width": 20, "txPowerDbm": 20, "mcs": 2,
+           "fec": {"mode": "swfec", "k": 8, "n": 12, "overheadPct": 50, "deadlineMs": 30},
+           "stbc": true, "ldpc": true,
            "linkId": 7669206, "mtu": 1500, "wlanAdapter": null},
   "video": {"codec": "h265", "resolution": "1920x1080", "fps": 60,
             "bitrate": 8192, "rcMode": "cbr", "gopSize": 1.0, "qpDelta": -4,
+            "sensorBin": "",
             "roi": {"enabled": true, "qp": 0, "center": 0.4, "steps": 2}},
   "image": {"mirror": false, "flip": false, "rotate": 0},
   "telemetry": {"router": "msposd", "serial": "ttyS2", "osdFps": 20, "baud": 115200},
   "recording": {"enabled": false, "format": "ts",
                 "mode": "mirror", "maxSeconds": 300, "maxMB": 500},
+  "osd": {"enabled": true},
   "dynamicLink": {
     "enabled": false, "healthTimeoutMs": 10000,
-    "interleavingSupported": true, "minIdrIntervalMs": 500,
-    "applyStaggerMs": 50, "applySubPaceMs": 5, "mavlinkEnable": true,
-    "osd": {"enabled": true, "debugLatency": false},
+    "applyStaggerMs": 50, "applySubPaceMs": 5,
     "roiQp": {"thresholdKbps": 6000, "lowAnchorKbps": 2000, "floor": -24, "step": 3},
-    "safe": {"mcs": 1, "k": 8, "n": 12, "depth": 1,
-             "bandwidth": 20, "txPowerDbm": 20, "bitrateKbps": 2000}
+    "safe": {"mcs": 1, "k": 8, "n": 12, "overheadPct": 100, "deadlineMs": 30, "bitrateKbps": 2000},
+    "compute": {"minBitrateKbps": 1000, "maxBitrateKbps": 24000,
+                "baseRedundancyRatio": 0.5, "blocksPerFrame": 2.0, "kMin": 2, "kMax": 50}
   },
   "services": {}
 }
@@ -187,8 +189,9 @@ curl -X PATCH http://127.0.0.1:8080/config \
 
 ```jsonc
 {
-  "link": {"channel": 161, "width": 20, "txPowerDbm": 20, "mcs": 2,
-           "fec": {"k": 8, "n": 12}, "stbc": false, "ldpc": false,
+  "link": {"channel": 132, "width": 20, "txPowerDbm": 20, "mcs": 2,
+           "fec": {"mode": "swfec", "k": 8, "n": 12, "overheadPct": 50, "deadlineMs": 30},
+           "stbc": true, "ldpc": true,
            "linkId": 7669206, "mtu": 1500, "wlanAdapter": null},
   "video": {"codec": "h265", "resolution": "1920x1080", "fps": 90,
             "bitrate": 12000, "rcMode": "cbr", "gopSize": 1.0, "qpDelta": -4,
@@ -385,16 +388,19 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 
 ```jsonc
 "link": {
-  "channel": 161,       // integer, 1..200 — Wi-Fi channel number
-  "width": 20,          // integer, 20 or 40 — channel width in MHz
+  "channel": 132,       // integer, 1..200 — Wi-Fi channel number
+  "width": 20,          // integer, 10, 20, or 40 — channel width in MHz
   "txPowerDbm": 20,     // integer, -10..30 — TX power in dBm (converted x100 to mBm at the radio edge)
   "mcs": 2,             // integer, 0..7 — MCS index
   "fec": {
-    "k": 8,             // integer, 1..31 — FEC data shards (k < n, n ≤ 32)
-    "n": 12             // integer, 2..32 — FEC total shards (n > k, n ≤ 32)
+    "mode": "swfec",    // string — "rs" or "swfec"
+    "k": 8,             // integer, 1..31 — FEC data shards (k < n, n ≤ 32; rs mode)
+    "n": 12,            // integer, 2..32 — FEC total shards (n > k, n ≤ 32; rs mode)
+    "overheadPct": 50,  // integer, 0..255 — swfec repair budget
+    "deadlineMs": 30    // integer, 1..255 — swfec recovery window
   },
-  "stbc": false,        // boolean — enable STBC
-  "ldpc": false,        // boolean — enable LDPC
+  "stbc": true,         // boolean — enable STBC
+  "ldpc": true,         // boolean — enable LDPC
   "linkId": 7669206,    // integer — wfb-ng link ID (must match GS)
   "mtu": 1500,          // integer — packet MTU in bytes
   "wlanAdapter": null   // string or null — force a specific wlan interface name;
@@ -404,14 +410,17 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 
 | Field | Type | Default | Valid values |
 |-------|------|---------|--------------|
-| `channel` | integer | `161` | 1 – 200 |
-| `width` | integer | `20` | `20` or `40` |
+| `channel` | integer | `132` | 1 – 200 |
+| `width` | integer | `20` | `10`, `20`, or `40` |
 | `txPowerDbm` | integer | `20` | -10 – 30 |
 | `mcs` | integer | `2` | 0 – 7 |
+| `fec.mode` | string | `"swfec"` | `"rs"` or `"swfec"` |
 | `fec.k` | integer | `8` | 1 – 31, must be < `fec.n` |
 | `fec.n` | integer | `12` | 2 – 32, must be > `fec.k` |
-| `stbc` | boolean | `false` | — |
-| `ldpc` | boolean | `false` | — |
+| `fec.overheadPct` | integer | `50` | 0 – 255 |
+| `fec.deadlineMs` | integer | `30` | 1 – 255 |
+| `stbc` | boolean | `true` | — |
+| `ldpc` | boolean | `true` | — |
 | `linkId` | integer | `7669206` | — |
 | `mtu` | integer | `1500` | — |
 | `wlanAdapter` | string \| null | `null` | interface name or `null` |
@@ -510,17 +519,10 @@ Controls the on-drone `dl-applier` process from the `wfbng-dynamic-link` project
 
 ```jsonc
 "dynamicLink": {
-  "enabled": false,              // boolean — start the dl-applier process
+  "enabled": false,              // boolean — arm the dynamic-link applier
   "healthTimeoutMs": 10000,      // integer, >= 1000 — watchdog timeout in ms
-  "interleavingSupported": true, // boolean — whether the GS supports interleaving
-  "minIdrIntervalMs": 500,       // integer, >= 16 — minimum IDR request interval in ms
   "applyStaggerMs": 50,          // integer, 0..500 — stagger between command batches in ms
   "applySubPaceMs": 5,           // integer, 0..50 — pacing between sub-commands in ms
-  "mavlinkEnable": true,         // boolean — send MAVLink STATUSTEXT updates
-  "osd": {
-    "enabled": true,             // boolean — push link-quality data to OSD
-    "debugLatency": false        // boolean — include latency debug info in OSD messages
-  },
   "roiQp": {
     // ROI-QP curve: maps current bitrate onto a QP delta for the center ROI region.
     // thresholdKbps is the high-bitrate anchor; lowAnchorKbps is the low-bitrate anchor.
@@ -531,30 +533,36 @@ Controls the on-drone `dl-applier` process from the `wfbng-dynamic-link` project
     "step": 3                    // integer, >= 1 — QP step per curve segment
   },
   "safe": {
-    // Per-airframe failsafe ceilings: dl-applier will not exceed these values
-    // regardless of what the ground-station controller requests.
-    "mcs": 1,           // integer, 0..7 — maximum MCS index dl-applier may set
-    "k": 8,             // integer, 1..31 — maximum FEC k shard count (k < n, n ≤ 32)
-    "n": 12,            // integer, 2..32 — maximum FEC n shard count (n > k, n ≤ 32)
-    "depth": 1,         // integer, 1..8 — wfb-ng block depth
-    "bandwidth": 20,    // integer, 20 or 40 — maximum channel width in MHz
-    "txPowerDbm": 20,   // integer, -10..30 — maximum TX power in dBm
-    "bitrateKbps": 2000 // integer, > 0 — maximum video bitrate in kbps
+    // Safe-mode floor: applied when the GS falls back to the lowest rung.
+    // bandwidth and txPowerDbm are NOT in safe — they are derived (from link.width
+    // and the per-MCS TX-power curve in txpower_curve.hpp).
+    "mcs": 1,              // integer, 0..7 — safe-mode MCS
+    "k": 8,                // integer, 1..31 — safe-mode FEC k (k < n, n ≤ 32)
+    "n": 12,               // integer, 2..32 — safe-mode FEC n (n > k, n ≤ 32)
+    "overheadPct": 100,    // integer, 0..255 — swfec repair budget at safe rung
+    "deadlineMs": 30,      // integer, 1..255 — swfec recovery window at safe rung
+    "bitrateKbps": 2000    // integer, > 0 — safe-mode video bitrate in kbps
+  },
+  "compute": {
+    // Bitrate and FEC geometry derivation knobs (rarely need tuning).
+    "minBitrateKbps": 1000,        // integer, > 0 — floor for computed video bitrate
+    "maxBitrateKbps": 24000,       // integer, > minBitrateKbps — ceiling for computed video bitrate
+    "baseRedundancyRatio": 0.5,    // number, > 0 — n/k − 1 (e.g. 0.5 → k=8, n=12)
+    "blocksPerFrame": 2.0,         // number, > 0 — FEC blocks per video frame
+    "kMin": 2,                     // integer, >= 1 — minimum FEC k
+    "kMax": 50                     // integer, >= kMin — maximum FEC k
   }
 }
 ```
+
+> **`osd.enabled` is a top-level key** (`"osd": {"enabled": true}`), not inside `dynamicLink`. The OSD overlay runs regardless of whether dynamic-link is armed.
 
 | Field | Type | Default | Valid values |
 |-------|------|---------|--------------|
 | `enabled` | boolean | `false` | — |
 | `healthTimeoutMs` | integer | `10000` | >= 1000 |
-| `interleavingSupported` | boolean | `true` | — |
-| `minIdrIntervalMs` | integer | `500` | >= 16 |
 | `applyStaggerMs` | integer | `50` | 0 – 500 |
 | `applySubPaceMs` | integer | `5` | 0 – 50 |
-| `mavlinkEnable` | boolean | `true` | — |
-| `osd.enabled` | boolean | `true` | — |
-| `osd.debugLatency` | boolean | `false` | — |
 | `roiQp.thresholdKbps` | integer | `6000` | > `roiQp.lowAnchorKbps` |
 | `roiQp.lowAnchorKbps` | integer | `2000` | > 0 |
 | `roiQp.floor` | integer | `-24` | <= 0 |
@@ -562,10 +570,15 @@ Controls the on-drone `dl-applier` process from the `wfbng-dynamic-link` project
 | `safe.mcs` | integer | `1` | 0 – 7 |
 | `safe.k` | integer | `8` | 1 – 31, must be < `safe.n` |
 | `safe.n` | integer | `12` | 2 – 32, must be > `safe.k` |
-| `safe.depth` | integer | `1` | 1 – 8 |
-| `safe.bandwidth` | integer | `20` | `20` or `40` |
-| `safe.txPowerDbm` | integer | `20` | -10 – 30 |
+| `safe.overheadPct` | integer | `100` | 0 – 255 |
+| `safe.deadlineMs` | integer | `30` | 1 – 255 |
 | `safe.bitrateKbps` | integer | `2000` | > 0 |
+| `compute.minBitrateKbps` | integer | `1000` | > 0, must be < `compute.maxBitrateKbps` |
+| `compute.maxBitrateKbps` | integer | `24000` | > `compute.minBitrateKbps` |
+| `compute.baseRedundancyRatio` | number | `0.5` | > 0 |
+| `compute.blocksPerFrame` | number | `2.0` | > 0 |
+| `compute.kMin` | integer | `2` | >= 1, must be <= `compute.kMax` |
+| `compute.kMax` | integer | `50` | >= `compute.kMin` |
 
 ### `services` — user-defined services
 
@@ -871,7 +884,7 @@ curl -X POST http://127.0.0.1:8080/apply
 Enable `dl-applier` supervision with custom safe ceilings for a long-range airframe.
 
 ```bash
-# Stage: configure safe ceilings and enable adaptive link
+# Stage: configure safe floor and enable adaptive link
 curl -X PATCH http://127.0.0.1:8080/config \
   -H 'content-type: application/json' \
   -d '{
@@ -879,8 +892,7 @@ curl -X PATCH http://127.0.0.1:8080/config \
       "enabled": true,
       "safe": {
         "mcs": 2,
-        "bitrateKbps": 6000,
-        "txPowerDbm": 25
+        "bitrateKbps": 6000
       }
     }
   }'

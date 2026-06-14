@@ -146,7 +146,7 @@ TEST_CASE("buildDlSnapshot: swfec fields from link.fec + safe") {
 
 TEST_CASE("buildDlSnapshot: rs mode -> swfec false") {
     fpvd::Config c{};
-    c.link.fec.mode = "rs";
+    c.link.fec.mode = "rs";  // default is now swfec; set rs explicitly to exercise the rs path
     auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
     CHECK_FALSE(s.swfec);
 }

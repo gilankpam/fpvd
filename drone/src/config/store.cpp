@@ -10,8 +10,6 @@
 
 namespace fpvd {
 
-
-
 nlohmann::json deepMergeJson(const nlohmann::json& base,
                               const nlohmann::json& overlay) {
     if (!base.is_object() || !overlay.is_object()) {
