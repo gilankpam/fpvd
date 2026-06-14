@@ -12,11 +12,8 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
     DlRuntimeConfig s{};
 
     s.healthTimeoutMs      = static_cast<uint32_t>(dl.healthTimeoutMs);
-    s.minIdrIntervalMs     = static_cast<uint32_t>(dl.minIdrIntervalMs);
     s.applyStaggerMs       = static_cast<uint32_t>(dl.applyStaggerMs);
     s.applySubPaceMs       = static_cast<uint32_t>(dl.applySubPaceMs);
-    s.osdEnabled           = dl.osd.enabled;
-    s.osdDebugLatency      = dl.osd.debugLatency;
     s.debug                = false;   // no debug field in schema DynamicLink yet
 
     s.roiQp = RoiCurve{

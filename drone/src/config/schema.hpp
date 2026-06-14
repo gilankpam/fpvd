@@ -125,13 +125,6 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkSafe, mcs, k, n,
                                                bandwidth, txPowerDbm,
                                                bitrateKbps)
 
-struct DynamicLinkOsd {
-    bool enabled{true};
-    bool debugLatency{false};
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkOsd, enabled,
-                                               debugLatency)
-
 struct DynamicLinkRoiQp {
     int thresholdKbps{6000};
     int lowAnchorKbps{2000};
@@ -162,20 +155,24 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkFec,
 struct DynamicLink {
     bool enabled{false};
     int healthTimeoutMs{10000};
-    int minIdrIntervalMs{500};
     int applyStaggerMs{50};
     int applySubPaceMs{5};
-    DynamicLinkOsd osd{};
     DynamicLinkRoiQp roiQp{};
     DynamicLinkSafe safe{};
     DynamicLinkBitrate bitrate{};
     DynamicLinkFec     fec{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled,
-                                               healthTimeoutMs,
-                                               minIdrIntervalMs, applyStaggerMs,
+                                               healthTimeoutMs, applyStaggerMs,
                                                applySubPaceMs,
-                                               osd, roiQp, safe, bitrate, fec)
+                                               roiQp, safe, bitrate, fec)
+
+// OSD overlay (msposd message file). Top-level: the OSD is rendered whether or
+// not the dynamic link is enabled, so its enable flag lives outside dynamicLink.
+struct Osd {
+    bool enabled{true};
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Osd, enabled)
 
 struct Service {
     bool enabled{true};
@@ -194,11 +191,12 @@ struct Config {
     Image image{};
     Telemetry telemetry{};
     Recording recording{};
+    Osd osd{};
     DynamicLink dynamicLink{};
     std::map<std::string, Service> services{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, link, video, image,
-                                               telemetry, recording,
+                                               telemetry, recording, osd,
                                                dynamicLink, services)
 
 } // namespace fpvd

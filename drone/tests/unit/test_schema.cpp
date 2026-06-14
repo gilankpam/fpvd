@@ -19,10 +19,10 @@ TEST_CASE("schema: round-trip a minimal config through json") {
         "telemetry":{"router":"msposd","serial":"ttyS2","osdFps":20,"baud":115200},
         "recording":{"enabled":false,"format":"ts",
                      "mode":"mirror","maxSeconds":300,"maxMB":500},
+        "osd":{"enabled":true},
         "dynamicLink":{
             "enabled":false,"healthTimeoutMs":10000,
-            "minIdrIntervalMs":500,"applyStaggerMs":50,"applySubPaceMs":5,
-            "osd":{"enabled":true,"debugLatency":false},
+            "applyStaggerMs":50,"applySubPaceMs":5,
             "roiQp":{"thresholdKbps":6000,"lowAnchorKbps":2000,
                      "floor":-24,"step":3},
             "safe":{"mcs":1,"k":8,"n":12,"overheadPct":100,"deadlineMs":30,
@@ -88,13 +88,13 @@ TEST_CASE("schema: dynamicLink round-trips through json") {
     c.dynamicLink.enabled = true;
     c.dynamicLink.safe.mcs = 3;
     c.dynamicLink.roiQp.floor = -18;
-    c.dynamicLink.osd.debugLatency = true;
+    c.osd.enabled = false;
     json j = c;
     fpvd::Config c2 = j.get<fpvd::Config>();
     CHECK(c2.dynamicLink.enabled == true);
     CHECK(c2.dynamicLink.safe.mcs == 3);
     CHECK(c2.dynamicLink.roiQp.floor == -18);
-    CHECK(c2.dynamicLink.osd.debugLatency == true);
+    CHECK(c2.osd.enabled == false);
     // unchanged defaults round-trip too
     CHECK(c2.dynamicLink.healthTimeoutMs == 10000);
     // mavlinkEnable was removed from schema — must NOT appear in serialised output
@@ -111,11 +111,9 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
     fpvd::Config c{};
     CHECK(c.dynamicLink.enabled == false);
     CHECK(c.dynamicLink.healthTimeoutMs == 10000);
-    CHECK(c.dynamicLink.minIdrIntervalMs == 500);
     CHECK(c.dynamicLink.applyStaggerMs == 50);
     CHECK(c.dynamicLink.applySubPaceMs == 5);
-    CHECK(c.dynamicLink.osd.enabled == true);
-    CHECK(c.dynamicLink.osd.debugLatency == false);
+    CHECK(c.osd.enabled == true);
     CHECK(c.dynamicLink.roiQp.thresholdKbps == 6000);
     CHECK(c.dynamicLink.roiQp.lowAnchorKbps == 2000);
     CHECK(c.dynamicLink.roiQp.floor == -24);

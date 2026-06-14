@@ -463,9 +463,9 @@ static fpvd::DaemonPaths makeRoutingPaths(const fs::path& tmp, uint16_t listenPo
     paths.dlEndpoints.wfbCtlPort = 0;
     paths.dlEndpoints.encHost = "127.0.0.1";
     paths.dlEndpoints.encPort = 0;
-    paths.dlEndpoints.idrPort = 0;
+    paths.idrPort = 0;
     paths.dlEndpoints.gsTunnelPort = 0;
-    paths.dlEndpoints.osdMsgPath = (tmp / "MSPOSD.msg").string();
+    paths.osdMsgPath = (tmp / "MSPOSD.msg").string();
     paths.waybeamRestartSettleMs = 0;  // keep the waybeam-restart tests fast
     return paths;
 }
@@ -945,7 +945,7 @@ TEST_CASE("apply: writes the system-stats OSD line when dynamic-link is off") {
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
 
-    std::ifstream f(paths.dlEndpoints.osdMsgPath);
+    std::ifstream f(paths.osdMsgPath);
     std::string content((std::istreambuf_iterator<char>(f)),
                         std::istreambuf_iterator<char>());
     CHECK(content.find("&B") != std::string::npos);   // video bitrate+fps

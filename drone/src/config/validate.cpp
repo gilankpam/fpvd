@@ -142,8 +142,6 @@ std::vector<ValidationError> validate(const Config& c) {
 
         if (dl.healthTimeoutMs < 1000)
             errs.push_back({"dynamicLink.healthTimeoutMs", "must be >= 1000"});
-        if (dl.minIdrIntervalMs < 16)
-            errs.push_back({"dynamicLink.minIdrIntervalMs", "must be >= 16"});
         if (dl.applyStaggerMs < 0 || dl.applyStaggerMs > 500)
             errs.push_back({"dynamicLink.applyStaggerMs", "must be 0..500"});
         if (dl.applySubPaceMs < 0 || dl.applySubPaceMs > 50)

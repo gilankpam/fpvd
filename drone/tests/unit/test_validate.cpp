@@ -180,12 +180,6 @@ TEST_CASE("validate: dynamicLink.healthTimeoutMs >= 1000") {
     CHECK(errs[0].path == "dynamicLink.healthTimeoutMs");
 }
 
-TEST_CASE("validate: dynamicLink.minIdrIntervalMs >= 16") {
-    Config c{}; c.dynamicLink.minIdrIntervalMs = 10;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.minIdrIntervalMs");
-}
 
 TEST_CASE("validate: dynamicLink.applyStaggerMs in [0,500]") {
     Config c{}; c.dynamicLink.applyStaggerMs = 501;

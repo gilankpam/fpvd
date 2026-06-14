@@ -363,9 +363,9 @@ static std::unique_ptr<fpvd::Daemon> makeTestDaemonWithDlEndpoints(
     paths.dlEndpoints.wfbCtlPort   = 0;
     paths.dlEndpoints.encHost      = "127.0.0.1";
     paths.dlEndpoints.encPort      = 0;
-    paths.dlEndpoints.idrPort      = 0;
+    paths.idrPort = 0;
     paths.dlEndpoints.gsTunnelPort = 0;
-    paths.dlEndpoints.osdMsgPath   = (tmp / "MSPOSD.msg").string();
+    paths.osdMsgPath   = (tmp / "MSPOSD.msg").string();
 
     auto d = std::make_unique<fpvd::Daemon>(paths);
     d->bootstrap(false);

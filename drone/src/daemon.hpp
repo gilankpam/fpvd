@@ -4,6 +4,10 @@
 #include "config/validate.hpp"
 #include "dynlink/controller.hpp"
 #include "dynlink/runtime_config.hpp"
+#include "idr/idr_constants.hpp"
+#include "idr/relay.hpp"
+#include "osd/osd_constants.hpp"
+#include "osd/writer.hpp"
 #include "waybeam/client.hpp"
 #include "supervise/orchestrator.hpp"
 #include "supervise/beamforming.hpp"
@@ -24,6 +28,13 @@ struct DaemonPaths {
     std::string waybeamJsonPath; // /etc/waybeam.json
     std::string radioTuneScript{}; // /usr/libexec/fpvd/radio-tune.sh (optional)
     dynlink::Endpoints dlEndpoints{};  // defaults to production endpoints; overridable in tests
+    // UDP port for the always-on IDR relay (GS tunnel -> drone). Not operator
+    // config — a fixed transport constant; this field exists only so tests can
+    // pick an ephemeral port or disable it (0). Production uses idr::kIdrPort.
+    int idrPort{idr::kIdrPort};
+    // OSD message-file path. Not operator config; this field exists only so
+    // tests can redirect it to a temp file. Production uses osd::kOsdMsgPath.
+    std::string osdMsgPath{osd::kOsdMsgPath};
     // Settle delay for the waybeam-only restart (see Orchestrator::restart):
     // gives the SigmaStar driver time to drain the old pipeline before the fresh
     // waybeam re-inits, so a video0.size change doesn't wedge the VENC channel.
@@ -125,7 +136,15 @@ private:
     int version_{0};
     LastApply lastApply_;
     RadioInfo radio_;
-    WaybeamClient waybeam_;   // declared before dl_/orch_ for init order
+    WaybeamClient waybeam_;   // declared before dl_/orch_/idrRelay_ for init order
+    // Always-on IDR keyframe relay: shares waybeam_ (thread-safe), runs whether
+    // dynamicLink is enabled or not. Declared after waybeam_ so it outlives it.
+    idr::IdrRelay idrRelay_;
+    // Always-on OSD writer: the single owner of the msposd message file. Both
+    // the controller (status line, injected via dl_.setOsdWriter) and the daemon
+    // (base line) write through it. Declared before dl_ so it outlives the
+    // controller's pointer to it.
+    osd::OsdWriter osd_;
     Orchestrator orch_;
     BeamformingController bf_;
     dynlink::DynamicLinkController dl_;

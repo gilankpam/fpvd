@@ -52,16 +52,14 @@
     "maxSeconds": 300,
     "maxMB": 500
   },
+  "osd": {
+    "enabled": true
+  },
   "dynamicLink": {
     "enabled": false,
     "healthTimeoutMs": 10000,
-    "minIdrIntervalMs": 500,
     "applyStaggerMs": 50,
     "applySubPaceMs": 5,
-    "osd": {
-      "enabled": true,
-      "debugLatency": false
-    },
     "roiQp": {
       "thresholdKbps": 6000,
       "lowAnchorKbps": 2000,

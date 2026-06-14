@@ -24,12 +24,6 @@ struct FakeSrv {
             hits.push_back(r.target);
             res.set_content("ok", "text/plain");
         });
-        srv.Get("/request/idr", [&](const httplib::Request& r, httplib::Response& res) {
-            (void)r;
-            std::lock_guard<std::mutex> lk(mu);
-            hits.push_back("/request/idr");
-            res.set_content("ok", "text/plain");
-        });
         port = srv.bind_to_any_port("127.0.0.1");
         th = std::thread([&] { srv.listen_after_bind(); });
         srv.wait_until_ready();
@@ -49,11 +43,11 @@ struct FakeSrv {
 // ---------------------------------------------------------------------------
 // Task spec test
 // ---------------------------------------------------------------------------
-TEST_CASE("EncoderClient applies bitrate+roiQp+fps, diffs, throttles IDR") {
+TEST_CASE("EncoderClient applies bitrate+roiQp+fps, diffs") {
     FakeSrv f;
 
     fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
-    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
+    EncoderClient enc(wb, RoiCurve{6000, 2000, -24, 3});
 
     // bitrate 6000 -> roiQp 0; fps 60
     CHECK(enc.apply(6000, 60) == 0);
@@ -64,10 +58,6 @@ TEST_CASE("EncoderClient applies bitrate+roiQp+fps, diffs, throttles IDR") {
     size_t n = f.count();
     CHECK(enc.apply(6000, 60) == 0);  // identical -> diffed out, no new hit
     CHECK(f.count() == n);
-
-    CHECK(enc.requestIdr(1000) == 0);  // first IDR sent
-    CHECK(enc.requestIdr(1100) == 1);  // throttled (<500ms)
-    CHECK(enc.requestIdr(1700) == 0);  // window elapsed -> sent
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +66,7 @@ TEST_CASE("EncoderClient applies bitrate+roiQp+fps, diffs, throttles IDR") {
 TEST_CASE("EncoderClient emits signed roiQp when starved") {
     FakeSrv f;
     fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
-    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
+    EncoderClient enc(wb, RoiCurve{6000, 2000, -24, 3});
 
     CHECK(enc.apply(4000, 60) == 0);
     // At 4000 kbps with defaults, roiQp = -12
@@ -88,7 +78,7 @@ TEST_CASE("EncoderClient emits signed roiQp when starved") {
 TEST_CASE("EncoderClient emits roiQp=0 above threshold") {
     FakeSrv f;
     fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
-    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
+    EncoderClient enc(wb, RoiCurve{6000, 2000, -24, 3});
 
     CHECK(enc.apply(8000, 60) == 0);
     // Bug-fix assertion: at 8000 kbps roiQp = 0, still send fpv.roiQp=0
@@ -99,7 +89,7 @@ TEST_CASE("EncoderClient emits roiQp=0 above threshold") {
 TEST_CASE("EncoderClient deduplicates repeat apply") {
     FakeSrv f;
     fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
-    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
+    EncoderClient enc(wb, RoiCurve{6000, 2000, -24, 3});
 
     enc.apply(4000, 60);
     size_t n1 = f.count();
@@ -115,7 +105,7 @@ TEST_CASE("EncoderClient different bitrate same roiQp is NOT deduped") {
     // The dedup key includes raw bitrate, so BOTH must produce HTTP hits.
     FakeSrv f;
     fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
-    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
+    EncoderClient enc(wb, RoiCurve{6000, 2000, -24, 3});
 
     enc.apply(4000, 60);
     size_t n1 = f.count();
@@ -129,7 +119,7 @@ TEST_CASE("EncoderClient different bitrate same roiQp is NOT deduped") {
 TEST_CASE("EncoderClient bitrate=0 is no-op sentinel") {
     FakeSrv f;
     fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
-    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
+    EncoderClient enc(wb, RoiCurve{6000, 2000, -24, 3});
 
     CHECK(enc.apply(0, 60) == 0);
     CHECK(f.count() == 0);  // no HTTP request
@@ -139,7 +129,7 @@ TEST_CASE("EncoderClient applySafe uses compute formula") {
     FakeSrv f;
     // safe bitrate 2000 -> floor -24
     fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
-    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
+    EncoderClient enc(wb, RoiCurve{6000, 2000, -24, 3});
 
     CHECK(enc.applySafe(2000) == 0);
     REQUIRE(f.count() > 0);
@@ -152,7 +142,7 @@ TEST_CASE("EncoderClient applySafe uses compute formula") {
 TEST_CASE("EncoderClient fps=0 omits video0.fps from query") {
     FakeSrv f;
     fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
-    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
+    EncoderClient enc(wb, RoiCurve{6000, 2000, -24, 3});
 
     // fps=0 -> video0.fps not emitted
     CHECK(enc.apply(6000, 0) == 0);
@@ -161,27 +151,10 @@ TEST_CASE("EncoderClient fps=0 omits video0.fps from query") {
     CHECK(f.last().find("video0.bitrate=6000") != std::string::npos);
 }
 
-TEST_CASE("EncoderClient IDR throttle arms on any attempt including failure") {
-    // Grab a free port via bind_to_any_port, then stop the server immediately
-    // so connections are refused — port is guaranteed free/refused.
-    httplib::Server dead;
-    int dead_port = dead.bind_to_any_port("127.0.0.1");
-    dead.stop();  // stop before listen; connections will be refused
-
-    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(dead_port));
-    EncoderClient enc(wb, 500, RoiCurve{6000, 2000, -24, 3});
-    enc.setMinIdrInterval(500);
-
-    (void)enc.requestIdr(1000);  // may fail (-1) but arms throttle
-    // regardless of result, second call within window must be throttled
-    int rc2 = enc.requestIdr(1100);
-    CHECK(rc2 == 1);  // throttled
-}
-
 TEST_CASE("EncoderClient setRoiCurve hot reconcile") {
     FakeSrv f;
     fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
-    EncoderClient enc(wb, /*minIdrIntervalMs=*/500, RoiCurve{6000, 2000, -24, 3});
+    EncoderClient enc(wb, RoiCurve{6000, 2000, -24, 3});
 
     enc.apply(4000, 60);  // roiQp=-12 cached
     size_t n1 = f.count();

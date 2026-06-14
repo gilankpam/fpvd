@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-namespace fpvd::dynlink {
+namespace fpvd::idr {
 
 /* UDP listener for PixelPilot IDR-token bursts.
  *
@@ -29,4 +29,4 @@ private:
     int fd_{-1};
 };
 
-} // namespace fpvd::dynlink
+} // namespace fpvd::idr

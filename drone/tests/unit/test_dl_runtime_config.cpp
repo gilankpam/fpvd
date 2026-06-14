@@ -22,20 +22,14 @@ TEST_CASE("buildDlSnapshot maps schema + derived inputs") {
 TEST_CASE("buildDlSnapshot maps all DynamicLink fields") {
     Config c{};
     c.dynamicLink.healthTimeoutMs    = 5000;
-    c.dynamicLink.minIdrIntervalMs   = 200;
     c.dynamicLink.applyStaggerMs     = 25;
     c.dynamicLink.applySubPaceMs     = 10;
-    c.dynamicLink.osd.enabled        = false;
-    c.dynamicLink.osd.debugLatency   = true;
 
     auto s = buildDlSnapshot(c, "wlan0");
 
     CHECK(s.healthTimeoutMs     == 5000u);
-    CHECK(s.minIdrIntervalMs    == 200u);
     CHECK(s.applyStaggerMs      == 25u);
     CHECK(s.applySubPaceMs      == 10u);
-    CHECK(s.osdEnabled          == false);
-    CHECK(s.osdDebugLatency     == true);
     // debug field is absent from schema — must default to false
     CHECK(s.debug               == false);
 }
@@ -80,11 +74,8 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
 
     // DynamicLink defaults from schema
     CHECK(s.healthTimeoutMs      == 10000u);
-    CHECK(s.minIdrIntervalMs     == 500u);
     CHECK(s.applyStaggerMs       == 50u);
     CHECK(s.applySubPaceMs       == 5u);
-    CHECK(s.osdEnabled           == true);
-    CHECK(s.osdDebugLatency      == false);
     CHECK(s.debug                == false);
 
     // Link/video defaults
