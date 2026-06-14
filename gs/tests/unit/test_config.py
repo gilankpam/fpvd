@@ -1,4 +1,5 @@
 import json
+import logging
 
 from fpvdgs.config import ConfigStore, deep_merge
 from fpvdgs.config_defaults import default_config
@@ -95,7 +96,6 @@ def test_load_patch_commit_reload_roundtrip(tmp_path):
 
 
 def test_load_warns_on_unknown_keys(tmp_path, caplog):
-    import logging
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps({
         "bogusTop": 1,

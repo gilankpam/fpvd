@@ -209,3 +209,13 @@ def test_patch_rejects_unknown_dynamic_link_subkey():
 
 def test_patch_accepts_known_dynamic_link_keys():
     schema.validate_config_patch({"dynamicLink": {"selector": {}, "maxMcs": 4}})
+
+
+def test_smoothing_alpha_above_one_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(_dl(smoothing={"ewmaAlphaRssi": 1.5}))
+
+
+def test_selector_non_dict_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(_dl(selector=0))

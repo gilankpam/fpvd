@@ -41,6 +41,8 @@ def validate_config_patch(sparse: dict) -> None:
             raise SchemaError(f"unknown link keys: {sorted(unknown_link)}")
     dl = sparse.get("dynamicLink")
     if dl is not None:
+        # PATCH rejects unknown top-level dynamicLink keys; sub-block contents
+        # (selector/smoothing ranges) are deferred to validate_effective on apply.
         if not isinstance(dl, dict):
             raise SchemaError("dynamicLink must be an object")
         unknown_dl = set(dl) - DYNAMIC_LINK_KEYS
@@ -102,8 +104,10 @@ def _validate_dynamic_link(dl: dict) -> None:
     profile = dl.get("radioProfile", "m8812eu2")
     if not isinstance(profile, str) or not profile:
         raise SchemaError("dynamicLink.radioProfile must be a non-empty string")
-    sel = dl.get("selector", {})
-    if sel:
+    if not isinstance(dl.get("enabled", False), bool):
+        raise SchemaError("dynamicLink.enabled must be a bool")
+    sel = dl.get("selector")
+    if sel is not None:
         _validate_block_keys("dynamicLink.selector", sel, SELECTOR_KEYS)
         for k in ("probeViableThreshold", "videoDemotePer", "emergencyLossRate",
                   "emergencyFecPressure"):
@@ -112,16 +116,16 @@ def _validate_dynamic_link(dl: dict) -> None:
             _validate_pos_int(f"dynamicLink.selector.{k}", sel.get(k))
         for k in ("probeFreshnessMs", "holdModesDownMs", "minBetweenChangesMs"):
             _validate_non_neg_num(f"dynamicLink.selector.{k}", sel.get(k))
-    sm = dl.get("smoothing", {})
-    if sm:
+    sm = dl.get("smoothing")
+    if sm is not None:
         _validate_block_keys("dynamicLink.smoothing", sm, SMOOTHING_KEYS)
         for k in ("ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst"):
             _validate_alpha(f"dynamicLink.smoothing.{k}", sm.get(k))
         _validate_non_neg_num("dynamicLink.smoothing.starvationThresholdPps",
                               sm.get("starvationThresholdPps"))
     for sub in ("flightlog", "rssiNorm"):
-        blk = dl.get(sub, {})
-        if blk:
+        blk = dl.get(sub)
+        if blk is not None:
             _validate_block_keys(f"dynamicLink.{sub}", blk, {"enabled"})
             if not isinstance(blk.get("enabled", True), bool):
                 raise SchemaError(f"dynamicLink.{sub}.enabled must be a bool")
