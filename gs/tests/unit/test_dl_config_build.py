@@ -91,3 +91,10 @@ def test_make_dl_snapshot_explicit_drone_addr_wins():
     snap = make_dl_snapshot(eff)
     assert snap["droneAddr"] == "10.5.0.99"
     assert snap["dronePort"] == 12345
+
+
+def test_make_dl_snapshot_falls_back_to_default_port():
+    eff = {"dynamicLink": _block(droneAddr="10.0.0.1", dronePort=None),
+           "drone": {"endpoint": "http://10.5.0.10:8080"}}
+    snap = make_dl_snapshot(eff)
+    assert snap["dronePort"] == 9999

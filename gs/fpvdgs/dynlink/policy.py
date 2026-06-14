@@ -99,9 +99,7 @@ class LeadingSelector:
     """
 
     def __init__(self, cfg: SelectorConfig):
-        # One merged config; alias both names so select()'s body is unchanged.
-        self.gate = cfg
-        self.sel = cfg
+        self.cfg = cfg
         cap = int(cfg.max_mcs)
         if cap < 0:
             raise ValueError(f"max_mcs={cfg.max_mcs} excludes every MCS")
@@ -122,8 +120,8 @@ class LeadingSelector:
         self, loss_rate: float, fec_pressure: float, link_starved: bool
     ) -> bool:
         return (
-            loss_rate >= self.gate.emergency_loss_rate
-            or fec_pressure >= self.gate.emergency_fec_pressure
+            loss_rate >= self.cfg.emergency_loss_rate
+            or fec_pressure >= self.cfg.emergency_fec_pressure
             or link_starved
         )
 
@@ -174,15 +172,15 @@ class LeadingSelector:
             )
             self._reasons = reasons
             return (st.current_mcs, st.current_mcs != prev)
-        if loss_rate >= self.gate.video_demote_per:
+        if loss_rate >= self.cfg.video_demote_per:
             commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
             self._reasons = reasons
             return (st.current_mcs, st.current_mcs != prev)
 
         # --- Rate limit (promotes only; emergencies above bypass it) ---
-        within_hold = (ts_ms - st.last_change_time_ms) < self.sel.hold_modes_down_ms
+        within_hold = (ts_ms - st.last_change_time_ms) < self.cfg.hold_modes_down_ms
         within_rate = (
-            (ts_ms - st.last_change_time_ms) < self.sel.min_between_changes_ms
+            (ts_ms - st.last_change_time_ms) < self.cfg.min_between_changes_ms
         )
 
         # --- Promote: clean+fresh current+1 for promote_debounce_windows ---
@@ -196,16 +194,16 @@ class LeadingSelector:
         fresh = (
             rung is not None
             and rung.get("ageMs") is not None
-            and rung["ageMs"] <= self.gate.probe_freshness_ms
+            and rung["ageMs"] <= self.cfg.probe_freshness_ms
         )
         clean = (
             fresh
             and rung.get("per") is not None
-            and (1.0 - rung["per"]) >= self.gate.probe_viable_threshold
+            and (1.0 - rung["per"]) >= self.cfg.probe_viable_threshold
         )
         if clean:
             self._promote_clean += 1
-            if (self._promote_clean >= self.gate.promote_debounce_windows
+            if (self._promote_clean >= self.cfg.promote_debounce_windows
                     and not within_hold and not within_rate):
                 commit(target, f"probe_promote mcs{target} per={rung['per']:.4f}")
         else:

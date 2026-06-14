@@ -46,9 +46,8 @@ def build_aggregator(block: dict) -> SignalAggregator:
     s = block.get("smoothing", {}) or {}
     rn = block.get("rssiNorm", {}) or {}
     d = SignalAggregator()
-    dn = RssiNormConfig()
     # rssiNorm curve is frozen — read only `enabled` (the rollback toggle).
-    rssi_norm = RssiNormConfig(enabled=bool(rn.get("enabled", dn.enabled)))
+    rssi_norm = RssiNormConfig(enabled=bool(rn.get("enabled", True)))
     return SignalAggregator(
         ewma_alpha_rssi=float(s.get("ewmaAlphaRssi", d.ewma_alpha_rssi)),
         ewma_alpha_fec=float(s.get("ewmaAlphaFec", d.ewma_alpha_fec)),

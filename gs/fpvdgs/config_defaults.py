@@ -12,7 +12,10 @@ def _dynamic_link_defaults() -> dict:
     sel = SelectorConfig()
     agg = SignalAggregator()
     return {
-        "enabled": False, "maxMcs": 5, "radioProfile": "m8812eu2",
+        "enabled": False,
+        # maxMcs 5 = operator runtime cap (distinct from SelectorConfig.max_mcs=7 HW ceiling fallback)
+        "maxMcs": 5,
+        "radioProfile": "m8812eu2",
         "droneAddr": None, "dronePort": 9999,
         "selector": {
             "probeViableThreshold": sel.probe_viable_threshold,
