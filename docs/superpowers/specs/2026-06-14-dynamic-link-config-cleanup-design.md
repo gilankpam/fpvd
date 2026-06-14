@@ -26,20 +26,26 @@ lives in exactly one place. The result is a **two-bucket** config model —
 ## Decisions (locked)
 
 1. **Full execution** — remove dead, merge, and restructure in code now.
-2. **Clean break** — no back-compat shims; the live GS overlay is hand-updated
-   (see Migration).
+2. **Clean break** — no back-compat shims; the live GS `config.json` is
+   hand-migrated to the new key names (see Migration).
 3. **Freeze calibration to constants** — `txpower_curve`, the probe/idr/osd
    constants, and the GS rssi_norm curve. (The IDR/OSD constants from the prior
    commit are the precedent.)
-4. **Strict GS `tuning` validation** — reject unknown keys at load. Boot
-   validation is fatal: `build_app` runs `validate_effective` unguarded
-   (`supervisor.py:86`) and `main()` (`:188`) doesn't catch it — no last-good
-   fallback, so a stale key blocks boot until removed. Intended forcing function
-   for a clean overlay.
-5. **Code is the single default source** — drop the drone's shipped
-   `defaults.json`; the defaults baseline becomes the serialized code struct.
-   (GS defaults-centralization is a named follow-up — see Section C — because the
-   GS's top-level defaults aren't in a code schema yet.)
+4. **Tolerant load — warn, never fatal.** The loader merges `config.json` onto
+   the code defaults: a key present in the file wins; a missing key falls back to
+   the code default; an **unknown / deprecated / renamed key logs a warning and
+   is ignored** (a renamed key resets to the code default while its old name
+   warns); an **invalid value for a known key also warns and falls back to the
+   code default**. Config problems never block boot. (Reverses an earlier
+   strict-reject idea — removes the boot-loop risk entirely; the cost is that a
+   typo'd key silently uses the default and only surfaces as a log line.)
+5. **Single full `config.json`; code is the default source.** No separate
+   `defaults.json`, no sparse overlay. `config.json` holds the full set of
+   tunable knobs, and the code struct / dataclasses are the single source of
+   default *values* — used as the fallback for missing keys and to **generate**
+   the shipped full file (so it is a code-derived artifact, never a
+   hand-maintained second copy of the defaults). (GS top-level defaults need the
+   centralization follow-up to be code-sourced; see Section C.)
 
 ## Non-goals
 
@@ -57,32 +63,36 @@ lives in exactly one place. The result is a **two-bucket** config model —
 
 | Bucket | Mechanism | Discovery |
 |---|---|---|
-| **Tunable** | code default + sparse `config.json` overlay, deep-merged; validated | `GET /config` returns the full effective config (defaults materialized); reference doc explains each knob |
+| **Tunable** | full `config.json` (all knobs), merged onto code defaults; tolerant load (warn, never fatal) | the file is itself the full list; `GET /config` also returns the full effective config |
 | **Frozen** | compile-time / module constant; no config path | the reference doc + the header |
 
-There is **no `defaults.json` to be "in"** anymore (drone now; GS after the
-follow-up), so the old Tier-1-vs-Tier-2 distinction dissolves — everything
-tunable is discovered the same way. "Operational vs advanced" survives only as
-*documentation grouping* in the reference doc, not as a config mechanism.
+There is **no `defaults.json`** and **no sparse overlay** — one full file plus
+code defaults as the fallback. The old Tier-1-vs-Tier-2 "in the file or not"
+distinction dissolves; "operational vs advanced" survives only as *documentation
+grouping*, not a config mechanism.
 
-**Why a sparse overlay (not a full `config.json`):** with the file holding only
-your deviations, a new build's added keys and changed defaults flow in
-automatically, and the file doubles as the "what did I change" diff. A full file
-would freeze old defaults and hide overrides. New-build behavior:
+**The file is generated, not hand-written.** Defaults are defined once in code;
+the full `config.json` is materialized from them (`--dump-config` / first boot),
+so the file is a code-derived artifact rather than a second hand-maintained copy
+of the defaults. The operator then edits the deployed copy.
+
+**Load = tolerant merge** (decision 4): file value → else code default for a
+missing key → unknown/invalid keys warn and fall back. New-build behavior:
 
 | New build… | Result |
 |---|---|
-| adds a key | absent from your overlay → picks up the new code default automatically |
-| changes a default | inherited automatically unless you explicitly overrode it |
-| removes/renames a key | drone: nlohmann ignores it; GS: strict validator rejects it (clean the overlay — decision 4) |
+| adds a key | missing from your file → code default fills it (re-dump to write it in) |
+| changes a default | your file pins whatever it holds; a changed code default reaches only keys *not* in your file — re-dump to adopt |
+| renames a key | old name → warning, ignored; new name → code default |
+| deprecated key present | warning log, ignored |
 
-**Discovery mechanism.** `GET /config` is the source of truth for "what can I set
-and what is it now":
-- **Drone** already returns `nlohmann::json(effective())` — the full struct with
-  all defaults materialized (`handlers.cpp:21`). No change needed.
+**Discovery.** The full `config.json` *is* the inventory of tunable knobs. `GET
+/config` corroborates it with live values:
+- **Drone** already returns `nlohmann::json(effective())` — the full struct
+  (`handlers.cpp:21`).
 - **GS** currently returns the raw stored dict, so dataclass `tuning` defaults are
-  invisible. This spec adds **default-materialization** (C3) so `GET /gs/config`
-  renders the effective tuning with defaults filled in, matching the drone.
+  invisible. C3 adds **default-materialization** so `GET /gs/config` (and the
+  generated file) render the full effective config, matching the drone.
 
 ## Current inventory (post IDR/OSD)
 
@@ -131,7 +141,8 @@ GS deprecated-key detector sets: `_DEPRECATED_LEADING_KEYS`,
    signal chain in `signals.py` (per-window `_w` + EWMA fields) — computed every
    window, consumed by nothing (not even logged).
 4. The three `_DEPRECATED_*` detector sets in `config_build.py` — they warn on
-   ~47 long-removed keys; the strict validator (C2) subsumes their purpose.
+   ~47 long-removed keys; the tolerant loader's generic warn-on-unknown (C2)
+   subsumes their purpose with one consistent path.
 
 ## Section B — Merge
 
@@ -173,82 +184,95 @@ Drop `dynamicLink.safe.bandwidth` and `dynamicLink.safe.txPowerDbm` from config
 The remaining fields stay explicit — a failsafe's k/n/overhead/deadline/bitrate
 are deliberate recovery values, not derived.
 
-## Section C — Defaults dedup, GS validation & discovery
+## Section C — Single full config, tolerant load & discovery
 
-**C1. Drone: code is the single default source; drop `defaults.json`.**
-- `loadEffective` and `computeOverlay` use the serialized code struct
-  (`nlohmann::json(Config{})`) as the defaults baseline instead of parsing
-  `defaults.json`.
-- The loader tolerates an absent defaults file (today it hard-fails — the `/rom`
-  shadow gotcha) and falls back to `Config{}`.
-- Remove `drone/etc/defaults.json` and its CMake `install(FILES …)` rule.
-- `GET /config` still returns the full effective config; `PATCH` still writes a
-  sparse overlay diffed against the code defaults. One source: the struct.
+**C1. Drone: single full `config.json`; code is the default source.**
+- Drop `drone/etc/defaults.json` and its CMake `install(FILES …)` rule.
+- Load: parse `config.json` if present and deep-merge it onto `Config{}` (the
+  code defaults) so any missing key defaults; an absent file → run on `Config{}`
+  (today the loader hard-fails on a missing defaults file — the `/rom` shadow
+  gotcha — that path disappears).
+- Warn-on-unknown: nlohmann silently drops unknown keys, so add an explicit pass
+  that diffs the parsed JSON's keys against the schema and logs a warning per
+  unknown/deprecated key. An invalid value for a known key → warn + keep the code
+  default (never abort).
+- `PATCH` merges + persists the **full** effective config back to `config.json`
+  (no sparse diff — remove `computeOverlay`). `GET /config` unchanged.
+- Generate the initial full file from `nlohmann::json(Config{})` (a
+  `--dump-config` flag / install step) so it's code-derived, not hand-written.
 
-**C2. GS: replace the opaque `tuning` passthrough with a validated nested
-schema.** A `_validate_tuning(tuning)` recurses the known structure
-(`gate, policy, learned_prior(.flightlog), smoothing, probe`), type/range-checks
-each value, and **rejects unknown keys at every level**. Wire into
-`validate_effective` (boot) and `validate_config_patch` (PATCH); extend
-`_validate_dynamic_link` to reject unknown `dynamicLink.*` keys too. Dead keys
-(A) and typos become explicit load-time errors.
+**C2. GS: replace the opaque `tuning` passthrough with a *tolerant* validated
+schema.** `_validate_tuning(tuning)` recurses the known structure (`gate, policy,
+learned_prior(.flightlog), smoothing, probe`), type/range-checks known keys
+(**warn + fall back to the dataclass default** on a bad value), and **warns on
+unknown keys** (ignored, not rejected). Same treatment in `_validate_dynamic_link`
+for unknown `dynamicLink.*`. One consistent warn path replaces both the
+`_DEPRECATED_*` detector sets and the silent-typo no-ops — and, unlike a strict
+reject, never blocks boot.
 
-**C3. GS: materialize tuning defaults into `GET /gs/config`.**
-Render the effective tuning with dataclass defaults filled in so the advanced
-knobs are discoverable via the API (matching the drone). Single source for the
-tuning defaults = the dataclasses.
+**C3. GS: materialize the full effective config.** Render the effective config
+with all dataclass defaults filled in — used both for `GET /gs/config` and to
+generate the full `config.json`. Single source for the tuning defaults = the
+dataclasses.
 
-**C4. Docs.** New `docs/dynamic-link-tuning.md` enumerating every tunable knob
-(grouped operational/advanced for readability) with default + valid range, both
-daemons. With no `defaults.json`, this + `GET /config` are the discovery surface.
+**C4. Docs.** `docs/dynamic-link-tuning.md` documents each tunable knob (meaning +
+valid range, grouped operational/advanced). The generated full `config.json` is
+the canonical inventory; the doc adds the semantics.
 
 **Follow-up (out of scope here): GS defaults-centralization.**
-The GS keeps `gs/etc/defaults.json` for now — its top-level
-`link/wfb/drone/pixelpilot/idrForward` defaults live only in the file (plus
-scattered `.get(k, literal)` literals), not in a code schema. A later phase
-centralizes those into one code layer and drops the GS `defaults.json` the same
-way C1 does on the drone. Tracked here, not implemented in this spec.
+For "missing key → code default" and clean full-file generation, the GS needs
+code defaults for its top-level `link/wfb/drone/pixelpilot/idrForward` keys.
+Today those are the scattered `.get(k, literal)` literals (which *do* serve as
+fallbacks, so tolerant load works now) plus `gs/etc/defaults.json`. A later phase
+centralizes them into one code layer and drops `gs/etc/defaults.json` the way C1
+does on the drone. Tracked here, not implemented in this spec.
 
-## Migration (clean break)
+## Migration (tolerant — warns, never bricks)
 
-**GS overlay** (`/etc/fpvd/config.json`), before/with the deploy:
+Tolerant load means a non-migrated key never blocks boot — but a **renamed key
+resets to the code default**, so your tuned value silently reverts (with a
+warning). Migration therefore still matters for *behavior*, just not for boot.
+
+**GS `config.json`** — rename to the new locations so your values keep applying:
 - `probe.{rxL, ewmaAlpha, blackoutWindows}` → `dynamicLink.tuning.probe.{…}`
-  (the live `rxL=800`). The old top-level `probe` block must be removed.
+  (otherwise the old top-level `probe` warns and `rxL` falls back to 50 — your
+  `800` won't apply).
 - `profile_selection.{hold_modes_down_ms, min_between_changes_ms}` →
-  `dynamicLink.tuning.gate.{…}`; drop any other `profile_selection.*`.
-- Drop `gate.max_mcs_step_up`, any `rssi_norm` override, any `_DEPRECATED_*`-era
-  keys, and `smoothing.ewma_alpha_burst`.
+  `dynamicLink.tuning.gate.{…}`.
+- Drop `gate.max_mcs_step_up`, `rssi_norm`, `smoothing.ewma_alpha_burst`,
+  `profile_selection.*` leftovers, `_DEPRECATED_*`-era keys (all warn + ignored).
 
-The strict validator + fatal boot validation means **a leftover key blocks GS
-boot**, so the overlay must be clean before the GS daemon restarts; the deploy
-step validates the overlay against the new schema first.
+Easiest path: **regenerate** the full `config.json` from code defaults, then
+re-apply your handful of real overrides under the new key names.
 
-**Drone overlay:** nlohmann-tolerant, so stale `safe.bandwidth`/`safe.txPowerDbm`
-(or any removed key) are silently ignored — no boot risk; clean them out anyway.
-Dropping the shipped `defaults.json` doesn't touch the operator overlay.
+**Drone:** stale `safe.bandwidth`/`safe.txPowerDbm` (or any removed key) warn +
+ignored. Dropping the shipped `defaults.json` doesn't touch `config.json`.
 
 ## Testing
 
-- **Drone doctest:** loading with **no defaults file** yields a fully-defaulted
-  `Config` (== `Config{}` ⊕ overlay); `computeOverlay` diffs against `Config{}`;
-  `GET /config` returns the full effective struct; `compute`-block round-trip
-  (B1); `safe` fallback unchanged with derived bandwidth/txpower (B5).
-- **GS pytest (suite must stay green):** tuning validation good/bad/unknown (C2);
-  `GET /gs/config` materializes tuning defaults (C3); dead-key removal (A);
-  `profile_selection`→`gate` fold preserves selector behavior (B2); frozen
+- **Drone doctest:** tolerant load — a missing key → code default; an **unknown
+  key → warning** (captured) and ignored; an **invalid known value → warning +
+  code default**; **no config file → `Config{}`**; `PATCH` persists the **full**
+  effective config; `GET /config` returns the full struct; `--dump-config`
+  emits `nlohmann::json(Config{})`; `compute`-block round-trip (B1); `safe`
+  fallback unchanged with derived bandwidth/txpower (B5).
+- **GS pytest (suite must stay green):** tolerant tuning validation — good value
+  applies, bad value warns + defaults, unknown key warns + ignored (C2);
+  `GET /gs/config` materializes the full effective config (C3); dead-key removal
+  (A); `profile_selection`→`gate` fold preserves selector behavior (B2); frozen
   rssi_norm + curve drift-guard test (B4); probe-block move (B3).
 - The GS suite is import/config-coupled, so all changes land together.
 
 ## Risks
 
-- **Boot-loop on a forgotten GS overlay key** — accepted (decision 4); mitigated
-  by a deploy-time overlay validation step + the Migration checklist.
+- **A typo'd / renamed key silently uses the default** (warning only) — the
+  intended setting doesn't apply unless the operator notices the log. This is the
+  accepted cost of tolerant-over-strict (decision 4); the regenerate-the-file
+  workflow avoids stale key names.
+- **Changed code defaults don't propagate** to keys already present in the full
+  `config.json` — re-dump to adopt new defaults.
 - **Drift between the GS rssi_norm constant and the drone curve** — mitigated by
   the B4 drift-guard test.
-- **No human-readable drone baseline file** after C1 — mitigated by `GET /config`
-  (full effective) + the C4 reference doc; optionally ship a commented
-  `config.example.json` as docs only (not loaded).
-- **GS keeps its defaults duplication** until the follow-up centralization — the
-  scattered `.get(k, literal)` literals + `gs/etc/defaults.json` remain in sync by
-  hand for top-level config; this spec only de-dups the drone and the GS `tuning`
-  subtree.
+- **GS keeps its top-level defaults duplication** until the follow-up
+  centralization — the scattered `.get(k, literal)` literals + `gs/etc/defaults.json`
+  stay hand-synced; this spec de-dups only the drone and the GS `tuning` subtree.
