@@ -107,3 +107,19 @@ def test_load_warns_on_unknown_keys(tmp_path, caplog):
     assert "bogusTop" in msgs
     assert "tuning" in msgs                 # stale dynamicLink key warned
     assert s.effective()["link"]["channel"] == default_config()["link"]["channel"]
+    eff = s.effective()
+    assert "bogusTop" not in eff
+    assert "tuning" not in eff["dynamicLink"]
+
+
+def test_stale_dynamic_link_keys_do_not_brick_boot(tmp_path):
+    from fpvdgs import schema
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"dynamicLink": {
+        "enabled": True, "maxMcs": 5,
+        "tuning": {}, "bandwidth": 20, "txpower": {"min": 18, "max": 28},
+        "idrForward": True, "idrPort": 11223}}))
+    s = ConfigStore.load(str(cfg))            # warns + strips
+    schema.validate_effective(s.effective())  # must NOT raise (boot path)
+    assert "tuning" not in s.effective()["dynamicLink"]
+    assert "bandwidth" not in s.effective()["dynamicLink"]

@@ -17,17 +17,23 @@ from .schema import DYNAMIC_LINK_KEYS
 log = logging.getLogger("fpvdgs.config")
 
 
-def _warn_unknown(loaded: dict, defaults: dict) -> None:
-    """Warn (never fail) on keys in the loaded config absent from the code
-    defaults. Scoped to the top level + the dynamicLink subtree — the blocks
-    this cleanup restructured. Other blocks (pixelpilot/wfb/link) hold open
-    maps (env, raw) and are left to value-validation, not key-walking."""
-    for key in set(loaded) - set(defaults):
+def _warn_unknown(loaded: dict, defaults: dict) -> dict:
+    """Warn on AND strip keys absent from the code defaults — scoped to the
+    top level and the dynamicLink subtree. Returns a pruned copy so stale /
+    unknown keys never reach the effective config: this keeps an old config.json
+    from bricking boot (validate_effective is strict on dynamicLink keys) and
+    matches the drone's drop-unknowns load. Other blocks (pixelpilot/wfb/link)
+    hold open maps and are left untouched."""
+    pruned = copy.deepcopy(loaded)
+    for key in sorted(set(pruned) - set(defaults)):
         log.warning("ignoring unknown config key: %s", key)
-    dl = loaded.get("dynamicLink")
+        del pruned[key]
+    dl = pruned.get("dynamicLink")
     if isinstance(dl, dict):
-        for key in set(dl) - DYNAMIC_LINK_KEYS:
+        for key in sorted(set(dl) - DYNAMIC_LINK_KEYS):
             log.warning("ignoring unknown dynamicLink key: %s", key)
+            del dl[key]
+    return pruned
 
 
 def deep_merge(base: dict, overlay: dict) -> dict:
@@ -57,7 +63,7 @@ class ConfigStore:
         if config_path and os.path.exists(config_path):
             with open(config_path) as f:
                 loaded = json.load(f)
-            _warn_unknown(loaded, defaults)
+            loaded = _warn_unknown(loaded, defaults)
         return cls(defaults, loaded, config_path)
 
     def defaults(self) -> dict:
