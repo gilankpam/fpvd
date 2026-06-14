@@ -125,8 +125,3 @@ install(TARGETS fpvd RUNTIME DESTINATION bin)
 install(PROGRAMS scripts/radio-up.sh DESTINATION libexec/fpvd)
 install(PROGRAMS scripts/radio-tune.sh DESTINATION libexec/fpvd)
 install(PROGRAMS scripts/S99fpvd DESTINATION ../etc/init.d)
-# Lands in the squashfs at /etc/fpvd/defaults.json, which the read-only rootfs
-# also exposes at /rom/etc/fpvd/defaults.json — the path the binary defaults to
-# (main.cpp). Do NOT prefix with rom/: a literal rom/ dir in the image gets
-# shadowed by the /rom squashfs mountpoint at boot, hiding the file from fpvd.
-install(FILES etc/defaults.json DESTINATION ../etc/fpvd)

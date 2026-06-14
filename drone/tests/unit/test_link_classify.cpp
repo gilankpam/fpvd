@@ -58,7 +58,8 @@ TEST_CASE("classifyLinkChange: mcs -> videoRadiotap only") {
 }
 
 TEST_CASE("classifyLinkChange: fec -> videoFec only") {
-    Config a{}, b{}; b.link.fec.k = a.link.fec.k + 1;
+    // With default mode=swfec, the live knobs are overheadPct/deadlineMs.
+    Config a{}, b{}; b.link.fec.overheadPct = a.link.fec.overheadPct + 10;
     auto c = classifyLinkChange(a, b);
     CHECK(c.videoFec);
     CHECK_FALSE(c.videoRadiotap);
@@ -77,7 +78,8 @@ TEST_CASE("classifyLinkChange: wlanAdapter -> fullRestart") {
 }
 
 TEST_CASE("classifyLinkChange: fec mode flip -> fullRestart, not videoFec") {
-    Config a{}, b{}; b.link.fec.mode = "swfec";
+    // Flip from swfec (default) to rs triggers fullRestart.
+    Config a{}, b{}; b.link.fec.mode = "rs";
     auto c = classifyLinkChange(a, b);
     CHECK(c.fullRestart);
     CHECK_FALSE(c.videoFec);

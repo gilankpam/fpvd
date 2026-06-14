@@ -33,7 +33,7 @@ struct adl_serializer<std::optional<T>> {
 namespace fpvd {
 
 struct Fec {
-    std::string mode{"rs"};   // "rs" | "swfec" — mode flip restarts wfb_tx (-z is constructor-time)
+    std::string mode{"swfec"};   // "rs" | "swfec" — mode flip restarts wfb_tx (-z is constructor-time)
     int k{8};                 // rs-mode block geometry: data fragments per block
     int n{12};                //   ...and total fragments (k data + n-k parity)
     int overheadPct{50};      // swfec-mode repair budget, 0..255 (uint8 on the control wire)
@@ -51,7 +51,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beamforming, enabled, remoteMac,
                                                 ackTimeout, intervalMs)
 
 struct Link {
-    int channel{161};
+    int channel{132};
     int width{20};
     int txPowerDbm{20};
     int mcs{2};

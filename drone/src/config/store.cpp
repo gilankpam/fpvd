@@ -10,27 +10,7 @@
 
 namespace fpvd {
 
-static nlohmann::json readJsonFile(const std::string& path,
-                                    const std::string& what) {
-    std::ifstream f(path);
-    if (!f) throw StoreError("failed to open " + what + ": " + path);
-    std::stringstream buf;
-    buf << f.rdbuf();
-    try {
-        return nlohmann::json::parse(buf.str());
-    } catch (const nlohmann::json::exception& e) {
-        throw StoreError(what + " parse error: " + e.what());
-    }
-}
 
-Config loadDefaults(const std::string& path) {
-    auto j = readJsonFile(path, "defaults");
-    try {
-        return j.get<Config>();
-    } catch (const nlohmann::json::exception& e) {
-        throw StoreError(std::string("defaults schema: ") + e.what());
-    }
-}
 
 nlohmann::json deepMergeJson(const nlohmann::json& base,
                               const nlohmann::json& overlay) {

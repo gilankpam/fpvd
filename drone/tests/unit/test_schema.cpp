@@ -146,12 +146,12 @@ TEST_CASE("schema: beamforming defaults and round-trip") {
 
 TEST_CASE("schema: link.fec swfec keys default and round-trip") {
     fpvd::Config c{};
-    CHECK(c.link.fec.mode == "rs");
+    CHECK(c.link.fec.mode == "swfec");
     CHECK(c.link.fec.overheadPct == 50);
     CHECK(c.link.fec.deadlineMs == 30);
     nlohmann::json j = c;
     auto back = j.get<fpvd::Config>();
-    CHECK(back.link.fec.mode == "rs");
+    CHECK(back.link.fec.mode == "swfec");
     CHECK(back.link.fec.overheadPct == 50);
     CHECK(back.link.fec.deadlineMs == 30);
 }
@@ -161,7 +161,7 @@ TEST_CASE("schema: legacy fec object without swfec keys parses with defaults") {
     auto c = j.get<fpvd::Config>();
     CHECK(c.link.fec.k == 3);
     CHECK(c.link.fec.n == 5);
-    CHECK(c.link.fec.mode == "rs");
+    CHECK(c.link.fec.mode == "swfec");
 }
 
 TEST_CASE("schema: dynamicLink.safe swfec keys default") {

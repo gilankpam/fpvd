@@ -10,10 +10,6 @@ struct StoreError : public std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
-// Load the baseline configuration from a JSON file. Throws StoreError
-// on read failure or invalid JSON.
-Config loadDefaults(const std::string& path);
-
 // Deep-merge two JSON values. Objects are merged key-by-key recursively;
 // arrays are replaced wholesale; scalars in `overlay` win.
 nlohmann::json deepMergeJson(const nlohmann::json& base,
