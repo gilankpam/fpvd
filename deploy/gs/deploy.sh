@@ -29,7 +29,7 @@ remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 # both `python3 -m fpvdgs.supervisor` and the spawned `python3 -m fpvdgs.runner`
 # import without any sys.path/PYTHONPATH hacks.
 SITE="$(remote 'python3 -c "import site; print(site.getsitepackages()[0])"')"
-echo "[push] fpvdgs -> $TARGET:$SITE/fpvdgs  (+ init + defaults)"
+echo "[push] fpvdgs -> $TARGET:$SITE/fpvdgs  (+ init)"
 remote "mkdir -p /etc/fpvd '$SITE/fpvdgs' '$SITE/fpvdgs/dynlink' '$SITE/fpvdgs/probe'"
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs"/*.py "$TARGET:$SITE/fpvdgs/"
 # dynlink subpackage (in-process GS dynamic-link controller)
@@ -44,17 +44,7 @@ remote "[ -f /etc/fpvd/learned/BL-M8812EU2.json ] && mv -n /etc/fpvd/learned/BL-
 # probe subpackage (in-process GS probe-link measurement: spawns FEC-off wfb_rx
 # per probe radio_port, parses stdout for per-MCS PER/RSSI — observe-only)
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/probe"/*.py "$TARGET:$SITE/fpvdgs/probe/"
-# defaults (do not clobber an existing user overlay /etc/fpvd/config.json)
-scp -O "${SSH_OPTS[@]}" "$GS/etc/defaults.json" "$TARGET:/etc/fpvd/defaults.json"
 scp -O "${SSH_OPTS[@]}" "$GS/scripts/S99fpvd"  "$TARGET:/etc/init.d/S99fpvd"
-# initial dynamic-link overlay (production tuning translated from the standalone's
-# gs.yaml) — installed ONLY on first deploy; never clobbers operator edits.
-if remote 'test -e /etc/fpvd/config.json'; then
-    echo "[skip] /etc/fpvd/config.json exists — operator overlay preserved"
-else
-    echo "[push] initial config.json -> $TARGET:/etc/fpvd/config.json"
-    scp -O "${SSH_OPTS[@]}" "$REPO/deploy/gs/config.json" "$TARGET:/etc/fpvd/config.json"
-fi
 
 echo "[install] fpvd launcher + backup/disable S98wifibroadcast"
 remote '
@@ -110,6 +100,15 @@ remote '
     rm -f /var/run/fpvd.pid
     /etc/init.d/S99fpvd start
 '
+
+# initial config.json — generated from the code defaults (fpvd --dump-config),
+# installed ONLY on first deploy; never clobbers operator edits.
+if remote 'test -e /etc/fpvd/config.json'; then
+    echo "[skip] /etc/fpvd/config.json exists — operator config preserved"
+else
+    echo "[seed] config.json <- fpvd --dump-config"
+    remote 'fpvd --dump-config > /etc/fpvd/config.json.tmp && mv /etc/fpvd/config.json.tmp /etc/fpvd/config.json'
+fi
 
 echo "[verify]"
 sleep 5

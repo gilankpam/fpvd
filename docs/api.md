@@ -616,23 +616,39 @@ An object whose keys are service names and whose values are service definitions.
 
 The adaptive link has two halves. The drone runs the **applier** — the [`dynamicLink`](#dynamiclink--adaptive-link-controller) block in the Config schema above — which receives decisions and applies them to the radio and encoder. The **controller** (the brain that *decides*) runs on the ground station as a separate daemon, `fpvdgs`, with its own HTTP+JSON API on the GS (same shapes as this document, but rooted under `/gs/*`: `GET`/`PATCH /gs/config`, `POST /gs/apply`, `GET /gs/status`, plus an opaque `/air/*` proxy to the drone fpvd).
 
-The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the dual-gate MCS selector + trailing FEC/bitrate loop, and emits decision packets over UDP to the drone applier (`droneAddr:dronePort`, default `:9999`). It is configured by the GS daemon's own `dynamicLink` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
+The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the probe-driven MCS selector, and emits `{mcs}`-only decision packets over UDP to the drone applier (`droneAddr:dronePort`, default `:9999`). It is configured by the GS daemon's own `dynamicLink` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
 
 ```jsonc
 "dynamicLink": {
   "enabled": false,            // boolean — arm the in-process control loop
-  "maxMcs": 5,                 // integer, 0..7 — upper MCS bound the controller may select
-  "bandwidth": 20,             // integer, 20 or 40 — RF bandwidth the controller targets (MHz)
-  "txpower": {
-    "min": 18,                 // integer (dBm) — power at the top MCS (inverse MCS↔power coupling)
-    "max": 28                  // integer (dBm) — power at the bottom MCS; require min <= max
-  },
-  "radioProfile": "m8812eu2",  // string — packaged radio profile (fpvdgs/dynlink/profiles/<name>.json)
+  "maxMcs": 5,                 // integer, 0..7 — operator MCS ceiling
+  "radioProfile": "m8812eu2",  // string — keys the learned-prior persistence file
   "droneAddr": null,           // string|null — drone UDP address; null => host parsed from drone.endpoint
   "dronePort": 9999,           // integer, 1..65535 — drone dynamic-link UDP listener port
-  "videoStreamId": "video",    // string — substring matched against the wfb stats record id to
-                               //   select the VIDEO rx stream (mavlink/tunnel rx are ignored)
-  "tuning": {}                 // object — opaque passthrough of advanced policy knobs (see below)
+
+  // Selector: probe-driven promote + reactive demote + timing/cadence
+  "selector": {
+    "probeViableThreshold": 0.99,    // probability [0,1] — min EWMA probe success rate to promote
+    "probeFreshnessMs": 500.0,       // ms >= 0 — max probe age to accept for a promote decision
+    "promoteDebounceWindows": 3,     // positive int — consecutive clean probe windows before promote
+    "videoDemotePer": 0.05,          // probability [0,1] — video PER threshold that triggers demote
+    "emergencyLossRate": 0.05,       // probability [0,1] — residual loss rate for emergency demote
+    "emergencyFecPressure": 0.80,    // probability [0,1] — FEC work rate for emergency demote
+    "holdModesDownMs": 2000,         // ms >= 0 — cooldown after a demote before next promote
+    "minBetweenChangesMs": 200,      // ms >= 0 — minimum interval between any MCS changes
+    "starvationWindows": 5           // positive int — consecutive starved windows before emergency demote
+  },
+
+  // Smoothing: EWMA weights for signal aggregation
+  "smoothing": {
+    "ewmaAlphaRssi": 0.2,            // alpha (0,1] — RSSI EWMA decay
+    "ewmaAlphaFec": 0.2,             // alpha (0,1] — FEC work rate EWMA decay
+    "ewmaAlphaBurst": 0.1,           // alpha (0,1] — burst rate EWMA decay
+    "starvationThresholdPps": 50.0   // number >= 0 — pps below which link is considered starved
+  },
+
+  "flightlog": { "enabled": true },  // bool — write per-tick JSONL flight logs
+  "rssiNorm":  { "enabled": true }   // bool — EIRP-normalize RSSI by per-MCS TX power
 }
 ```
 
@@ -640,41 +656,21 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
 |-------|------|---------|--------------|
 | `enabled` | boolean | `false` | — |
 | `maxMcs` | integer | `5` | 0 – 7 |
-| `bandwidth` | integer | `20` | `20` or `40` |
-| `txpower.min` | integer (dBm) | `18` | `<= txpower.max` |
-| `txpower.max` | integer (dBm) | `28` | `>= txpower.min` |
-| `radioProfile` | string | `"m8812eu2"` | a packaged profile name (`fpvdgs/dynlink/profiles/<name>.json`) |
+| `radioProfile` | string | `"m8812eu2"` | any non-empty string |
 | `droneAddr` | string \| null | `null` | UDP address; `null` ⇒ host parsed from `drone.endpoint` |
 | `dronePort` | integer | `9999` | 1 – 65535 |
-| `videoStreamId` | string | `"video"` | non-empty string |
-| `tuning` | object | `{}` | see [Tuning passthrough](#tuning-passthrough) |
+| `selector.*` | — | see above | see [Tuning reference](gs-dynamic-link-tuning.md) |
+| `smoothing.*` | — | see above | see [Tuning reference](gs-dynamic-link-tuning.md) |
+| `flightlog.enabled` | boolean | `true` | — |
+| `rssiNorm.enabled` | boolean | `true` | — |
+
+All other knobs — learned-prior internals, probe measurement constants, rssi-norm EIRP curve, flightlog storage settings, and the `videoStreamId` constant — are **frozen code constants** not exposed in config. See [`docs/gs-dynamic-link-tuning.md`](gs-dynamic-link-tuning.md) for the full inventory with source file references.
 
 > **The IDR-token relay moved out of `dynamicLink`.** It is now a top-level [`idrForward`](#idrforward--idr-token-relay) block that runs **independently** of the controller. The old `dynamicLink.idrForward` (bool) and `dynamicLink.idrPort` keys are gone.
 
-Note `txpower.min`/`.max` are the **controller's** dBm request range and are unrelated to the static [`link.txPowerDbm`](#gs-config-schema) key.
-
 **Operating model.** Enabling, disabling, or tuning is applied at runtime via `PATCH /gs/config` + `POST /gs/apply` with **no wfb restart** — the GS runner is never bounced for `dynamicLink`-only changes. The controller reads wfb-ng stats on `:8103` (fpvd renders `log_interval = 100` so the feed is 10 Hz). The drone side must be armed **independently** (its own `dynamicLink.enabled`, applied via the GS `/air` proxy — the client orchestrates both halves). `GET /gs/status.dynamicLink` reports the GS controller state only (no drone round-trip); to check the drone's own dynamic-link/adapter state and detect a GS-armed/drone-not mismatch, the client reads `GET /air/status`.
 
-**`videoStreamId`.** The wfb stats feed interleaves rx records for every service (`video rx`, `mavlink rx`, `tunnel rx`). The policy must be driven by the **video** stream only — the low-rate uplink streams would trip the starvation detector and pin MCS at the floor. The default `"video"` substring matches the video record id.
-
-#### Tuning passthrough
-
-`tuning` is an opaque object deep-merged over the controller's built-in defaults; the **curated keys above always win** over the same field inside `tuning`. It mirrors the section layout of the standalone `dynamic-link` `gs.yaml` and accepts these sub-objects:
-
-| Sub-object | Selected keys |
-|---|---|
-| `gate` | `snr_safety_margin`, `hysteresis_up_db` / `hysteresis_down_db`, `emergency_loss_rate`, `emergency_fec_pressure`, `loss_margin_weight`, `fec_margin_weight`, `snr_ema_alpha`, `snr_slope_alpha`, `snr_predict_horizon_ticks` |
-| `profile_selection` | `upward_confidence_loops`, `hold_modes_down_ms`, `min_between_changes_ms`, `fast_downgrade` |
-| `fec` | `k_bounds.{min,max}`, `base_redundancy_ratio`, `max_redundancy_ratio`, `blocks_per_frame`, `n_loss_threshold`/`n_loss_windows`/`n_loss_step`, `n_recover_windows`/`n_recover_step`, `max_n_escalation`, `depth_max` |
-| `smoothing` | `ewma_alpha_rssi`, `ewma_alpha_fec`, `ewma_alpha_burst`, `starvation_threshold_pps` |
-| `cooldown` | `min_change_interval_ms_{fec,depth,radio,cross}` |
-| `policy` | `starvation_windows`, `bitrate.{utilization_factor,min_bitrate_kbps,max_bitrate_kbps}` |
-| `video` | `per_packet_airtime_us`, `max_latency_ms` (predictor latency budget) |
-| `safe_defaults` | `video.{k,n}`, `depth`, `mcs` — emitted until the drone HELLO handshake completes |
-
-A complete, production-tuned example for the BL-M8812EU2 airframe ships at **`deploy/gs/config.json`** (installed as the GS overlay on first deploy). Unknown or legacy keys are ignored with a log warning.
-
-> **Tip:** the controller computes the FEC block size `k` from the target bitrate, so a high-bitrate (high-MCS) link uses larger FEC blocks, which raises block-fill latency. If steady latency matters more than FEC granularity, raise `tuning.fec.blocks_per_frame` and/or lower `tuning.fec.k_bounds.max`. Also ensure the link runs at the intended channel **width** — a 10 MHz channel has half the airtime of 20 MHz, so a bitrate sized for 20 MHz will saturate and bufferbloat at 10 MHz.
+**PATCH validation.** On `PATCH /gs/config`, unknown `dynamicLink` sub-keys are rejected immediately (typo protection). Sub-block value ranges are validated on `POST /gs/apply`. On boot/upgrade load, unknown keys are warned and ignored so a config from an older build never bricks startup.
 
 ## `idrForward` — IDR-token relay
 
