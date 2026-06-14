@@ -273,6 +273,27 @@ TEST_CASE("validate: beamforming ackTimeout and intervalMs ranges") {
     CHECK(validate(c)[0].path == "link.beamforming.intervalMs");
 }
 
+TEST_CASE("validate: dynamicLink.compute maxBitrateKbps > minBitrateKbps") {
+    Config c{}; c.dynamicLink.compute.maxBitrateKbps = c.dynamicLink.compute.minBitrateKbps;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.compute");
+}
+
+TEST_CASE("validate: dynamicLink.compute kMax >= kMin") {
+    Config c{}; c.dynamicLink.compute.kMax = c.dynamicLink.compute.kMin - 1;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.compute.k");
+}
+
+TEST_CASE("validate: dynamicLink.compute.baseRedundancyRatio > 0") {
+    Config c{}; c.dynamicLink.compute.baseRedundancyRatio = 0.0;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.compute.baseRedundancyRatio");
+}
+
 TEST_CASE("validate: link.fec swfec rules") {
     auto hasErr = [](const std::vector<fpvd::ValidationError>& errs,
                      const std::string& path) {

@@ -144,7 +144,9 @@ struct DynamicLinkCompute {
     int    kMax{50};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkCompute,
-    minBitrateKbps, maxBitrateKbps, baseRedundancyRatio, blocksPerFrame, kMin, kMax)
+                                                minBitrateKbps, maxBitrateKbps,
+                                                baseRedundancyRatio, blocksPerFrame,
+                                                kMin, kMax)
 
 struct DynamicLink {
     bool enabled{false};
