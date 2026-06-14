@@ -233,7 +233,7 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     snap.iface                 = "wlan-test-nonexistent";  // iw will fail, not hang
     snap.safe = SafeDefaults{
         /*mcs=*/1, /*k=*/8, /*n=*/12,
-        /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
+        /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -271,9 +271,10 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     CHECK(wfb.sawRadioFlags(/*stbc=*/1, /*ldpc=*/true));
 
     // 2) Go silent past healthTimeoutMs -> watchdog trips -> safe-defaults push.
+    //    Safe radio uses operating linkBandwidth (40), not a separate safe.bandwidth.
     CHECK(waitFor([&] {
         return wfb.sawFec(8, 12) &&
-               wfb.sawRadio(1, 20) &&
+               wfb.sawRadio(1, 40) &&
                enc.sawContaining("video0.bitrate=2000");
     }, 2000));
     CHECK(waitFor([&] { return c.status().watchdogTripped == true; }, 1000));
@@ -312,7 +313,7 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{1, 8, 12, 20, 5, 2000};
+    snap.safe = SafeDefaults{1, 8, 12, 2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -378,7 +379,7 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     snap.iface                 = "wlan-test-nonexistent";
     snap.safe = SafeDefaults{
         /*mcs=*/1, /*k=*/8, /*n=*/12,
-        /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
+        /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -461,7 +462,6 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
     snap.swfecOverheadPct = 50;
     snap.swfecDeadlineMs  = 30;
     snap.safe = SafeDefaults{/*mcs=*/1, /*k=*/8, /*n=*/12,
-                             /*bandwidth=*/20, /*txPowerDbm=*/5,
                              /*bitrateKbps=*/2000};
     snap.safe.overheadPct = 100;            // trailing NSDMI fields, set by name
     snap.safe.deadlineMs  = 35;

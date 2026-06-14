@@ -11,11 +11,7 @@ struct SafeDefaults {
     uint8_t  mcs;
     uint8_t  k;
     uint8_t  n;
-    uint8_t  bandwidth;
-    int8_t   txPowerDbm;
     uint16_t bitrateKbps;
-    // swfec-mode safe recovery params — appended last + defaulted so existing
-    // positional aggregate inits keep compiling — do not reorder.
     uint8_t  overheadPct{100};
     uint8_t  deadlineMs{30};
 };

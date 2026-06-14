@@ -25,8 +25,7 @@ TEST_CASE("schema: round-trip a minimal config through json") {
             "applyStaggerMs":50,"applySubPaceMs":5,
             "roiQp":{"thresholdKbps":6000,"lowAnchorKbps":2000,
                      "floor":-24,"step":3},
-            "safe":{"mcs":1,"k":8,"n":12,"overheadPct":100,"deadlineMs":30,
-                    "bandwidth":20,"txPowerDbm":20,"bitrateKbps":2000},
+            "safe":{"mcs":1,"k":8,"n":12,"overheadPct":100,"deadlineMs":30,"bitrateKbps":2000},
             "compute":{"minBitrateKbps":1000,"maxBitrateKbps":24000,"baseRedundancyRatio":0.5,"blocksPerFrame":2.0,"kMin":2,"kMax":50}
         },
         "services":{}
@@ -120,8 +119,6 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
     CHECK(c.dynamicLink.safe.mcs == 1);
     CHECK(c.dynamicLink.safe.k == 8);
     CHECK(c.dynamicLink.safe.n == 12);
-    CHECK(c.dynamicLink.safe.bandwidth == 20);
-    CHECK(c.dynamicLink.safe.txPowerDbm == 20);
     CHECK(c.dynamicLink.safe.bitrateKbps == 2000);
 }
 

@@ -18,7 +18,7 @@
     "applyStaggerMs": 50,
     "applySubPaceMs": 5,
     "roiQp": {"thresholdKbps": 6000, "lowAnchorKbps": 2000, "floor": -24, "step": 3},
-    "safe": {"mcs": 1, "k": 8, "n": 12, "overheadPct": 100, "deadlineMs": 30, "bandwidth": 20, "txPowerDbm": 20, "bitrateKbps": 2000},
+    "safe": {"mcs": 1, "k": 8, "n": 12, "overheadPct": 100, "deadlineMs": 30, "bitrateKbps": 2000},
     "compute": {"minBitrateKbps": 1000, "maxBitrateKbps": 24000, "baseRedundancyRatio": 0.5, "blocksPerFrame": 2.0, "kMin": 2, "kMax": 50}
   },
   "services": {},

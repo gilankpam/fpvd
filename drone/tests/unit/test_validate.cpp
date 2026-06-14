@@ -125,16 +125,6 @@ TEST_CASE("validate: dynamicLink.safe k<n and both in [1,32]") {
     CHECK(errs3[0].path == "dynamicLink.safe.fec");
 }
 
-TEST_CASE("validate: dynamicLink.safe.bandwidth must be 10, 20, or 40") {
-    Config c{}; c.dynamicLink.safe.bandwidth = 80;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.bandwidth");
-
-    Config ok{}; ok.dynamicLink.safe.bandwidth = 10;
-    CHECK(validate(ok).empty());
-}
-
 TEST_CASE("validate: link.txPowerDbm in [-10,30]") {
     Config c{}; c.link.txPowerDbm = 31;
     auto errs = validate(c);
@@ -152,18 +142,6 @@ TEST_CASE("validate: link.txPowerDbm in [-10,30]") {
     Config c3{}; c3.link.txPowerDbm = 20;   // in range
     auto errs3 = validate(c3);
     for (auto& e : errs3) CHECK(e.path != "link.txPowerDbm");
-}
-
-TEST_CASE("validate: dynamicLink.safe.txPowerDbm in [-10,30]") {
-    Config c{}; c.dynamicLink.safe.txPowerDbm = 31;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.txPowerDbm");
-
-    Config c2{}; c2.dynamicLink.safe.txPowerDbm = -11;
-    auto errs2 = validate(c2);
-    REQUIRE(errs2.size() == 1);
-    CHECK(errs2[0].path == "dynamicLink.safe.txPowerDbm");
 }
 
 TEST_CASE("validate: dynamicLink.safe.bitrateKbps > 0") {

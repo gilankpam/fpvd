@@ -200,7 +200,8 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
 }
 
 // Port of dl_backend_tx_apply_safe: emit FEC + RADIO unconditionally, with
-// sub-pacing. safe.bandwidth is the 20/40 radiotap value.
+// sub-pacing. The safe rung uses the operating linkBandwidth (never changes
+// bandwidth on a watchdog trip — that would drop the link).
 void DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
     useconds_t paceUs = static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
     if (cfg.swfec) wfb_->setFec(cfg.safe.overheadPct, cfg.safe.deadlineMs);
@@ -210,14 +211,14 @@ void DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
     // (robustness coding is, if anything, helpful during recovery).
     wfb_->setRadio(/*stbc=*/static_cast<uint8_t>(cfg.stbc ? 1 : 0),
                    /*ldpc=*/cfg.ldpc, /*shortGi=*/false,
-                   /*bandwidth=*/cfg.safe.bandwidth, /*mcs=*/cfg.safe.mcs,
+                   /*bandwidth=*/cfg.linkBandwidth, /*mcs=*/cfg.safe.mcs,
                    /*vhtMode=*/false, /*vhtNss=*/1);
     // Move the probe down with the video on a watchdog safe-recovery so it never
     // sits above the (now reduced) video rung. Best-effort, like dispatchTxApply.
     if (probeWfb_) {
         int rung = probeRungFor(cfg.safe.mcs, cfg.probeMcsCeiling);
         probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc, false,
-                            cfg.safe.bandwidth, static_cast<uint8_t>(rung), false, 1);
+                            cfg.linkBandwidth, static_cast<uint8_t>(rung), false, 1);
         lastProbeMcs_ = rung;
     }
     // Safe recovery: drive power for the (low) safe rung unconditionally, matching

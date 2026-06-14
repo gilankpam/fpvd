@@ -27,8 +27,6 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
         static_cast<uint8_t> (dl.safe.mcs),
         static_cast<uint8_t> (dl.safe.k),
         static_cast<uint8_t> (dl.safe.n),
-        static_cast<uint8_t> (dl.safe.bandwidth),
-        static_cast<int8_t>  (dl.safe.txPowerDbm),
         static_cast<uint16_t>(dl.safe.bitrateKbps),
     };
     s.safe.overheadPct = static_cast<uint8_t>(dl.safe.overheadPct);

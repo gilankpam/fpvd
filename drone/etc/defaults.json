@@ -72,8 +72,6 @@
       "n": 12,
       "overheadPct": 100,
       "deadlineMs": 30,
-      "bandwidth": 20,
-      "txPowerDbm": 20,
       "bitrateKbps": 2000
     }
   },
