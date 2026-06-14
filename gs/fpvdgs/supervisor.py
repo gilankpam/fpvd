@@ -1,6 +1,7 @@
 """fpvd supervisor: owns config + HTTP API + runner supervision. Pure stdlib."""
 
 import argparse
+import json
 import logging
 import signal
 import sys
@@ -78,10 +79,10 @@ class App:
         self.runner.shutdown()
 
 
-def build_app(defaults_path, overlay_path, cfg_out, host, port,
+def build_app(config_path, cfg_out, host, port,
               runner_cmd, ready_port=8103, ready_timeout=10.0, log_path=None,
               probe_spawn=None):
-    store = ConfigStore.load(defaults_path, overlay_path)
+    store = ConfigStore.load(config_path)
     effective = store.effective()
     schema.validate_effective(effective)
 
@@ -173,8 +174,9 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="fpvd")
-    p.add_argument("--defaults", default="/etc/fpvd/defaults.json")
     p.add_argument("--config", default="/etc/fpvd/config.json")
+    p.add_argument("--dump-config", action="store_true",
+                   help="print the full default config as JSON and exit")
     p.add_argument("--cfg-out", default="/etc/wifibroadcast.cfg")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8080)
@@ -183,9 +185,14 @@ def main(argv=None):
                    help="runner command (default: this python -m fpvdgs.runner)")
     args = p.parse_args(argv)
 
+    if args.dump_config:
+        from .config_defaults import default_config
+        print(json.dumps(default_config(), indent=2))
+        return
+
     runner_cmd = (args.runner.split() if args.runner
                   else [sys.executable, "-m", "fpvdgs.runner"])
-    app = build_app(args.defaults, args.config, args.cfg_out, args.host, args.port,
+    app = build_app(args.config, args.cfg_out, args.host, args.port,
                     runner_cmd, log_path=args.log)
 
     def _on_sigterm(signum, frame):

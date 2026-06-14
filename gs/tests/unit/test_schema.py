@@ -126,9 +126,8 @@ def test_validate_effective_rejects_bad_pixelpilot():
 
 
 def test_shipped_defaults_include_pixelpilot_and_validate():
-    import json, pathlib
-    p = pathlib.Path(__file__).resolve().parents[2] / "etc" / "defaults.json"
-    cfg = json.loads(p.read_text())
+    from fpvdgs.config_defaults import default_config
+    cfg = default_config()
     assert "pixelpilot" in cfg
     assert cfg["pixelpilot"]["enabled"] is True
     schema.validate_effective(cfg)  # no raise

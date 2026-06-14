@@ -74,13 +74,11 @@ def test_build_app_wires_api_collaborators(tmp_path, monkeypatch):
 
     # Explicit wlans so every resolve_wlans() (supervisor AND probe.config_build)
     # short-circuits without shelling out to `wfb-nics`.
-    defaults = tmp_path / "defaults.json"
-    defaults.write_text('{"link": {"region": "US", "channel": 132, "width": 20, '
-                        '"wlans": ["wlan0"]}}')
-    overlay = tmp_path / "config.json"
-    overlay.write_text("{}")
+    config = tmp_path / "config.json"
+    config.write_text('{"link": {"region": "US", "channel": 132, "width": 20, '
+                      '"wlans": ["wlan0"]}}')
 
-    app = sup.build_app(str(defaults), str(overlay), str(tmp_path / "out.cfg"),
+    app = sup.build_app(str(config), str(tmp_path / "out.cfg"),
                         "127.0.0.1", 0, runner_cmd=["true"])
     assert app.api.retune is not None
     assert app.api.wlans_resolver is not None

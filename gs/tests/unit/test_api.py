@@ -26,7 +26,7 @@ def _api(retune_ok=True):
     cfg_out = os.path.join(tempfile.mkdtemp(), "wifibroadcast.cfg")
     store = ConfigStore({"link": {"channel": 132, "width": 40, "region": "US"},
                          "wfb": {"profile": "gs"}, "drone": {"endpoint": "http://x"}},
-                        overlay_path=None)
+                        config_path=None)
     drone = FakeDrone()
     runner = FakeRunner()
     retunes = []
@@ -329,7 +329,7 @@ def test_idr_forward_apply_starts_and_stops():
     store = ConfigStore({"link": {"channel": 132, "width": 40, "region": "US"},
                          "wfb": {"profile": "gs"}, "drone": {"endpoint": "http://x"},
                          "idrForward": {"enabled": False, "port": 11223}},
-                        overlay_path=None)
+                        config_path=None)
     relay = FakeRelay()
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=FakeRunner(),
               drone=FakeDrone(), status_fn=lambda: {}, cfg_out=cfg_out,
