@@ -23,6 +23,7 @@ from .api import Api, make_http_server
 from .beamforming import BeamformingController
 from .beamforming_armer import BeamformingArmer
 from .config import ConfigStore
+from .config_defaults import default_config
 from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot
@@ -186,7 +187,6 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     if args.dump_config:
-        from .config_defaults import default_config
         print(json.dumps(default_config(), indent=2))
         return
 

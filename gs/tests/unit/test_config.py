@@ -82,3 +82,13 @@ def test_legacy_key_in_file_does_not_break_load(tmp_path):
     cfg.write_text(json.dumps({"probe": {"enabled": True}}))
     s = ConfigStore.load(str(cfg))               # must not raise
     assert s.effective()["link"]["channel"] == default_config()["link"]["channel"]
+
+
+def test_load_patch_commit_reload_roundtrip(tmp_path):
+    path = str(tmp_path / "config.json")
+    s = ConfigStore.load(path)          # no file → starts from code defaults
+    s.patch({"link": {"channel": 100}})
+    s.commit()
+    s2 = ConfigStore.load(path)         # reload from the persisted full config
+    assert s2.effective()["link"]["channel"] == 100
+    assert s2.effective()["drone"] == default_config()["drone"]  # unchanged keys survive
