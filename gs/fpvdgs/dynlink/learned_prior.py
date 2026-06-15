@@ -20,6 +20,20 @@ log = logging.getLogger("fpvdgs.dynlink")
 MAX_MCS = 7   # rung ceiling (matches SelectorConfig.max_mcs default and the drone)
 
 
+def lsq_slope(samples) -> float:
+    """Least-squares gradient (dBm per tick) over an evenly-spaced sample
+    sequence (x = 0, 1, ..., n-1). Unlike a single-tick delta, a lone spike
+    barely moves the fit. Fewer than 2 samples → 0.0 (no trend yet)."""
+    n = len(samples)
+    if n < 2:
+        return 0.0
+    mean_x = (n - 1) / 2.0
+    mean_y = sum(samples) / n
+    num = sum((i - mean_x) * (y - mean_y) for i, y in enumerate(samples))
+    den = sum((i - mean_x) ** 2 for i in range(n))
+    return num / den if den else 0.0
+
+
 @dataclass
 class LearnedPriorConfig:
     bin_width_db: float = 2.0
