@@ -1,8 +1,37 @@
+import dataclasses
 import socket
 import time
 
+import pytest
+
+import fpvdgs.dynlink.controller as controller_mod
 from fpvdgs.dynlink.controller import DynamicLinkController
 from fpvdgs.dynlink.stats_client import RxAnt, RxEvent, SessionInfo
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dl_disk(tmp_path, monkeypatch):
+    """Keep the controller's real Policy off the shared on-disk paths.
+
+    build_policy_config freezes learned_prior.persist_dir (/etc/fpvd/learned)
+    and flightlog.dir (/media/dvr/log/dynamic-link/), and a real
+    DynamicLinkController here reads/writes both. On dev/CI those paths are
+    unwritable so the I/O errors are silently swallowed, but on a writable box
+    (root, or the bench device) these tests would read stale state and clobber
+    the production learned-prior / flight-log files. Redirect both to tmp_path —
+    the real persist logic still runs, just isolated."""
+    real = controller_mod.build_policy_config
+
+    def _to_tmp(block):
+        cfg = real(block)
+        return dataclasses.replace(
+            cfg,
+            learned_prior=dataclasses.replace(
+                cfg.learned_prior, persist_dir=str(tmp_path / "learned")),
+            flightlog=dataclasses.replace(cfg.flightlog, dir=str(tmp_path / "fl")),
+        )
+
+    monkeypatch.setattr(controller_mod, "build_policy_config", _to_tmp)
 
 
 def _snapshot(drone_port, **over):
