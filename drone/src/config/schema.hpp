@@ -82,12 +82,18 @@ struct Video {
     int bitrate{8192};
     std::string rcMode{"cbr"};
     double gopSize{1.0};
+    // waybeam error-resilience preset. Derives intra-refresh, the SVC-T
+    // reference pyramid, and GOP length inside waybeam; gopSize is honored
+    // only when resilience == "off". Validated against a fixed preset set in
+    // config/validate.cpp.
+    std::string resilience{"off"};
     int qpDelta{-4};
     std::string sensorBin{""};   // sensor binning mode (empty = sensor default)
     Roi roi{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Video, codec, resolution, fps, bitrate,
-                                   rcMode, gopSize, qpDelta, sensorBin, roi)
+                                   rcMode, gopSize, resilience, qpDelta,
+                                   sensorBin, roi)
 
 struct Image { bool mirror{false}; bool flip{false}; int rotate{0}; };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Image, mirror, flip, rotate)

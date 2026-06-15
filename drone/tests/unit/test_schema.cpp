@@ -12,7 +12,7 @@ TEST_CASE("schema: round-trip a minimal config through json") {
                 "linkId":7669206,"mtu":1500,"wlanAdapter":null,
                 "beamforming":{"enabled":false,"remoteMac":"","ackTimeout":255,"intervalMs":100}},
         "video":{"codec":"h265","resolution":"1920x1080","fps":60,
-                 "bitrate":8192,"rcMode":"cbr","gopSize":1.0,"qpDelta":-4,
+                 "bitrate":8192,"rcMode":"cbr","gopSize":1.0,"resilience":"off","qpDelta":-4,
                  "sensorBin":"",
                  "roi":{"enabled":true,"qp":0,"center":0.4,"steps":2}},
         "image":{"mirror":false,"flip":false,"rotate":0},
@@ -59,6 +59,23 @@ TEST_CASE("schema: video.sensorBin defaults empty and round-trips") {
     CHECK(j["video"]["sensorBin"] == "4lane");
     auto c2 = j.get<fpvd::Config>();
     CHECK(c2.video.sensorBin == "4lane");
+}
+
+TEST_CASE("schema: video.resilience defaults to off and round-trips") {
+    fpvd::Config c{};
+    CHECK(c.video.resilience == "off");
+
+    // Serialised default config must carry the new field.
+    json def = json(c);
+    CHECK(def["video"].contains("resilience"));
+    CHECK(def["video"]["resilience"] == "off");
+
+    // A value survives a parse -> serialise round-trip at struct and JSON level.
+    c.video.resilience = "fpv";
+    json j = c;
+    CHECK(j["video"]["resilience"] == "fpv");
+    auto c2 = j.get<fpvd::Config>();
+    CHECK(c2.video.resilience == "fpv");
 }
 
 TEST_CASE("schema: service entry round-trips") {
@@ -178,7 +195,7 @@ TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") 
                  "fec":{"k":8,"n":12},"stbc":false,"ldpc":false,
                  "linkId":7669206,"mtu":1500,"wlanAdapter":null},
         "video": {"codec":"h265","resolution":"1920x1080","fps":60,
-                  "bitrate":8192,"rcMode":"cbr","gopSize":1.0,"qpDelta":-4,
+                  "bitrate":8192,"rcMode":"cbr","gopSize":1.0,"resilience":"off","qpDelta":-4,
                   "sensorBin":"",
                   "roi":{"enabled":true,"qp":0,"center":0.4,"steps":2}},
         "image": {"mirror":false,"flip":false,"rotate":0},
