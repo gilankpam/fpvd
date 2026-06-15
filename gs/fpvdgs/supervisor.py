@@ -27,7 +27,7 @@ from .config_defaults import default_config
 from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot
-from .idr_relay import IdrRelay, drone_host_from_endpoint
+from .idr_relay import IdrRelay
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .probe.config_build import make_probe_snapshot
 from .probe.controller import ProbeController
@@ -96,12 +96,12 @@ def build_app(config_path, cfg_out, host, port,
                               wlans=wlans, ready_port=ready_port,
                               ready_timeout=ready_timeout, log_path=log_path)
 
-    endpoint = effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080")
-    drone = DroneClient(endpoint)
+    drone_cfg = effective.get("drone", {})
+    drone_host = drone_cfg.get("host", "10.5.0.10")
+    drone = DroneClient(f"http://{drone_host}:{int(drone_cfg.get('apiPort', 8080))}")
 
     idr_cfg = effective.get("idrForward", {})
-    idr_relay = IdrRelay(drone_host_from_endpoint(endpoint),
-                         port=int(idr_cfg.get("port", 11223)))
+    idr_relay = IdrRelay(drone_host, port=int(idr_cfg.get("port", 11223)))
 
     probe_ctrl = ProbeController(make_probe_snapshot(effective), spawn=probe_spawn)
 

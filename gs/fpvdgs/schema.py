@@ -4,8 +4,9 @@ LINK_KEYS = {"channel", "width", "txPowerDbm", "region", "linkId",
              "beamforming", "wlans"}
 CONFIG_TOP_KEYS = {"link", "wfb", "drone", "dynamicLink", "pixelpilot",
                    "idrForward"}
-DYNAMIC_LINK_KEYS = {"enabled", "maxMcs", "radioProfile", "droneAddr",
-                     "dronePort", "selector", "smoothing", "flightlog", "rssiNorm"}
+DYNAMIC_LINK_KEYS = {"enabled", "maxMcs", "radioProfile", "dronePort",
+                     "selector", "smoothing", "flightlog", "rssiNorm"}
+DRONE_KEYS = {"host", "apiPort"}   # the drone's address; reused by HTTP/IDR/DL
 SELECTOR_KEYS = {"probeViableThreshold", "probeFreshnessMs",
                  "promoteDebounceWindows", "videoDemotePer", "emergencyLossRate",
                  "emergencyFecPressure", "holdModesDownMs", "minBetweenChangesMs",
@@ -48,6 +49,13 @@ def validate_config_patch(sparse: dict) -> None:
         unknown_dl = set(dl) - DYNAMIC_LINK_KEYS
         if unknown_dl:
             raise SchemaError(f"unknown dynamicLink keys: {sorted(unknown_dl)}")
+    dr = sparse.get("drone")
+    if dr is not None:
+        if not isinstance(dr, dict):
+            raise SchemaError("drone must be an object")
+        unknown_dr = set(dr) - DRONE_KEYS
+        if unknown_dr:
+            raise SchemaError(f"unknown drone keys: {sorted(unknown_dr)}")
 
 
 def validate_effective(cfg: dict) -> None:
@@ -77,6 +85,20 @@ def validate_effective(cfg: dict) -> None:
     idr = cfg.get("idrForward")
     if idr is not None:
         _validate_idr_forward(idr)
+    dr = cfg.get("drone")
+    if dr is not None:
+        _validate_drone(dr)
+
+
+def _validate_drone(dr: dict) -> None:
+    if not isinstance(dr, dict):
+        raise SchemaError("drone must be an object")
+    host = dr.get("host", "10.5.0.10")
+    if not isinstance(host, str) or not host:
+        raise SchemaError("drone.host must be a non-empty string")
+    port = dr.get("apiPort", 8080)
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise SchemaError("drone.apiPort must be an int in 1..65535")
 
 
 def _validate_beamforming(bf: dict) -> None:

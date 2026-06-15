@@ -1,13 +1,6 @@
 import socket
 
-from fpvdgs.idr_relay import IdrRelay, drone_host_from_endpoint
-
-
-def test_drone_host_from_endpoint():
-    assert drone_host_from_endpoint("http://10.5.0.10:8080") == "10.5.0.10"
-    assert drone_host_from_endpoint("http://host:1/x") == "host"
-    assert drone_host_from_endpoint("") == "10.5.0.10"          # default
-    assert drone_host_from_endpoint(None) == "10.5.0.10"
+from fpvdgs.idr_relay import IdrRelay
 
 
 def test_relay_forwards_datagrams():

@@ -158,6 +158,33 @@ def test_beamforming_rejects_unknown_subkey():
         schema.validate_effective(cfg)
 
 
+def test_validate_effective_accepts_drone_block():
+    schema.validate_effective({"link": {"channel": 132, "region": "US"},
+                               "drone": {"host": "10.5.0.10", "apiPort": 8080}})
+
+
+def test_drone_host_empty_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective({"link": {"channel": 132, "region": "US"},
+                                   "drone": {"host": ""}})
+
+
+def test_drone_apiport_out_of_range_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective({"link": {"channel": 132, "region": "US"},
+                                   "drone": {"apiPort": 0}})
+
+
+def test_patch_rejects_unknown_drone_key():
+    # the old drone.endpoint key is now unknown -> rejected on PATCH
+    with pytest.raises(schema.SchemaError):
+        schema.validate_config_patch({"drone": {"endpoint": "http://x:8080"}})
+
+
+def test_patch_accepts_known_drone_keys():
+    schema.validate_config_patch({"drone": {"host": "10.5.0.10", "apiPort": 8080}})
+
+
 def test_enable_bf_on_incapable_card_rejected():
     schema.set_bf_capable(lambda cfg: False)
     try:
@@ -179,7 +206,7 @@ def test_enable_bf_on_capable_card_ok():
 
 def _dl(**over):
     base = {"enabled": True, "maxMcs": 5, "radioProfile": "m8812eu2",
-            "droneAddr": None, "dronePort": 9999}
+            "dronePort": 9999}
     base.update(over)
     return {"link": {"channel": 132, "region": "US", "width": 20},
             "dynamicLink": base}

@@ -16,7 +16,7 @@ def _dynamic_link_defaults() -> dict:
         # maxMcs 5 = operator runtime cap (distinct from SelectorConfig.max_mcs=7 HW ceiling fallback)
         "maxMcs": 5,
         "radioProfile": "m8812eu2",
-        "droneAddr": None, "dronePort": 9999,
+        "dronePort": 9999,
         "selector": {
             "probeViableThreshold": sel.probe_viable_threshold,
             "probeFreshnessMs": sel.probe_freshness_ms,
@@ -50,7 +50,7 @@ def default_config() -> dict:
             "mavlink": {"peer": "connect://127.0.0.1:14550"},
             "raw": {},
         },
-        "drone": {"endpoint": "http://10.5.0.10:8080"},
+        "drone": {"host": "10.5.0.10", "apiPort": 8080},
         "dynamicLink": _dynamic_link_defaults(),
         "idrForward": {"enabled": True, "port": 11223},
         "pixelpilot": {

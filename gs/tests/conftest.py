@@ -85,5 +85,7 @@ def fake_drone():
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
     state["endpoint"] = f"http://127.0.0.1:{port}"
+    state["host"] = "127.0.0.1"
+    state["port"] = port
     yield state
     srv.shutdown()

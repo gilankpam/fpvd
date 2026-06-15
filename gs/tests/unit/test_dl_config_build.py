@@ -5,7 +5,7 @@ from fpvdgs.dynlink.config_build import (
 
 def _block(**over):
     blk = {"enabled": True, "maxMcs": 5, "radioProfile": "m8812eu2",
-           "droneAddr": None, "dronePort": 9999}
+           "dronePort": 9999}
     blk.update(over)
     return blk
 
@@ -77,24 +77,20 @@ def test_rssi_norm_defaults_enabled():
     assert agg.rssi_norm.enabled is True
 
 
-def test_make_dl_snapshot_defaults_drone_host_from_endpoint():
-    eff = {"dynamicLink": _block(droneAddr=None),
-           "drone": {"endpoint": "http://10.5.0.10:8080"}}
+def test_make_dl_snapshot_uses_drone_host():
+    eff = {"dynamicLink": _block(), "drone": {"host": "10.5.0.99"}}
     snap = make_dl_snapshot(eff)
-    assert snap["droneAddr"] == "10.5.0.10"
+    assert snap["droneAddr"] == "10.5.0.99"
     assert snap["dronePort"] == 9999
 
 
-def test_make_dl_snapshot_explicit_drone_addr_wins():
-    eff = {"dynamicLink": _block(droneAddr="10.5.0.99", dronePort=12345),
-           "drone": {"endpoint": "http://10.5.0.10:8080"}}
-    snap = make_dl_snapshot(eff)
-    assert snap["droneAddr"] == "10.5.0.99"
-    assert snap["dronePort"] == 12345
+def test_make_dl_snapshot_default_host_when_drone_absent():
+    snap = make_dl_snapshot({"dynamicLink": _block()})
+    assert snap["droneAddr"] == "10.5.0.10"
 
 
 def test_make_dl_snapshot_falls_back_to_default_port():
-    eff = {"dynamicLink": _block(droneAddr="10.0.0.1", dronePort=None),
-           "drone": {"endpoint": "http://10.5.0.10:8080"}}
+    eff = {"dynamicLink": _block(dronePort=None), "drone": {"host": "10.0.0.1"}}
     snap = make_dl_snapshot(eff)
+    assert snap["droneAddr"] == "10.0.0.1"
     assert snap["dronePort"] == 9999

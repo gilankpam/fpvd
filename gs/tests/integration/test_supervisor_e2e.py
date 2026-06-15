@@ -36,7 +36,7 @@ def daemon(tmp_path, fake_drone):
         "link": {"channel": 132, "width": 40, "region": "US",
                  "linkId": 7669206, "wlans": ["wlan0"]},
         "wfb": {"profile": "gs"},
-        "drone": {"endpoint": fake_drone["endpoint"]},
+        "drone": {"host": fake_drone["host"], "apiPort": fake_drone["port"]},
         "pixelpilot": {"enabled": False},
     }))
     fake_runner = ["python3", "-c",
@@ -117,9 +117,9 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
     config_json.write_text(json.dumps({
         "link": {"channel": 132, "width": 40, "region": "US"},
         "wfb": {"profile": "gs", "raw": {}},
-        "drone": {"endpoint": "http://127.0.0.1:1"},
+        "drone": {"host": "127.0.0.1", "apiPort": 1},
         "dynamicLink": {"enabled": False, "maxMcs": 5,
-                        "radioProfile": "m8812eu2", "droneAddr": None,
+                        "radioProfile": "m8812eu2",
                         "dronePort": 9999}}))
     cfg_out = tmp_path / "wfb.cfg"
 
@@ -169,7 +169,7 @@ def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
     config_json.write_text(json.dumps({
         "link": {"channel": 132, "width": 40, "region": "US", "linkId": 7669206},
         "wfb": {"profile": "gs", "raw": {}},
-        "drone": {"endpoint": "http://127.0.0.1:1"},
+        "drone": {"host": "127.0.0.1", "apiPort": 1},
         "pixelpilot": {"enabled": False},
         "dynamicLink": {"enabled": True, "maxMcs": 5,
                         "radioProfile": "m8812eu2", "dronePort": 9999}}))

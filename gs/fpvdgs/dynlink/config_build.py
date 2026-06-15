@@ -9,8 +9,6 @@ internals are frozen entirely. camelCase JSON maps to the dataclasses'
 snake_case fields."""
 from __future__ import annotations
 
-from urllib.parse import urlparse
-
 from .flightlog import FlightLogConfig
 from .learned_prior import LearnedPriorConfig
 from .policy import PolicyConfig, SelectorConfig
@@ -59,12 +57,9 @@ def build_aggregator(block: dict) -> SignalAggregator:
 
 
 def make_dl_snapshot(effective: dict) -> dict:
-    """Self-contained snapshot the controller consumes. Resolves the drone
-    UDP target: explicit dynamicLink.droneAddr wins, else the host from
-    drone.endpoint; port defaults to 9999 (the fpvd drone's listener)."""
+    """Self-contained snapshot the controller consumes. The drone decision
+    UDP target is drone.host : dynamicLink.dronePort (9999 default)."""
     block = dict(effective.get("dynamicLink", {}))
-    endpoint = effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080")
-    host = urlparse(endpoint).hostname or "10.5.0.10"
-    block["droneAddr"] = block.get("droneAddr") or host
+    block["droneAddr"] = effective.get("drone", {}).get("host", "10.5.0.10")
     block["dronePort"] = int(block.get("dronePort") or 9999)
     return block
