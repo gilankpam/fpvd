@@ -84,8 +84,7 @@ struct Video {
     double gopSize{1.0};
     // waybeam error-resilience preset. Derives intra-refresh, the SVC-T
     // reference pyramid, and GOP length inside waybeam; gopSize is honored
-    // only when resilience == "off". Validated against a fixed preset set in
-    // config/validate.cpp.
+    // only when resilience == "off".
     std::string resilience{"off"};
     int qpDelta{-4};
     std::string sensorBin{""};   // sensor binning mode (empty = sensor default)
