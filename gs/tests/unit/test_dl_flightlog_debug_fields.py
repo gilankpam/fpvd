@@ -98,3 +98,31 @@ def test_record_carries_promote_clean_counter(tmp_path):
     recs = _records(tmp_path)
     assert recs[0]["promote_clean"] == 1
     assert recs[1]["promote_clean"] == 2
+
+
+def test_logged_slope_is_least_squares_not_single_tick(tmp_path):
+    """A lone RSSI spike barely moves the logged slope (least-squares over a
+    window) — the old single-tick delta would log the full +5 dB jump."""
+    p = Policy(_cfg(tmp_path), _profile())
+    for rssi, ts in [(-50.0, 1.0), (-50.0, 1.1), (-50.0, 1.2),
+                     (-50.0, 1.3), (-45.0, 1.4)]:
+        p.tick(_sig(rssi, ts=ts))
+    p.close()
+    last = _records(tmp_path)[-1]
+    # lsq over [-50,-50,-50,-50,-45] = +1.0  (single-tick delta would be +5.0)
+    assert abs(last["slope"] - 1.0) < 1e-6
+
+
+def test_logged_slope_uses_only_the_rolling_window(tmp_path):
+    """Samples older than the default 10-tick window must not affect the slope:
+    5 flat ticks then a 10-tick -1/tick ramp → slope -1.0 (the flat prefix has
+    rolled out). If the prefix leaked in, the slope would be shallower."""
+    p = Policy(_cfg(tmp_path), _profile())
+    ts = 1.0
+    for _ in range(5):                        # flat prefix — rolls out of the window
+        p.tick(_sig(-50.0, ts=ts)); ts += 0.1
+    for i in range(10):                       # -1 dB/tick ramp fills the window
+        p.tick(_sig(-50.0 - i, ts=ts)); ts += 0.1
+    p.close()
+    last = _records(tmp_path)[-1]
+    assert abs(last["slope"] - (-1.0)) < 1e-6

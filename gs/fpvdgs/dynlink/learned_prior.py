@@ -46,6 +46,7 @@ class LearnedPriorConfig:
     warmstart_margin: int = 0
     predictive_horizon_ticks: int = 3
     predictive_debounce_windows: int = 3
+    predictive_slope_window_ticks: int = 10   # least-squares RSSI window (1.0 s @ 10 Hz)
     flush_interval_observations: int = 50
     persist_dir: str = "/etc/fpvd/learned"
 

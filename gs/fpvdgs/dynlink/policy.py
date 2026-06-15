@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 from .decision import Decision
 from .flightlog import FlightLog, FlightLogConfig
-from .learned_prior import LearnedPrior, LearnedPriorConfig
+from .learned_prior import LearnedPrior, LearnedPriorConfig, lsq_slope
 from .signals import Signals
 
 log = logging.getLogger(__name__)
@@ -260,7 +261,8 @@ class Policy:
         # Learned per-card prior (always-on), keyed by the operator-set
         # dynamicLink.radioProfile; GS-local, the live probe stays authoritative.
         self.learned_prior = LearnedPrior(profile_name, cfg.learned_prior)
-        self._prev_rssi: float | None = None
+        self._rssi_window: deque[float] = deque(
+            maxlen=cfg.learned_prior.predictive_slope_window_ticks)
         self._predict_demote_count = 0
         self._last_healthy_mono = None   # monotonic ts of last non-starved tick (flight-gap roll)
         self.flightlog = FlightLog(cfg.flightlog)
@@ -295,9 +297,11 @@ class Policy:
         # pre-demote ahead of the reactive path. The probe still owns promotes;
         # the reactive Channel-B demote in select() remains the backstop.
         predict_reason = ""
-        slope = (None if signals.rssi is None
-                 else (0.0 if self._prev_rssi is None
-                       else signals.rssi - self._prev_rssi))
+        if signals.rssi is None:
+            slope = None
+        else:
+            self._rssi_window.append(signals.rssi)
+            slope = lsq_slope(self._rssi_window)
         pc = None
         if signals.rssi is not None:
             pc = self.learned_prior.predictive_ceiling(signals.rssi, slope)
@@ -311,7 +315,6 @@ class Policy:
                     predict_reason = f"predict_demote mcs{cur}->{pc}"
             else:
                 self._predict_demote_count = 0
-        self._prev_rssi = signals.rssi
 
         # Selector (Phase 2) is the only decision now: probe-promote +
         # reactive demote. The drone computes its own bitrate / FEC /
