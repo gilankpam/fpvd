@@ -26,6 +26,7 @@ def _dynamic_link_defaults() -> dict:
             "holdModesDownMs": sel.hold_modes_down_ms,
             "minBetweenChangesMs": sel.min_between_changes_ms,
             "starvationWindows": sel.starvation_windows,
+            "lossWindows": sel.loss_windows,
         },
         "smoothing": {
             "ewmaAlphaRssi": agg.ewma_alpha_rssi,

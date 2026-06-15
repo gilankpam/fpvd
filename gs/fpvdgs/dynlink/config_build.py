@@ -28,6 +28,7 @@ def build_policy_config(block: dict) -> PolicyConfig:
         hold_modes_down_ms=int(sel.get("holdModesDownMs", d.hold_modes_down_ms)),
         min_between_changes_ms=int(sel.get("minBetweenChangesMs", d.min_between_changes_ms)),
         starvation_windows=int(sel.get("starvationWindows", d.starvation_windows)),
+        loss_windows=int(sel.get("lossWindows", d.loss_windows)),
     )
     fl = block.get("flightlog", {}) or {}
     # flightlog internals are frozen — read only `enabled`.

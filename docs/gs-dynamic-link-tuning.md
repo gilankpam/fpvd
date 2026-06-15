@@ -41,6 +41,7 @@ Source: `gs/fpvdgs/dynlink/policy.py` (`SelectorConfig`).
 | `holdModesDownMs` | int | `2000` | >= 0 ms | Cooldown after any demote before the selector may promote again. Demotes bypass this cooldown (they are always immediate). |
 | `minBetweenChangesMs` | int | `200` | >= 0 ms | Minimum interval between any two MCS changes (promote or demote). |
 | `starvationWindows` | int | `5` | positive int | Consecutive windows with packet rate below `smoothing.starvationThresholdPps` before `link_starved` feeds the emergency demote. At 10 Hz, the default 5 = 0.5 s total-blackout failsafe. |
+| `lossWindows` | int | `2` | positive int | Consecutive windows with residual loss ≥ `videoDemotePer` before a loss demote. Filters single-window transients (200 ms @ 10 Hz). |
 
 ### `dynamicLink.smoothing` — advanced signal-aggregation tuning
 

@@ -634,7 +634,8 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
     "emergencyFecPressure": 0.80,    // probability [0,1] — FEC work rate for emergency demote
     "holdModesDownMs": 2000,         // ms >= 0 — cooldown after a demote before next promote
     "minBetweenChangesMs": 200,      // ms >= 0 — minimum interval between any MCS changes
-    "starvationWindows": 5           // positive int — consecutive starved windows before emergency demote
+    "starvationWindows": 5,          // positive int — consecutive starved windows before emergency demote
+    "lossWindows": 2                 // positive int — consecutive >=videoDemotePer windows before a loss demote
   },
 
   // Smoothing: EWMA weights for signal aggregation

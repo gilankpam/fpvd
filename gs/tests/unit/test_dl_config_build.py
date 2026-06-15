@@ -93,3 +93,10 @@ def test_make_dl_snapshot_falls_back_to_default_port():
     snap = make_dl_snapshot(eff)
     assert snap["droneAddr"] == "10.0.0.1"
     assert snap["dronePort"] == 9999
+
+
+def test_loss_windows_reads_and_defaults():
+    from fpvdgs.dynlink.config_build import build_policy_config
+    over = build_policy_config(_block(selector={"lossWindows": 4}))
+    assert over.selector.loss_windows == 4
+    assert build_policy_config(_block()).selector.loss_windows == 2  # default

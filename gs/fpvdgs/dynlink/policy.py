@@ -55,6 +55,9 @@ class SelectorConfig:
     # Total-blackout failsafe: consecutive starved windows before link_starved
     # feeds the emergency demote (10 Hz → 5 windows = 0.5 s).
     starvation_windows: int = 5
+    # Loss hysteresis: consecutive breaching windows (residual_loss_w >=
+    # video_demote_per) before a loss demote — filters single-window transients.
+    loss_windows: int = 2
 
 
 @dataclass
@@ -256,6 +259,7 @@ class Policy:
         # glitches). At 10 Hz, starvation_windows=5 = 0.5 s of below-
         # threshold packet rate before declaring blackout.
         self._starvation_count: int = 0
+        self._loss_count: int = 0
         # Learned per-card prior (always-on), keyed by the operator-set
         # dynamicLink.radioProfile; GS-local, the live probe stays authoritative.
         self.learned_prior = LearnedPrior(profile_name, cfg.learned_prior)
@@ -277,6 +281,19 @@ class Policy:
             self._starvation_count = 0
         sustained_starved = (
             self._starvation_count >= self.cfg.selector.starvation_windows
+        )
+
+        # Loss hysteresis (mirrors starvation): residual_loss_w is raw and
+        # spikes on a single bad window. Require loss_windows consecutive
+        # breaching windows before a loss demote; flag suppressed ones.
+        if signals.residual_loss_w >= self.cfg.selector.video_demote_per:
+            self._loss_count += 1
+        else:
+            self._loss_count = 0
+        sustained_loss = self._loss_count >= self.cfg.selector.loss_windows
+        loss_gated = (
+            signals.residual_loss_w >= self.cfg.selector.video_demote_per
+            and not sustained_loss
         )
 
         # Warm-start seed (one-shot). Uses the learned per-card curve ONLY —
@@ -328,11 +345,10 @@ class Policy:
         # reactive demote. The drone computes its own bitrate / FEC /
         # depth / tx_power locally, so we emit {mcs} only.
         probe_snap = self._probe_status() if self._probe_status else None
-        loss_demote = signals.residual_loss_w >= self.cfg.selector.video_demote_per
         new_mcs, _changed = self.leading.select(
             probe=probe_snap,
             loss_rate=signals.residual_loss_w,
-            loss_demote=loss_demote,
+            loss_demote=sustained_loss,
             fec_pressure=signals.fec_work,
             link_starved=sustained_starved,
             ts_ms=ts_ms,
@@ -385,6 +401,7 @@ class Policy:
             "residual_loss_w": signals.residual_loss_w,
             "fec_work": signals.fec_work,
             "link_starved": sustained_starved,
+            "loss_gated": loss_gated,
             "ceiling": (self.learned_prior.ceiling(signals.rssi)
                         if signals.rssi is not None else None),
             "probe": probe_log,
