@@ -29,6 +29,10 @@ nlohmann::json toWaybeamJson(const Config& c) {
             {"size", c.video.resolution},
             {"bitrate", c.video.bitrate},
             {"gopSize", c.video.gopSize},
+            // waybeam ignores gopSize when resilience != "off" (the preset owns
+            // intra-refresh + GOP). See waybeamConfigDiff() — resilience is a
+            // RESTART-class field.
+            {"resilience", c.video.resilience},
             {"qpDelta", c.video.qpDelta},
             {"frameLost", true},
             {"sceneThreshold", 0},

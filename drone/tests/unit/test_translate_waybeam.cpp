@@ -46,3 +46,12 @@ TEST_CASE("translate.waybeam: video.sensorBin maps to isp.sensorBin") {
     c.video.sensorBin = "2x2";
     CHECK(fpvd::toWaybeamJson(c)["isp"]["sensorBin"] == "2x2");
 }
+
+TEST_CASE("translate.waybeam: video.resilience maps to video0.resilience") {
+    fpvd::Config c{};
+    // Default is "off".
+    CHECK(fpvd::toWaybeamJson(c)["video0"]["resilience"] == "off");
+
+    c.video.resilience = "fpv";
+    CHECK(fpvd::toWaybeamJson(c)["video0"]["resilience"] == "fpv");
+}
