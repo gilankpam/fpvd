@@ -41,3 +41,16 @@ def test_probe_target_per_none_when_absent():
     assert mod.probe_target_per({"mcs": 3, "probe": None}) is None    # no probe_status
     assert mod.probe_target_per({"mcs": 3, "probe": {}}) is None      # rung not heard
     assert mod.probe_target_per({"probe": {"4": {"per": 0.1}}}) is None  # no mcs
+
+
+def test_summarize_counts_gated_demotes(tmp_path):
+    mod = _load_tool()
+    log = tmp_path / "f.jsonl"
+    with open(log, "w") as f:
+        f.write(json.dumps({"ts": 1.0, "mcs": 5, "reason": "",
+                            "predict_gated": True}) + "\n")
+        f.write(json.dumps({"ts": 1.1, "mcs": 5, "reason": "",
+                            "predict_gated": False}) + "\n")
+        f.write(json.dumps({"ts": 1.2, "mcs": 5, "reason": ""}) + "\n")  # pre-field log
+    s = mod.summarize(str(log))
+    assert s["gated_demotes"] == 1

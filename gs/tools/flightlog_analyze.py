@@ -37,7 +37,7 @@ def probe_target_per(rec) -> float | None:
 def summarize(path) -> dict:
     recs = list(_records(path))
     time_at_mcs = Counter()
-    predictive = reactive = warm_fallback = 0
+    predictive = reactive = warm_fallback = gated = 0
     ceilings, mcss = [], []
     for r in recs:
         time_at_mcs[r.get("mcs")] += 1
@@ -46,6 +46,8 @@ def summarize(path) -> dict:
             predictive += 1
         if "video_per_demote" in reason or "emergency" in reason:
             reactive += 1
+        if r.get("predict_gated"):
+            gated += 1
         if r.get("mcs") is not None:
             mcss.append(r["mcs"])
         if r.get("ceiling") is not None:
@@ -55,6 +57,7 @@ def summarize(path) -> dict:
         "time_at_mcs": dict(time_at_mcs),
         "predictive_demotes": predictive,
         "reactive_demotes": reactive,
+        "gated_demotes": gated,
         "mean_mcs": (sum(mcss) / len(mcss)) if mcss else None,
         "mean_ceiling": (sum(ceilings) / len(ceilings)) if ceilings else None,
     }
@@ -65,6 +68,7 @@ def _print_summary(s: dict) -> None:
     print(f"time-at-MCS (ticks): {s['time_at_mcs']}")
     print(f"predictive demotes: {s['predictive_demotes']}")
     print(f"reactive demotes:   {s['reactive_demotes']}")
+    print(f"gated demotes:      {s['gated_demotes']}")
     print(f"mean MCS: {s['mean_mcs']}   mean ceiling: {s['mean_ceiling']}")
 
 
