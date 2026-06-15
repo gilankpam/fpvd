@@ -81,6 +81,18 @@ TEST_CASE("waybeamConfigDiff: sensorBin is a RESTART field, not DL-owned") {
     CHECK(d2.restart.at("isp.sensor_bin") == "2x2");
 }
 
+TEST_CASE("waybeamConfigDiff: resilience is a RESTART field, not live") {
+    Config a{}, b{};
+    b.video.resilience = "fpv";
+    auto d = waybeamConfigDiff(a, b, /*dlEnabled=*/false);
+    CHECK(d.restart.at("video0.resilience") == "fpv");
+    CHECK(d.live.empty());
+
+    // Not dynamic-link-owned: still emitted while DL is enabled.
+    auto d2 = waybeamConfigDiff(a, b, /*dlEnabled=*/true);
+    CHECK(d2.restart.at("video0.resilience") == "fpv");
+}
+
 TEST_CASE("waybeamConfigDiff: fractional roi.center formats with a decimal") {
     Config a{}, b{};
     a.video.roi.center = 0.0;   // default center is 0.4, so explicitly set a to 0.0 for a genuine change

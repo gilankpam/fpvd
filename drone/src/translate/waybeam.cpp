@@ -133,6 +133,11 @@ WaybeamFieldDiff waybeamConfigDiff(const Config& a, const Config& b,
     // is restart-class. Not dynamic-link-owned (the controller never writes it).
     if (va.sensorBin != vb.sensorBin)
         d.restart["isp.sensor_bin"] = vb.sensorBin;
+    // resilience is a named encoder preset (intra-refresh + GOP). waybeam treats
+    // it as reboot-class; we apply it by bouncing the waybeam process (RESTART).
+    // Not dynamic-link-owned — the controller never writes it.
+    if (va.resilience != vb.resilience)
+        d.restart["video0.resilience"] = vb.resilience;
 
     const auto& ia = a.image; const auto& ib = b.image;
     if (ia.mirror != ib.mirror) d.restart["image.mirror"] = fmtBool(ib.mirror);
