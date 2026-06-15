@@ -163,3 +163,10 @@ TEST_CASE("lock: DL on + body writes link.txPowerDbm → rejected (curve owns po
     REQUIRE(r.lockedPaths.size() == 1);
     CHECK(r.lockedPaths[0] == "link.txPowerDbm");
 }
+
+TEST_CASE("lock: DL on + body writes video.resilience → allowed (operator-owned)") {
+    auto body = nlohmann::json::parse(R"({"video":{"resilience":"fpv"}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK(r.ok);
+    CHECK(r.lockedPaths.empty());
+}

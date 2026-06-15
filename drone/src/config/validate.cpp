@@ -95,6 +95,13 @@ std::vector<ValidationError> validate(const Config& c) {
         errs.push_back({"video.bitrate", "must be > 0"});
     if (c.video.rcMode != "cbr" && c.video.rcMode != "vbr")
         errs.push_back({"video.rcMode", "must be cbr or vbr"});
+    static const std::set<std::string> resiliencePresets{
+        "off", "rescue", "quality", "sprint", "racing",
+        "endurance", "patrol", "rally", "range", "fpv"};
+    if (!resiliencePresets.count(c.video.resilience))
+        errs.push_back({"video.resilience",
+                        "must be one of off|rescue|quality|sprint|racing|"
+                        "endurance|patrol|rally|range|fpv"});
 
     // image
     static const std::set<int> rots{0, 90, 180, 270};

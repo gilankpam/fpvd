@@ -29,6 +29,10 @@ nlohmann::json toWaybeamJson(const Config& c) {
             {"size", c.video.resolution},
             {"bitrate", c.video.bitrate},
             {"gopSize", c.video.gopSize},
+            // waybeam ignores gopSize when resilience != "off" (the preset owns
+            // intra-refresh + GOP). See waybeamConfigDiff() — resilience is a
+            // RESTART-class field.
+            {"resilience", c.video.resilience},
             {"qpDelta", c.video.qpDelta},
             {"frameLost", true},
             {"sceneThreshold", 0},
@@ -129,6 +133,13 @@ WaybeamFieldDiff waybeamConfigDiff(const Config& a, const Config& b,
     // is restart-class. Not dynamic-link-owned (the controller never writes it).
     if (va.sensorBin != vb.sensorBin)
         d.restart["isp.sensor_bin"] = vb.sensorBin;
+    // resilience is a named encoder preset (intra-refresh + GOP). waybeam
+    // documents it as reboot-required; we apply it restart-class by bouncing
+    // the waybeam process — whether that suffices vs a full reboot is an open
+    // bench-verification risk (see design spec). Not dynamic-link-owned — the
+    // controller never writes it.
+    if (va.resilience != vb.resilience)
+        d.restart["video0.resilience"] = vb.resilience;
 
     const auto& ia = a.image; const auto& ib = b.image;
     if (ia.mirror != ib.mirror) d.restart["image.mirror"] = fmtBool(ib.mirror);
