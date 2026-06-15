@@ -272,6 +272,21 @@ TEST_CASE("validate: dynamicLink.compute.baseRedundancyRatio > 0") {
     CHECK(errs[0].path == "dynamicLink.compute.baseRedundancyRatio");
 }
 
+TEST_CASE("validate: video.resilience accepts every known preset") {
+    for (const char* p : {"off","rescue","quality","sprint","racing",
+                          "endurance","patrol","rally","range","fpv"}) {
+        Config c{}; c.video.resilience = p;
+        CHECK(validate(c).empty());
+    }
+}
+
+TEST_CASE("validate: video.resilience rejects an unknown preset") {
+    Config c{}; c.video.resilience = "turbo";
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "video.resilience");
+}
+
 TEST_CASE("validate: link.fec swfec rules") {
     auto hasErr = [](const std::vector<fpvd::ValidationError>& errs,
                      const std::string& path) {
