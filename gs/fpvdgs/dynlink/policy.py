@@ -317,9 +317,10 @@ class Policy:
                         self.leading._promote_clean = 0
                         predict_reason = f"predict_demote mcs{cur}->{pc}"
                 else:
-                    # pc says demote but RSSI isn't genuinely falling: a static
-                    # prior-vs-probe disagreement, not a fade. Suppress (the
-                    # flapping fix) and log it.
+                    # pc says demote but RSSI isn't falling fast enough to matter
+                    # (flat/rising = a static prior-vs-probe disagreement, or a
+                    # fade too shallow to clear predictive_min_drop_db). Not a
+                    # real fade — suppress (the flapping fix) and log it.
                     predict_gated = True
                     self._predict_demote_count = 0
             else:
