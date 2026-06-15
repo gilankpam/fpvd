@@ -297,6 +297,7 @@ class Policy:
         # pre-demote ahead of the reactive path. The probe still owns promotes;
         # the reactive Channel-B demote in select() remains the backstop.
         predict_reason = ""
+        predict_gated = False
         if signals.rssi is None:
             slope = None
         else:
@@ -306,13 +307,21 @@ class Policy:
         if signals.rssi is not None:
             pc = self.learned_prior.predictive_ceiling(signals.rssi, slope)
             cur = self.leading.state.current_mcs
+            projected_drop = -slope * self.cfg.learned_prior.predictive_horizon_ticks
             if pc is not None and pc < cur:
-                self._predict_demote_count += 1
-                if (self._predict_demote_count
-                        >= self.cfg.learned_prior.predictive_debounce_windows):
-                    self.leading.state.current_mcs = max(pc, 0)
-                    self.leading._promote_clean = 0
-                    predict_reason = f"predict_demote mcs{cur}->{pc}"
+                if projected_drop >= self.cfg.learned_prior.predictive_min_drop_db:
+                    self._predict_demote_count += 1
+                    if (self._predict_demote_count
+                            >= self.cfg.learned_prior.predictive_debounce_windows):
+                        self.leading.state.current_mcs = max(pc, 0)
+                        self.leading._promote_clean = 0
+                        predict_reason = f"predict_demote mcs{cur}->{pc}"
+                else:
+                    # pc says demote but RSSI isn't genuinely falling: a static
+                    # prior-vs-probe disagreement, not a fade. Suppress (the
+                    # flapping fix) and log it.
+                    predict_gated = True
+                    self._predict_demote_count = 0
             else:
                 self._predict_demote_count = 0
 
@@ -380,6 +389,7 @@ class Policy:
             "probe": probe_log,
             "pc": pc,
             "slope": slope,
+            "predict_gated": predict_gated,
             "promote_clean": self.leading._promote_clean,
         })
         return Decision(

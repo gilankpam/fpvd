@@ -126,3 +126,33 @@ def test_logged_slope_uses_only_the_rolling_window(tmp_path):
     p.close()
     last = _records(tmp_path)[-1]
     assert abs(last["slope"] - (-1.0)) < 1e-6
+
+
+def test_record_carries_predict_gated_flag(tmp_path):
+    """predict_gated is True when pc < cur but the slope-direction gate blocks
+    the demote (flat RSSI = no real fade); the reason carries no predict_demote."""
+    prof = _profile()
+    p = Policy(_cfg(tmp_path, ewma_alpha=1.0, min_samples_warmstart=10_000,
+                    min_samples_predictive=3, predictive_horizon_ticks=3,
+                    predictive_debounce_windows=2), prof)
+    for _ in range(5):
+        for rung in range(3):
+            p.learned_prior.ingest(rssi=-50.0, probed_rung=rung, probe_clean=True,
+                                   operating_mcs=rung, operating_clean=True)
+        p.learned_prior.ingest(rssi=-50.0, probed_rung=3, probe_clean=False,
+                               operating_mcs=2, operating_clean=True)
+    p.leading.state.current_mcs = 5
+    p.tick(_sig(-50.0, ts=1.0))
+    p.tick(_sig(-50.0, ts=1.1))
+    p.close()
+    last = _records(tmp_path)[-1]
+    assert last["predict_gated"] is True
+    assert "predict_demote" not in last["reason"]
+
+
+def test_record_predict_gated_false_when_no_demote_intent(tmp_path):
+    # Cold prior → pc None → no demote intent → predict_gated False.
+    p = Policy(_cfg(tmp_path), _profile())
+    p.tick(_sig(-50.0))
+    p.close()
+    assert _records(tmp_path)[-1]["predict_gated"] is False

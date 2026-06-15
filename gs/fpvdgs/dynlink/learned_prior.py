@@ -47,6 +47,7 @@ class LearnedPriorConfig:
     predictive_horizon_ticks: int = 3
     predictive_debounce_windows: int = 3
     predictive_slope_window_ticks: int = 10   # least-squares RSSI window (1.0 s @ 10 Hz)
+    predictive_min_drop_db: float = 1.0       # min projected RSSI drop over the horizon to demote
     flush_interval_observations: int = 50
     persist_dir: str = "/etc/fpvd/learned"
 
