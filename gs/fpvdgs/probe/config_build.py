@@ -1,6 +1,7 @@
 """Build the self-contained snapshot the ProbeController consumes. One fixed
 probe wfb_rx on kProbePort (matching the drone's probe radio_port). No probe
-config — the probe lifecycle follows dynamicLink."""
+config — the probe lifecycle follows dynamicLink. Measurement knobs
+(rxL/ewmaAlpha/blackoutWindows) are frozen module constants — no config path."""
 from __future__ import annotations
 
 from ..runner_supervisor import resolve_wlans
@@ -13,16 +14,16 @@ PROBE_BLACKOUT_WINDOWS = 10     # consecutive empty windows before per=1.0
 
 
 def make_probe_snapshot(effective: dict) -> dict:
-    """The snapshot for the single probe wfb_rx: fixed port + key/linkId/wlans,
-    plus the per-window measurement tuning (`probe` config block): `rxL` (wfb_rx
-    -l window ms), `ewmaAlpha`, and `blackoutWindows`. These trade airtime vs
-    measurement smoothness — a wider window aggregates more packets per sample."""
-    probe = effective.get("probe", {}) or {}
+    """Snapshot for the single probe wfb_rx: fixed port + key/linkId/wlans.
+    The per-window measurement knobs (rxL, ewmaAlpha, blackoutWindows) are
+    frozen calibration constants — there is no config path (rxL=50 is
+    consistent with selector.probeFreshnessMs=500, so a probed rung never
+    reads stale between wfb_rx stats batches)."""
     return {
         "port": PROBE_PORT,
-        "rxL": int(probe.get("rxL", PROBE_RX_L)),
-        "ewmaAlpha": float(probe.get("ewmaAlpha", PROBE_EWMA_ALPHA)),
-        "blackoutWindows": int(probe.get("blackoutWindows", PROBE_BLACKOUT_WINDOWS)),
+        "rxL": PROBE_RX_L,
+        "ewmaAlpha": PROBE_EWMA_ALPHA,
+        "blackoutWindows": PROBE_BLACKOUT_WINDOWS,
         "key": GS_KEY,
         "linkId": effective.get("link", {}).get("linkId"),
         "wlans": resolve_wlans(effective),

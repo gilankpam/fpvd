@@ -128,11 +128,6 @@ std::vector<ValidationError> validate(const Config& c) {
             dl.safe.n < 1 || dl.safe.n > 32 ||
             dl.safe.k >= dl.safe.n)
             errs.push_back({"dynamicLink.safe.fec", "require 1<=k<n<=32"});
-        if (dl.safe.bandwidth != 10 && dl.safe.bandwidth != 20 &&
-            dl.safe.bandwidth != 40)
-            errs.push_back({"dynamicLink.safe.bandwidth", "must be 10, 20, or 40"});
-        if (dl.safe.txPowerDbm < -10 || dl.safe.txPowerDbm > 30)
-            errs.push_back({"dynamicLink.safe.txPowerDbm", "must be -10..30"});
         if (dl.safe.bitrateKbps <= 0)
             errs.push_back({"dynamicLink.safe.bitrateKbps", "must be > 0"});
         if (dl.safe.overheadPct < 0 || dl.safe.overheadPct > 255)
@@ -142,8 +137,6 @@ std::vector<ValidationError> validate(const Config& c) {
 
         if (dl.healthTimeoutMs < 1000)
             errs.push_back({"dynamicLink.healthTimeoutMs", "must be >= 1000"});
-        if (dl.minIdrIntervalMs < 16)
-            errs.push_back({"dynamicLink.minIdrIntervalMs", "must be >= 16"});
         if (dl.applyStaggerMs < 0 || dl.applyStaggerMs > 500)
             errs.push_back({"dynamicLink.applyStaggerMs", "must be 0..500"});
         if (dl.applySubPaceMs < 0 || dl.applySubPaceMs > 50)
@@ -158,6 +151,17 @@ std::vector<ValidationError> validate(const Config& c) {
             errs.push_back({"dynamicLink.roiQp.floor", "must be <= 0"});
         if (dl.roiQp.step < 1)
             errs.push_back({"dynamicLink.roiQp.step", "must be >= 1"});
+
+        if (dl.compute.minBitrateKbps <= 0 ||
+            dl.compute.maxBitrateKbps <= dl.compute.minBitrateKbps)
+            errs.push_back({"dynamicLink.compute",
+                            "require 0 < minBitrateKbps < maxBitrateKbps"});
+        if (dl.compute.baseRedundancyRatio <= 0.0)
+            errs.push_back({"dynamicLink.compute.baseRedundancyRatio", "must be > 0"});
+        if (dl.compute.blocksPerFrame <= 0.0)
+            errs.push_back({"dynamicLink.compute.blocksPerFrame", "must be > 0"});
+        if (dl.compute.kMin < 1 || dl.compute.kMax < dl.compute.kMin)
+            errs.push_back({"dynamicLink.compute.k", "require 1 <= kMin <= kMax"});
     }
 
     return errs;

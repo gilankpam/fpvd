@@ -9,13 +9,8 @@
 namespace fs = std::filesystem;
 
 static std::unique_ptr<fpvd::Daemon> makeTestDaemon(const fs::path& tmp) {
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
-                  fs::copy_options::overwrite_existing);
     fpvd::DaemonPaths paths{
-        (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string(),
         (tmp / "etc" / "fpvd" / "config.json").string(),
         "tests/fixtures/fake_radio_up_ok.sh",
         (tmp / "etc" / "waybeam.json").string()
@@ -346,15 +341,10 @@ TEST_CASE("handlers: enabling dynamicLink reports dynamicLink in apply restarted
 static std::unique_ptr<fpvd::Daemon> makeTestDaemonWithDlEndpoints(
         const fs::path& tmp, uint16_t listenPort) {
     fs::remove_all(tmp);
-    fs::create_directories(tmp / "rom" / "etc" / "fpvd");
     fs::create_directories(tmp / "etc" / "fpvd");
-    fs::copy_file("tests/fixtures/defaults.json",
-                  tmp / "rom" / "etc" / "fpvd" / "defaults.json",
-                  fs::copy_options::overwrite_existing);
 
     fpvd::DaemonPaths paths{};
-    paths.defaultsPath    = (tmp / "rom" / "etc" / "fpvd" / "defaults.json").string();
-    paths.overlayPath     = (tmp / "etc" / "fpvd" / "config.json").string();
+    paths.configPath      = (tmp / "etc" / "fpvd" / "config.json").string();
     paths.radioUpScript   = "tests/fixtures/fake_radio_up_ok.sh";
     paths.waybeamJsonPath = (tmp / "etc" / "waybeam.json").string();
     paths.dlEndpoints.listenAddr   = "127.0.0.1";
@@ -363,9 +353,9 @@ static std::unique_ptr<fpvd::Daemon> makeTestDaemonWithDlEndpoints(
     paths.dlEndpoints.wfbCtlPort   = 0;
     paths.dlEndpoints.encHost      = "127.0.0.1";
     paths.dlEndpoints.encPort      = 0;
-    paths.dlEndpoints.idrPort      = 0;
+    paths.idrPort = 0;
     paths.dlEndpoints.gsTunnelPort = 0;
-    paths.dlEndpoints.osdMsgPath   = (tmp / "MSPOSD.msg").string();
+    paths.osdMsgPath   = (tmp / "MSPOSD.msg").string();
 
     auto d = std::make_unique<fpvd::Daemon>(paths);
     d->bootstrap(false);

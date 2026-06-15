@@ -48,8 +48,7 @@ def test_validate_effective_ok():
 def _eff(**dl):
     base = {"link": {"channel": 132, "width": 40, "region": "US"},
             "dynamicLink": {"enabled": False, "maxMcs": 5,
-                            "radioProfile": "m8812eu2", "dronePort": 9999,
-                            "tuning": {}}}
+                            "radioProfile": "m8812eu2", "dronePort": 9999}}
     base["dynamicLink"].update(dl)
     return base
 
@@ -126,9 +125,8 @@ def test_validate_effective_rejects_bad_pixelpilot():
 
 
 def test_shipped_defaults_include_pixelpilot_and_validate():
-    import json, pathlib
-    p = pathlib.Path(__file__).resolve().parents[2] / "etc" / "defaults.json"
-    cfg = json.loads(p.read_text())
+    from fpvdgs.config_defaults import default_config
+    cfg = default_config()
     assert "pixelpilot" in cfg
     assert cfg["pixelpilot"]["enabled"] is True
     schema.validate_effective(cfg)  # no raise
@@ -160,6 +158,33 @@ def test_beamforming_rejects_unknown_subkey():
         schema.validate_effective(cfg)
 
 
+def test_validate_effective_accepts_drone_block():
+    schema.validate_effective({"link": {"channel": 132, "region": "US"},
+                               "drone": {"host": "10.5.0.10", "apiPort": 8080}})
+
+
+def test_drone_host_empty_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective({"link": {"channel": 132, "region": "US"},
+                                   "drone": {"host": ""}})
+
+
+def test_drone_apiport_out_of_range_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective({"link": {"channel": 132, "region": "US"},
+                                   "drone": {"apiPort": 0}})
+
+
+def test_patch_rejects_unknown_drone_key():
+    # the old drone.endpoint key is now unknown -> rejected on PATCH
+    with pytest.raises(schema.SchemaError):
+        schema.validate_config_patch({"drone": {"endpoint": "http://x:8080"}})
+
+
+def test_patch_accepts_known_drone_keys():
+    schema.validate_config_patch({"drone": {"host": "10.5.0.10", "apiPort": 8080}})
+
+
 def test_enable_bf_on_incapable_card_rejected():
     schema.set_bf_capable(lambda cfg: False)
     try:
@@ -177,3 +202,47 @@ def test_enable_bf_on_capable_card_ok():
                                             "beamforming": {"enabled": True}}})
     finally:
         schema.set_bf_capable(None)
+
+
+def _dl(**over):
+    base = {"enabled": True, "maxMcs": 5, "radioProfile": "m8812eu2",
+            "dronePort": 9999}
+    base.update(over)
+    return {"link": {"channel": 132, "region": "US", "width": 20},
+            "dynamicLink": base}
+
+
+def test_validate_effective_accepts_flat_dynamic_link():
+    schema.validate_effective(_dl(selector={"probeViableThreshold": 0.9},
+                                  smoothing={"ewmaAlphaRssi": 0.3},
+                                  flightlog={"enabled": True},
+                                  rssiNorm={"enabled": True}))  # no raise
+
+
+def test_selector_probability_out_of_range_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(_dl(selector={"probeViableThreshold": 1.5}))
+
+
+def test_smoothing_alpha_out_of_range_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(_dl(smoothing={"ewmaAlphaRssi": 0}))
+
+
+def test_patch_rejects_unknown_dynamic_link_subkey():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_config_patch({"dynamicLink": {"bogusKnob": 1}})
+
+
+def test_patch_accepts_known_dynamic_link_keys():
+    schema.validate_config_patch({"dynamicLink": {"selector": {}, "maxMcs": 4}})
+
+
+def test_smoothing_alpha_above_one_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(_dl(smoothing={"ewmaAlphaRssi": 1.5}))
+
+
+def test_selector_non_dict_rejected():
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(_dl(selector=0))

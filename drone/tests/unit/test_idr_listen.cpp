@@ -1,6 +1,6 @@
-/* test_dl_idr_listen.cpp — unit tests for IdrListener (ported from test_idr_listen.c). */
+/* test_idr_listen.cpp — unit tests for idr::IdrListener. */
 #include "doctest.h"
-#include "dynlink/idr_listen.hpp"
+#include "idr/idr_listen.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -8,7 +8,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-using namespace fpvd::dynlink;
+using namespace fpvd::idr;
 
 TEST_CASE("idr listener: port 0 disables") {
     IdrListener l("127.0.0.1", 0);

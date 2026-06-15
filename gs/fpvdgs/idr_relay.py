@@ -17,17 +17,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from urllib.parse import urlparse
 
 log = logging.getLogger("fpvdgs.idr_relay")
 
 IDR_PORT = 11223
-
-
-def drone_host_from_endpoint(endpoint, default="10.5.0.10"):
-    if not endpoint:
-        return default
-    return urlparse(endpoint).hostname or default
 
 
 class _IdrRelay(asyncio.DatagramProtocol):

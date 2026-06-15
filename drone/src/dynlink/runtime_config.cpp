@@ -12,11 +12,8 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
     DlRuntimeConfig s{};
 
     s.healthTimeoutMs      = static_cast<uint32_t>(dl.healthTimeoutMs);
-    s.minIdrIntervalMs     = static_cast<uint32_t>(dl.minIdrIntervalMs);
     s.applyStaggerMs       = static_cast<uint32_t>(dl.applyStaggerMs);
     s.applySubPaceMs       = static_cast<uint32_t>(dl.applySubPaceMs);
-    s.osdEnabled           = dl.osd.enabled;
-    s.osdDebugLatency      = dl.osd.debugLatency;
     s.debug                = false;   // no debug field in schema DynamicLink yet
 
     s.roiQp = RoiCurve{
@@ -30,8 +27,6 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
         static_cast<uint8_t> (dl.safe.mcs),
         static_cast<uint8_t> (dl.safe.k),
         static_cast<uint8_t> (dl.safe.n),
-        static_cast<uint8_t> (dl.safe.bandwidth),
-        static_cast<int8_t>  (dl.safe.txPowerDbm),
         static_cast<uint16_t>(dl.safe.bitrateKbps),
     };
     s.safe.overheadPct = static_cast<uint8_t>(dl.safe.overheadPct);
@@ -42,14 +37,14 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
     s.swfecDeadlineMs  = static_cast<uint8_t>(c.link.fec.deadlineMs);
 
     s.bitrate = BitrateEngineConfig{
-        dl.fec.baseRedundancyRatio,    // baseRedundancyRatio
-        dl.fec.blocksPerFrame,         // blocksPerFrame
-        dl.fec.kMin,                   // kMin
-        dl.fec.kMax,                   // kMax
-        dl.bitrate.minBitrateKbps,     // minBitrateKbps
-        dl.bitrate.maxBitrateKbps,     // maxBitrateKbps
-        c.link.mtu,                    // mtuBytes (from link.mtu)
-        c.video.fps,                   // fps (from video.fps)
+        dl.compute.baseRedundancyRatio,
+        dl.compute.blocksPerFrame,
+        dl.compute.kMin,
+        dl.compute.kMax,
+        dl.compute.minBitrateKbps,
+        dl.compute.maxBitrateKbps,
+        c.link.mtu,
+        c.video.fps,
     };
 
     s.stbc          = c.link.stbc;

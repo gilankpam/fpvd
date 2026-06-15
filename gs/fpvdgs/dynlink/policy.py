@@ -24,56 +24,44 @@ log = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
-# Config dataclasses — mirror the §6 gs.yaml layout.
+# Config dataclasses for the probe-driven selector + smoothing/learned-prior/flightlog.
 # ------------------------------------------------------------------
 
 @dataclass
-class GateConfig:
-    """Probe-driven promote + emergency (Channel-B) demote.
+class SelectorConfig:
+    """Probe-driven promote + reactive demote + timing/cadence.
 
     Promote: the `current+1` probe rung must read clean (EWMA success
     >= probe_viable_threshold) and fresh (within probe_freshness_ms) for
-    promote_debounce_windows consecutive ticks. Demote: the kept Channel-B
-    emergency (loss/fec/starvation) plus a video on-air PER breach
-    (video_demote_per on (lost+fec_rec)/(out+lost)).
+    promote_debounce_windows consecutive ticks, and clear the
+    hold_modes_down_ms / min_between_changes_ms cooldowns. Demote: a kept
+    Channel-B emergency (loss/fec/starvation), or a video-PER breach
+    (video_demote_per). starvation_windows is the consecutive-starved-window
+    count before link_starved feeds the emergency demote.
     """
     # Probe-driven promote
-    probe_viable_threshold: float = 0.99   # min EWMA success (1 - per) to climb
-    probe_freshness_ms: float = 500.0      # max age of the probed rung's sample
-    promote_debounce_windows: int = 3      # consecutive clean ticks before a climb
+    probe_viable_threshold: float = 0.99
+    probe_freshness_ms: float = 500.0
+    promote_debounce_windows: int = 3
     # Reactive demote
-    video_demote_per: float = 0.05         # (lost+fec_rec)/(out+lost) demote breach
+    video_demote_per: float = 0.05
     emergency_loss_rate: float = 0.05
     emergency_fec_pressure: float = 0.80
-    # MCS bounds
+    # MCS bound
     max_mcs: int = 7
-    max_mcs_step_up: int = 1
-
-
-@dataclass
-class ProfileSelectionConfig:
-    """Timing/cadence knobs for the dual-gate selector."""
-    hold_fallback_mode_ms: int = 1000
+    # Timing/cadence (promote cooldowns; demotes bypass them)
     hold_modes_down_ms: int = 2000
     min_between_changes_ms: int = 200
-    fast_downgrade: bool = True
-    upward_confidence_loops: int = 4
+    # Total-blackout failsafe: consecutive starved windows before link_starved
+    # feeds the emergency demote (10 Hz → 5 windows = 0.5 s).
+    starvation_windows: int = 5
 
 
 @dataclass
 class PolicyConfig:
-    gate: GateConfig = field(default_factory=GateConfig)
-    selection: ProfileSelectionConfig = field(
-        default_factory=ProfileSelectionConfig
-    )
+    selector: SelectorConfig = field(default_factory=SelectorConfig)
     learned_prior: LearnedPriorConfig = field(default_factory=LearnedPriorConfig)
     flightlog: FlightLogConfig = field(default_factory=FlightLogConfig)
-    # Total-blackout failsafe: this many consecutive starved windows
-    # (packet_rate_w < starvation_threshold while session active) feeds
-    # the selector's link_starved emergency demote. Intentionally short —
-    # at 10 Hz, 5 windows = 0.5 s — because starvation is unambiguous
-    # and the alternative is letting the link sit silent.
-    starvation_windows: int = 5
 
 
 # ------------------------------------------------------------------
@@ -110,17 +98,11 @@ class LeadingSelector:
     downgrade, bypassing the promote rate limit and hold timers.
     """
 
-    def __init__(
-        self,
-        gate: GateConfig,
-        sel: ProfileSelectionConfig,
-    ):
-        self.gate = gate
-        self.sel = sel
-        # gate.max_mcs is the operator's runtime cap (schema-bounded 0..7).
-        cap = int(gate.max_mcs)
+    def __init__(self, cfg: SelectorConfig):
+        self.cfg = cfg
+        cap = int(cfg.max_mcs)
         if cap < 0:
-            raise ValueError(f"gate.max_mcs={gate.max_mcs} excludes every MCS")
+            raise ValueError(f"max_mcs={cfg.max_mcs} excludes every MCS")
         self._cap_mcs = cap
         # Boot at the safe-default MCS (1) just like the prior loop.
         start_mcs = 1
@@ -138,8 +120,8 @@ class LeadingSelector:
         self, loss_rate: float, fec_pressure: float, link_starved: bool
     ) -> bool:
         return (
-            loss_rate >= self.gate.emergency_loss_rate
-            or fec_pressure >= self.gate.emergency_fec_pressure
+            loss_rate >= self.cfg.emergency_loss_rate
+            or fec_pressure >= self.cfg.emergency_fec_pressure
             or link_starved
         )
 
@@ -190,15 +172,15 @@ class LeadingSelector:
             )
             self._reasons = reasons
             return (st.current_mcs, st.current_mcs != prev)
-        if loss_rate >= self.gate.video_demote_per:
+        if loss_rate >= self.cfg.video_demote_per:
             commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
             self._reasons = reasons
             return (st.current_mcs, st.current_mcs != prev)
 
         # --- Rate limit (promotes only; emergencies above bypass it) ---
-        within_hold = (ts_ms - st.last_change_time_ms) < self.sel.hold_modes_down_ms
+        within_hold = (ts_ms - st.last_change_time_ms) < self.cfg.hold_modes_down_ms
         within_rate = (
-            (ts_ms - st.last_change_time_ms) < self.sel.min_between_changes_ms
+            (ts_ms - st.last_change_time_ms) < self.cfg.min_between_changes_ms
         )
 
         # --- Promote: clean+fresh current+1 for promote_debounce_windows ---
@@ -212,16 +194,16 @@ class LeadingSelector:
         fresh = (
             rung is not None
             and rung.get("ageMs") is not None
-            and rung["ageMs"] <= self.gate.probe_freshness_ms
+            and rung["ageMs"] <= self.cfg.probe_freshness_ms
         )
         clean = (
             fresh
             and rung.get("per") is not None
-            and (1.0 - rung["per"]) >= self.gate.probe_viable_threshold
+            and (1.0 - rung["per"]) >= self.cfg.probe_viable_threshold
         )
         if clean:
             self._promote_clean += 1
-            if (self._promote_clean >= self.gate.promote_debounce_windows
+            if (self._promote_clean >= self.cfg.promote_debounce_windows
                     and not within_hold and not within_rate):
                 commit(target, f"probe_promote mcs{target} per={rung['per']:.4f}")
         else:
@@ -266,7 +248,7 @@ class Policy:
         # cold-start table was removed; a cold prior just lets the probe
         # climb from boot.)
         self._cold_started = False
-        self.leading = LeadingSelector(cfg.gate, cfg.selection)
+        self.leading = LeadingSelector(cfg.selector)
         # Per-window link_starved_w can flicker on brief packet-rate
         # dips inside an otherwise-healthy bursty stream. Require N
         # consecutive starved windows before treating the link as
@@ -275,13 +257,9 @@ class Policy:
         # glitches). At 10 Hz, starvation_windows=5 = 0.5 s of below-
         # threshold packet rate before declaring blackout.
         self._starvation_count: int = 0
-        # Phase 4: learned per-card prior + flight log. Keyed by the
-        # operator-set dynamicLink.radioProfile string. GS-local; the live
-        # probe stays authoritative.
-        self.learned_prior = (
-            LearnedPrior(profile_name, cfg.learned_prior)
-            if cfg.learned_prior.enabled else None
-        )
+        # Learned per-card prior (always-on), keyed by the operator-set
+        # dynamicLink.radioProfile; GS-local, the live probe stays authoritative.
+        self.learned_prior = LearnedPrior(profile_name, cfg.learned_prior)
         self._prev_rssi: float | None = None
         self._predict_demote_count = 0
         self._last_healthy_mono = None   # monotonic ts of last non-starved tick (flight-gap roll)
@@ -298,7 +276,7 @@ class Policy:
         else:
             self._starvation_count = 0
         sustained_starved = (
-            self._starvation_count >= self.cfg.starvation_windows
+            self._starvation_count >= self.cfg.selector.starvation_windows
         )
 
         # Warm-start seed (one-shot). Uses the learned per-card curve ONLY —
@@ -307,8 +285,7 @@ class Policy:
         # cold the probe climbs safely from the boot MCS. Only raises the boot
         # MCS, runs before select().
         if not self._cold_started and signals.rssi is not None:
-            seed = (self.learned_prior.warmstart_seed(signals.rssi)
-                    if self.learned_prior is not None else None)
+            seed = self.learned_prior.warmstart_seed(signals.rssi)
             if seed is not None and seed > self.leading.state.current_mcs:
                 self.leading.state.current_mcs = min(seed, self.leading._cap_mcs)
             self._cold_started = True
@@ -322,7 +299,7 @@ class Policy:
                  else (0.0 if self._prev_rssi is None
                        else signals.rssi - self._prev_rssi))
         pc = None
-        if (self.learned_prior is not None and signals.rssi is not None):
+        if signals.rssi is not None:
             pc = self.learned_prior.predictive_ceiling(signals.rssi, slope)
             cur = self.leading.state.current_mcs
             if pc is not None and pc < cur:
@@ -350,15 +327,15 @@ class Policy:
 
         # Ingest one observation for the learned prior (spec §4): the probe
         # rung verdict (current+1) and the operating-rung health.
-        if self.learned_prior is not None and signals.rssi is not None:
+        if signals.rssi is not None:
             target = self.leading.state.current_mcs + 1
             rung = probe_snap or {}
             rung = rung.get("mcs", {}).get(str(target)) if target <= self.leading._cap_mcs else None
             probe_clean = bool(
                 rung and rung.get("per") is not None
-                and (1.0 - rung["per"]) >= self.cfg.gate.probe_viable_threshold
+                and (1.0 - rung["per"]) >= self.cfg.selector.probe_viable_threshold
             )
-            operating_clean = signals.residual_loss_w < self.cfg.gate.video_demote_per
+            operating_clean = signals.residual_loss_w < self.cfg.selector.video_demote_per
             self.learned_prior.ingest(
                 rssi=signals.rssi,
                 probed_rung=(target if rung is not None else None),
@@ -396,7 +373,7 @@ class Policy:
             "fec_work": signals.fec_work,
             "link_starved": sustained_starved,
             "ceiling": (self.learned_prior.ceiling(signals.rssi)
-                        if self.learned_prior and signals.rssi is not None else None),
+                        if signals.rssi is not None else None),
             "probe": probe_log,
             "pc": pc,
             "slope": slope,
@@ -419,6 +396,5 @@ class Policy:
     def close(self) -> None:
         """Flush the learned prior + close the flight log. Called by the
         controller when the dynamicLink loop tears down."""
-        if self.learned_prior is not None:
-            self.learned_prior.flush()
+        self.learned_prior.flush()
         self.flightlog.close()

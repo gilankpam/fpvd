@@ -1,43 +1,44 @@
 #include "doctest.h"
 #include "config/store.hpp"
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 namespace fs = std::filesystem;
 
-TEST_CASE("store: load defaults from file") {
-    auto cfg = fpvd::loadDefaults("tests/fixtures/defaults.json");
-    CHECK(cfg.link.channel == 161);
-    CHECK(cfg.video.bitrate == 8192);
-    CHECK(cfg.telemetry.router == "msposd");
+using fpvd::Config;
+
+
+TEST_CASE("loadEffective: no file yields code defaults") {
+    Config c = fpvd::loadEffective("/no/such/config.json");
+    CHECK(c.dynamicLink.healthTimeoutMs == 10000);   // schema default
+    CHECK(c.link.width == 20);
 }
 
-TEST_CASE("store: loadDefaults throws on missing file") {
-    CHECK_THROWS_AS(fpvd::loadDefaults("/no/such/file.json"),
+TEST_CASE("loadEffective: present key overrides, missing key defaults") {
+    auto tmp = std::filesystem::temp_directory_path() / "fpvd-cfg-load.json";
+    std::ofstream(tmp) << R"({"dynamicLink":{"healthTimeoutMs":7000}})";
+    Config c = fpvd::loadEffective(tmp.string());
+    CHECK(c.dynamicLink.healthTimeoutMs == 7000);    // from file
+    CHECK(c.dynamicLink.applyStaggerMs == 50);       // missing -> default
+    std::filesystem::remove(tmp);
+}
+
+TEST_CASE("loadEffective: malformed config throws") {
+    CHECK_THROWS_AS(fpvd::loadEffective("tests/fixtures/malformed.json"),
                     fpvd::StoreError);
 }
 
-TEST_CASE("store: loadDefaults throws on malformed JSON") {
-    CHECK_THROWS_AS(fpvd::loadDefaults("tests/fixtures/malformed.json"),
-                    fpvd::StoreError);
-}
-
-TEST_CASE("store: sparse overlay merges into defaults") {
-    auto cfg = fpvd::loadEffective(
-        "tests/fixtures/defaults.json",
-        "tests/fixtures/overlay_bitrate_only.json");
-    // Overlay only changed video.bitrate.
-    CHECK(cfg.video.bitrate == 12000);
-    // Everything else from defaults.
-    CHECK(cfg.video.fps == 60);
-    CHECK(cfg.link.channel == 161);
-}
-
-TEST_CASE("store: missing overlay returns defaults unchanged") {
-    auto cfg = fpvd::loadEffective(
-        "tests/fixtures/defaults.json",
-        "/no/such/overlay.json");
-    CHECK(cfg.video.bitrate == 8192);
+TEST_CASE("unknownConfigKeys flags strays but not services entries") {
+    nlohmann::json cfg = {
+        {"dynamicLink", {{"bogusKnob", 1}}},
+        {"services", {{"myproc", {{"exec", "/bin/true"}}}}},
+        {"strayTop", true},
+    };
+    auto unknown = fpvd::unknownConfigKeys(cfg);
+    CHECK(std::find(unknown.begin(), unknown.end(), "dynamicLink.bogusKnob") != unknown.end());
+    CHECK(std::find(unknown.begin(), unknown.end(), "strayTop") != unknown.end());
+    CHECK(std::find(unknown.begin(), unknown.end(), "services.myproc") == unknown.end());
 }
 
 TEST_CASE("store: deepMergeJson merges nested objects") {
@@ -58,22 +59,6 @@ TEST_CASE("store: deepMergeJson replaces arrays wholesale") {
     CHECK(m["arr"] == json::array({9}));
 }
 
-TEST_CASE("store: computeOverlay returns only diff") {
-    using nlohmann::json;
-    json defaults = {{"a", 1}, {"b", {{"x", 1}, {"y", 2}}}};
-    json effective = {{"a", 1}, {"b", {{"x", 1}, {"y", 99}}}};
-    auto ov = fpvd::computeOverlay(defaults, effective);
-    CHECK(ov == json{{"b", {{"y", 99}}}});
-}
-
-TEST_CASE("store: computeOverlay handles arrays as wholesale replace") {
-    using nlohmann::json;
-    json defaults = {{"arr", {1, 2, 3}}};
-    json effective = {{"arr", {1, 2, 4}}};
-    auto ov = fpvd::computeOverlay(defaults, effective);
-    CHECK(ov == json{{"arr", {1, 2, 4}}});
-}
-
 TEST_CASE("store: atomicWriteJson writes file and survives") {
     auto tmp = fs::temp_directory_path() / "fpvd_atomic_test.json";
     fs::remove(tmp);
@@ -87,10 +72,16 @@ TEST_CASE("store: atomicWriteJson writes file and survives") {
     fs::remove(tmp);
 }
 
-TEST_CASE("store: defaults file carries dynamicLink section") {
-    auto c = fpvd::loadEffective("tests/fixtures/defaults.json",
-                                  "/no/such/path");
+TEST_CASE("store: code defaults carry dynamicLink section") {
+    auto c = fpvd::loadEffective("/no/such/path");
     CHECK(c.dynamicLink.enabled == false);
     CHECK(c.dynamicLink.safe.mcs == 1);
     CHECK(c.dynamicLink.roiQp.thresholdKbps == 6000);
+}
+
+TEST_CASE("loadEffective: wrong-typed known key throws StoreError") {
+    auto tmp = std::filesystem::temp_directory_path() / "fpvd-cfg-wrongtype.json";
+    std::ofstream(tmp) << R"({"link":{"channel":"not-a-number"}})";
+    CHECK_THROWS_AS(fpvd::loadEffective(tmp.string()), fpvd::StoreError);
+    std::filesystem::remove(tmp);
 }

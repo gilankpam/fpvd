@@ -33,7 +33,7 @@ struct adl_serializer<std::optional<T>> {
 namespace fpvd {
 
 struct Fec {
-    std::string mode{"rs"};   // "rs" | "swfec" — mode flip restarts wfb_tx (-z is constructor-time)
+    std::string mode{"swfec"};   // "rs" | "swfec" — mode flip restarts wfb_tx (-z is constructor-time)
     int k{8};                 // rs-mode block geometry: data fragments per block
     int n{12};                //   ...and total fragments (k data + n-k parity)
     int overheadPct{50};      // swfec-mode repair budget, 0..255 (uint8 on the control wire)
@@ -51,7 +51,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beamforming, enabled, remoteMac,
                                                 ackTimeout, intervalMs)
 
 struct Link {
-    int channel{161};
+    int channel{132};
     int width{20};
     int txPowerDbm{20};
     int mcs{2};
@@ -116,21 +116,11 @@ struct DynamicLinkSafe {
     int n{12};
     int overheadPct{100};   // swfec-mode safe recovery: more repair at the low rung (0..255, uint8 wire)
     int deadlineMs{30};     // 1..255 (uint8 wire)
-    int bandwidth{20};
-    int txPowerDbm{20};
     int bitrateKbps{2000};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkSafe, mcs, k, n,
                                                overheadPct, deadlineMs,
-                                               bandwidth, txPowerDbm,
                                                bitrateKbps)
-
-struct DynamicLinkOsd {
-    bool enabled{true};
-    bool debugLatency{false};
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkOsd, enabled,
-                                               debugLatency)
 
 struct DynamicLinkRoiQp {
     int thresholdKbps{6000};
@@ -142,40 +132,39 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkRoiQp,
                                                thresholdKbps, lowAnchorKbps,
                                                floor, step)
 
-struct DynamicLinkBitrate {
-    int minBitrateKbps{1000};
-    int maxBitrateKbps{24000};
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkBitrate,
-                                               minBitrateKbps, maxBitrateKbps)
-
-struct DynamicLinkFec {
-    double baseRedundancyRatio{0.5};   // n/k = 1 + ratio = 1.5 (= 8/12 data fraction)
+struct DynamicLinkCompute {
+    int    minBitrateKbps{1000};
+    int    maxBitrateKbps{24000};
+    double baseRedundancyRatio{0.5};   // n/k = 1 + ratio (= 8/12 data fraction)
     double blocksPerFrame{2.0};
     int    kMin{2};
     int    kMax{50};
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkFec,
-                                               baseRedundancyRatio,
-                                               blocksPerFrame, kMin, kMax)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkCompute,
+                                                minBitrateKbps, maxBitrateKbps,
+                                                baseRedundancyRatio, blocksPerFrame,
+                                                kMin, kMax)
 
 struct DynamicLink {
     bool enabled{false};
     int healthTimeoutMs{10000};
-    int minIdrIntervalMs{500};
     int applyStaggerMs{50};
     int applySubPaceMs{5};
-    DynamicLinkOsd osd{};
-    DynamicLinkRoiQp roiQp{};
-    DynamicLinkSafe safe{};
-    DynamicLinkBitrate bitrate{};
-    DynamicLinkFec     fec{};
+    DynamicLinkRoiQp  roiQp{};
+    DynamicLinkSafe   safe{};
+    DynamicLinkCompute compute{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled,
-                                               healthTimeoutMs,
-                                               minIdrIntervalMs, applyStaggerMs,
+                                               healthTimeoutMs, applyStaggerMs,
                                                applySubPaceMs,
-                                               osd, roiQp, safe, bitrate, fec)
+                                               roiQp, safe, compute)
+
+// OSD overlay (msposd message file). Top-level: the OSD is rendered whether or
+// not the dynamic link is enabled, so its enable flag lives outside dynamicLink.
+struct Osd {
+    bool enabled{true};
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Osd, enabled)
 
 struct Service {
     bool enabled{true};
@@ -194,11 +183,12 @@ struct Config {
     Image image{};
     Telemetry telemetry{};
     Recording recording{};
+    Osd osd{};
     DynamicLink dynamicLink{};
     std::map<std::string, Service> services{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, link, video, image,
-                                               telemetry, recording,
+                                               telemetry, recording, osd,
                                                dynamicLink, services)
 
 } // namespace fpvd

@@ -11,11 +11,7 @@ struct SafeDefaults {
     uint8_t  mcs;
     uint8_t  k;
     uint8_t  n;
-    uint8_t  bandwidth;
-    int8_t   txPowerDbm;
     uint16_t bitrateKbps;
-    // swfec-mode safe recovery params — appended last + defaulted so existing
-    // positional aggregate inits keep compiling — do not reorder.
     uint8_t  overheadPct{100};
     uint8_t  deadlineMs{30};
 };
@@ -33,14 +29,11 @@ struct BitrateEngineConfig {
 
 struct DlRuntimeConfig {
     uint32_t healthTimeoutMs;
-    uint32_t minIdrIntervalMs;
     uint32_t applyStaggerMs;
     uint32_t applySubPaceMs;
     bool     swfec{false};        // link.fec.mode == "swfec"
     uint8_t  swfecOverheadPct{50};
     uint8_t  swfecDeadlineMs{30};
-    bool     osdEnabled;
-    bool     osdDebugLatency;
     bool     debug;
     RoiCurve     roiQp;
     SafeDefaults safe;
@@ -75,9 +68,9 @@ struct Endpoints {
     std::string  listenAddr{"0.0.0.0"};    uint16_t listenPort{9999};
     std::string  wfbCtlAddr{"127.0.0.1"};  uint16_t wfbCtlPort{8000};
     std::string  encHost{"127.0.0.1"};     uint16_t encPort{80};
-    std::string  idrAddr{"0.0.0.0"};       uint16_t idrPort{11223};
     std::string  gsTunnelAddr{"10.5.0.1"}; uint16_t gsTunnelPort{5801};
-    std::string  osdMsgPath{"/tmp/MSPOSD.msg"};
+    // OSD message-file path moved to the daemon-owned osd writer (osd/). This
+    // is the control-loop tick cadence (named for its original OSD-refresh use).
     uint32_t     osdUpdateIntervalMs{1000};
 };
 

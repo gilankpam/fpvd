@@ -1,6 +1,7 @@
 """fpvd supervisor: owns config + HTTP API + runner supervision. Pure stdlib."""
 
 import argparse
+import json
 import logging
 import signal
 import sys
@@ -22,10 +23,11 @@ from .api import Api, make_http_server
 from .beamforming import BeamformingController
 from .beamforming_armer import BeamformingArmer
 from .config import ConfigStore
+from .config_defaults import default_config
 from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot
-from .idr_relay import IdrRelay, drone_host_from_endpoint
+from .idr_relay import IdrRelay
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .probe.config_build import make_probe_snapshot
 from .probe.controller import ProbeController
@@ -78,10 +80,10 @@ class App:
         self.runner.shutdown()
 
 
-def build_app(defaults_path, overlay_path, cfg_out, host, port,
+def build_app(config_path, cfg_out, host, port,
               runner_cmd, ready_port=8103, ready_timeout=10.0, log_path=None,
               probe_spawn=None):
-    store = ConfigStore.load(defaults_path, overlay_path)
+    store = ConfigStore.load(config_path)
     effective = store.effective()
     schema.validate_effective(effective)
 
@@ -94,12 +96,12 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
                               wlans=wlans, ready_port=ready_port,
                               ready_timeout=ready_timeout, log_path=log_path)
 
-    endpoint = effective.get("drone", {}).get("endpoint", "http://10.5.0.10:8080")
-    drone = DroneClient(endpoint)
+    drone_cfg = effective.get("drone", {})
+    drone_host = drone_cfg.get("host", "10.5.0.10")
+    drone = DroneClient(f"http://{drone_host}:{int(drone_cfg.get('apiPort', 8080))}")
 
     idr_cfg = effective.get("idrForward", {})
-    idr_relay = IdrRelay(drone_host_from_endpoint(endpoint),
-                         port=int(idr_cfg.get("port", 11223)))
+    idr_relay = IdrRelay(drone_host, port=int(idr_cfg.get("port", 11223)))
 
     probe_ctrl = ProbeController(make_probe_snapshot(effective), spawn=probe_spawn)
 
@@ -173,8 +175,9 @@ def build_app(defaults_path, overlay_path, cfg_out, host, port,
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="fpvd")
-    p.add_argument("--defaults", default="/etc/fpvd/defaults.json")
     p.add_argument("--config", default="/etc/fpvd/config.json")
+    p.add_argument("--dump-config", action="store_true",
+                   help="print the full default config as JSON and exit")
     p.add_argument("--cfg-out", default="/etc/wifibroadcast.cfg")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8080)
@@ -183,9 +186,13 @@ def main(argv=None):
                    help="runner command (default: this python -m fpvdgs.runner)")
     args = p.parse_args(argv)
 
+    if args.dump_config:
+        print(json.dumps(default_config(), indent=2))
+        return
+
     runner_cmd = (args.runner.split() if args.runner
                   else [sys.executable, "-m", "fpvdgs.runner"])
-    app = build_app(args.defaults, args.config, args.cfg_out, args.host, args.port,
+    app = build_app(args.config, args.cfg_out, args.host, args.port,
                     runner_cmd, log_path=args.log)
 
     def _on_sigterm(signum, frame):

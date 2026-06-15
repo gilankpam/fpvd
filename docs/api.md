@@ -37,7 +37,7 @@ The daemon maintains two views of the configuration:
 
 `GET /config` returns effective by default and pending with `?pending=true`.
 
-`POST /apply` validates pending, persists it as a sparse overlay over the firmware baseline, and restarts only the affected subsystems.
+`POST /apply` validates pending, persists the full config to `/etc/fpvd/config.json`, and restarts only the affected subsystems.
 
 ---
 
@@ -73,7 +73,7 @@ curl http://127.0.0.1:8080/healthz
 
 ### GET /defaults
 
-Returns the firmware baseline configuration — the values burned into `/rom/etc/fpvd/defaults.json` at build time. This is the starting point before any user overlay is applied. Use it to show "reset to defaults" previews or to build a diff display.
+Returns the code-default configuration — the values baked into the `Config{}` struct at compile time. There is no `/rom/etc/fpvd/defaults.json` file; the daemon serialises `Config{}` directly and returns it. This is the starting point before any user overlay is applied. Use it to show "reset to defaults" previews or to build a diff display.
 
 **Request body:** none
 
@@ -93,24 +93,26 @@ curl http://127.0.0.1:8080/defaults
 
 ```json
 {
-  "link": {"channel": 161, "width": 20, "txPowerDbm": 20, "mcs": 2,
-           "fec": {"k": 8, "n": 12}, "stbc": false, "ldpc": false,
+  "link": {"channel": 132, "width": 20, "txPowerDbm": 20, "mcs": 2,
+           "fec": {"mode": "swfec", "k": 8, "n": 12, "overheadPct": 50, "deadlineMs": 30},
+           "stbc": true, "ldpc": true,
            "linkId": 7669206, "mtu": 1500, "wlanAdapter": null},
   "video": {"codec": "h265", "resolution": "1920x1080", "fps": 60,
             "bitrate": 8192, "rcMode": "cbr", "gopSize": 1.0, "qpDelta": -4,
+            "sensorBin": "",
             "roi": {"enabled": true, "qp": 0, "center": 0.4, "steps": 2}},
   "image": {"mirror": false, "flip": false, "rotate": 0},
   "telemetry": {"router": "msposd", "serial": "ttyS2", "osdFps": 20, "baud": 115200},
   "recording": {"enabled": false, "format": "ts",
                 "mode": "mirror", "maxSeconds": 300, "maxMB": 500},
+  "osd": {"enabled": true},
   "dynamicLink": {
     "enabled": false, "healthTimeoutMs": 10000,
-    "interleavingSupported": true, "minIdrIntervalMs": 500,
-    "applyStaggerMs": 50, "applySubPaceMs": 5, "mavlinkEnable": true,
-    "osd": {"enabled": true, "debugLatency": false},
+    "applyStaggerMs": 50, "applySubPaceMs": 5,
     "roiQp": {"thresholdKbps": 6000, "lowAnchorKbps": 2000, "floor": -24, "step": 3},
-    "safe": {"mcs": 1, "k": 8, "n": 12, "depth": 1,
-             "bandwidth": 20, "txPowerDbm": 20, "bitrateKbps": 2000}
+    "safe": {"mcs": 1, "k": 8, "n": 12, "overheadPct": 100, "deadlineMs": 30, "bitrateKbps": 2000},
+    "compute": {"minBitrateKbps": 1000, "maxBitrateKbps": 24000,
+                "baseRedundancyRatio": 0.5, "blocksPerFrame": 2.0, "kMin": 2, "kMax": 50}
   },
   "services": {}
 }
@@ -187,8 +189,9 @@ curl -X PATCH http://127.0.0.1:8080/config \
 
 ```jsonc
 {
-  "link": {"channel": 161, "width": 20, "txPowerDbm": 20, "mcs": 2,
-           "fec": {"k": 8, "n": 12}, "stbc": false, "ldpc": false,
+  "link": {"channel": 132, "width": 20, "txPowerDbm": 20, "mcs": 2,
+           "fec": {"mode": "swfec", "k": 8, "n": 12, "overheadPct": 50, "deadlineMs": 30},
+           "stbc": true, "ldpc": true,
            "linkId": 7669206, "mtu": 1500, "wlanAdapter": null},
   "video": {"codec": "h265", "resolution": "1920x1080", "fps": 90,
             "bitrate": 12000, "rcMode": "cbr", "gopSize": 1.0, "qpDelta": -4,
@@ -219,7 +222,7 @@ curl -X PATCH http://127.0.0.1:8080/config \
 
 ### POST /apply
 
-Commits the pending configuration to effective, persists the user overlay, and restarts only the subsystems affected by the change. This is the single action that makes staged changes take effect on the drone.
+Commits the pending configuration to effective, persists the full config to `/etc/fpvd/config.json`, and restarts only the subsystems affected by the change. This is the single action that makes staged changes take effect on the drone.
 
 Affected subsystems are determined by which fields changed:
 
@@ -272,7 +275,7 @@ curl -X POST http://127.0.0.1:8080/apply
 
 ### POST /reset
 
-Discards the user overlay file and resets pending to the firmware baseline (same as `GET /defaults`). Does **not** call `POST /apply` — the effective configuration and running processes are unchanged until the client calls apply.
+Removes `/etc/fpvd/config.json` and resets pending to the code defaults (same as `GET /defaults`). Does **not** call `POST /apply` — the effective configuration and running processes are unchanged until the client calls apply.
 
 **Request body:** none
 
@@ -286,7 +289,7 @@ Discards the user overlay file and resets pending to the firmware baseline (same
 
 | Code | Meaning |
 |------|---------|
-| 200  | Overlay discarded; pending is now the firmware baseline. |
+| 200  | `/etc/fpvd/config.json` removed; pending is now the code defaults. |
 
 **Example**
 
@@ -385,16 +388,19 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 
 ```jsonc
 "link": {
-  "channel": 161,       // integer, 1..200 — Wi-Fi channel number
-  "width": 20,          // integer, 20 or 40 — channel width in MHz
+  "channel": 132,       // integer, 1..200 — Wi-Fi channel number
+  "width": 20,          // integer, 10, 20, or 40 — channel width in MHz
   "txPowerDbm": 20,     // integer, -10..30 — TX power in dBm (converted x100 to mBm at the radio edge)
   "mcs": 2,             // integer, 0..7 — MCS index
   "fec": {
-    "k": 8,             // integer, 1..31 — FEC data shards (k < n, n ≤ 32)
-    "n": 12             // integer, 2..32 — FEC total shards (n > k, n ≤ 32)
+    "mode": "swfec",    // string — "rs" or "swfec"
+    "k": 8,             // integer, 1..31 — FEC data shards (k < n, n ≤ 32; rs mode)
+    "n": 12,            // integer, 2..32 — FEC total shards (n > k, n ≤ 32; rs mode)
+    "overheadPct": 50,  // integer, 0..255 — swfec repair budget
+    "deadlineMs": 30    // integer, 1..255 — swfec recovery window
   },
-  "stbc": false,        // boolean — enable STBC
-  "ldpc": false,        // boolean — enable LDPC
+  "stbc": true,         // boolean — enable STBC
+  "ldpc": true,         // boolean — enable LDPC
   "linkId": 7669206,    // integer — wfb-ng link ID (must match GS)
   "mtu": 1500,          // integer — packet MTU in bytes
   "wlanAdapter": null   // string or null — force a specific wlan interface name;
@@ -404,14 +410,17 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 
 | Field | Type | Default | Valid values |
 |-------|------|---------|--------------|
-| `channel` | integer | `161` | 1 – 200 |
-| `width` | integer | `20` | `20` or `40` |
+| `channel` | integer | `132` | 1 – 200 |
+| `width` | integer | `20` | `10`, `20`, or `40` |
 | `txPowerDbm` | integer | `20` | -10 – 30 |
 | `mcs` | integer | `2` | 0 – 7 |
+| `fec.mode` | string | `"swfec"` | `"rs"` or `"swfec"` |
 | `fec.k` | integer | `8` | 1 – 31, must be < `fec.n` |
 | `fec.n` | integer | `12` | 2 – 32, must be > `fec.k` |
-| `stbc` | boolean | `false` | — |
-| `ldpc` | boolean | `false` | — |
+| `fec.overheadPct` | integer | `50` | 0 – 255 |
+| `fec.deadlineMs` | integer | `30` | 1 – 255 |
+| `stbc` | boolean | `true` | — |
+| `ldpc` | boolean | `true` | — |
 | `linkId` | integer | `7669206` | — |
 | `mtu` | integer | `1500` | — |
 | `wlanAdapter` | string \| null | `null` | interface name or `null` |
@@ -510,17 +519,10 @@ Controls the on-drone `dl-applier` process from the `wfbng-dynamic-link` project
 
 ```jsonc
 "dynamicLink": {
-  "enabled": false,              // boolean — start the dl-applier process
+  "enabled": false,              // boolean — arm the dynamic-link applier
   "healthTimeoutMs": 10000,      // integer, >= 1000 — watchdog timeout in ms
-  "interleavingSupported": true, // boolean — whether the GS supports interleaving
-  "minIdrIntervalMs": 500,       // integer, >= 16 — minimum IDR request interval in ms
   "applyStaggerMs": 50,          // integer, 0..500 — stagger between command batches in ms
   "applySubPaceMs": 5,           // integer, 0..50 — pacing between sub-commands in ms
-  "mavlinkEnable": true,         // boolean — send MAVLink STATUSTEXT updates
-  "osd": {
-    "enabled": true,             // boolean — push link-quality data to OSD
-    "debugLatency": false        // boolean — include latency debug info in OSD messages
-  },
   "roiQp": {
     // ROI-QP curve: maps current bitrate onto a QP delta for the center ROI region.
     // thresholdKbps is the high-bitrate anchor; lowAnchorKbps is the low-bitrate anchor.
@@ -531,30 +533,36 @@ Controls the on-drone `dl-applier` process from the `wfbng-dynamic-link` project
     "step": 3                    // integer, >= 1 — QP step per curve segment
   },
   "safe": {
-    // Per-airframe failsafe ceilings: dl-applier will not exceed these values
-    // regardless of what the ground-station controller requests.
-    "mcs": 1,           // integer, 0..7 — maximum MCS index dl-applier may set
-    "k": 8,             // integer, 1..31 — maximum FEC k shard count (k < n, n ≤ 32)
-    "n": 12,            // integer, 2..32 — maximum FEC n shard count (n > k, n ≤ 32)
-    "depth": 1,         // integer, 1..8 — wfb-ng block depth
-    "bandwidth": 20,    // integer, 20 or 40 — maximum channel width in MHz
-    "txPowerDbm": 20,   // integer, -10..30 — maximum TX power in dBm
-    "bitrateKbps": 2000 // integer, > 0 — maximum video bitrate in kbps
+    // Safe-mode floor: applied when the GS falls back to the lowest rung.
+    // bandwidth and txPowerDbm are NOT in safe — they are derived (from link.width
+    // and the per-MCS TX-power curve in txpower_curve.hpp).
+    "mcs": 1,              // integer, 0..7 — safe-mode MCS
+    "k": 8,                // integer, 1..31 — safe-mode FEC k (k < n, n ≤ 32)
+    "n": 12,               // integer, 2..32 — safe-mode FEC n (n > k, n ≤ 32)
+    "overheadPct": 100,    // integer, 0..255 — swfec repair budget at safe rung
+    "deadlineMs": 30,      // integer, 1..255 — swfec recovery window at safe rung
+    "bitrateKbps": 2000    // integer, > 0 — safe-mode video bitrate in kbps
+  },
+  "compute": {
+    // Bitrate and FEC geometry derivation knobs (rarely need tuning).
+    "minBitrateKbps": 1000,        // integer, > 0 — floor for computed video bitrate
+    "maxBitrateKbps": 24000,       // integer, > minBitrateKbps — ceiling for computed video bitrate
+    "baseRedundancyRatio": 0.5,    // number, > 0 — n/k − 1 (e.g. 0.5 → k=8, n=12)
+    "blocksPerFrame": 2.0,         // number, > 0 — FEC blocks per video frame
+    "kMin": 2,                     // integer, >= 1 — minimum FEC k
+    "kMax": 50                     // integer, >= kMin — maximum FEC k
   }
 }
 ```
+
+> **`osd.enabled` is a top-level key** (`"osd": {"enabled": true}`), not inside `dynamicLink`. The OSD overlay runs regardless of whether dynamic-link is armed.
 
 | Field | Type | Default | Valid values |
 |-------|------|---------|--------------|
 | `enabled` | boolean | `false` | — |
 | `healthTimeoutMs` | integer | `10000` | >= 1000 |
-| `interleavingSupported` | boolean | `true` | — |
-| `minIdrIntervalMs` | integer | `500` | >= 16 |
 | `applyStaggerMs` | integer | `50` | 0 – 500 |
 | `applySubPaceMs` | integer | `5` | 0 – 50 |
-| `mavlinkEnable` | boolean | `true` | — |
-| `osd.enabled` | boolean | `true` | — |
-| `osd.debugLatency` | boolean | `false` | — |
 | `roiQp.thresholdKbps` | integer | `6000` | > `roiQp.lowAnchorKbps` |
 | `roiQp.lowAnchorKbps` | integer | `2000` | > 0 |
 | `roiQp.floor` | integer | `-24` | <= 0 |
@@ -562,10 +570,15 @@ Controls the on-drone `dl-applier` process from the `wfbng-dynamic-link` project
 | `safe.mcs` | integer | `1` | 0 – 7 |
 | `safe.k` | integer | `8` | 1 – 31, must be < `safe.n` |
 | `safe.n` | integer | `12` | 2 – 32, must be > `safe.k` |
-| `safe.depth` | integer | `1` | 1 – 8 |
-| `safe.bandwidth` | integer | `20` | `20` or `40` |
-| `safe.txPowerDbm` | integer | `20` | -10 – 30 |
+| `safe.overheadPct` | integer | `100` | 0 – 255 |
+| `safe.deadlineMs` | integer | `30` | 1 – 255 |
 | `safe.bitrateKbps` | integer | `2000` | > 0 |
+| `compute.minBitrateKbps` | integer | `1000` | > 0, must be < `compute.maxBitrateKbps` |
+| `compute.maxBitrateKbps` | integer | `24000` | > `compute.minBitrateKbps` |
+| `compute.baseRedundancyRatio` | number | `0.5` | > 0 |
+| `compute.blocksPerFrame` | number | `2.0` | > 0 |
+| `compute.kMin` | integer | `2` | >= 1, must be <= `compute.kMax` |
+| `compute.kMax` | integer | `50` | >= `compute.kMin` |
 
 ### `services` — user-defined services
 
@@ -603,23 +616,38 @@ An object whose keys are service names and whose values are service definitions.
 
 The adaptive link has two halves. The drone runs the **applier** — the [`dynamicLink`](#dynamiclink--adaptive-link-controller) block in the Config schema above — which receives decisions and applies them to the radio and encoder. The **controller** (the brain that *decides*) runs on the ground station as a separate daemon, `fpvdgs`, with its own HTTP+JSON API on the GS (same shapes as this document, but rooted under `/gs/*`: `GET`/`PATCH /gs/config`, `POST /gs/apply`, `GET /gs/status`, plus an opaque `/air/*` proxy to the drone fpvd).
 
-The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the dual-gate MCS selector + trailing FEC/bitrate loop, and emits decision packets over UDP to the drone applier (`droneAddr:dronePort`, default `:9999`). It is configured by the GS daemon's own `dynamicLink` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
+The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the probe-driven MCS selector, and emits `{mcs}`-only decision packets over UDP to the drone applier (`drone.host`:`dynamicLink.dronePort`, default `:9999`). It is configured by the GS daemon's own `dynamicLink` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
 
 ```jsonc
 "dynamicLink": {
   "enabled": false,            // boolean — arm the in-process control loop
-  "maxMcs": 5,                 // integer, 0..7 — upper MCS bound the controller may select
-  "bandwidth": 20,             // integer, 20 or 40 — RF bandwidth the controller targets (MHz)
-  "txpower": {
-    "min": 18,                 // integer (dBm) — power at the top MCS (inverse MCS↔power coupling)
-    "max": 28                  // integer (dBm) — power at the bottom MCS; require min <= max
+  "maxMcs": 5,                 // integer, 0..7 — operator MCS ceiling
+  "radioProfile": "m8812eu2",  // string — keys the learned-prior persistence file
+  "dronePort": 9999,           // integer, 1..65535 — drone DL UDP port (host comes from drone.host)
+
+  // Selector: probe-driven promote + reactive demote + timing/cadence
+  "selector": {
+    "probeViableThreshold": 0.99,    // probability [0,1] — min EWMA probe success rate to promote
+    "probeFreshnessMs": 500.0,       // ms >= 0 — max probe age to accept for a promote decision
+    "promoteDebounceWindows": 3,     // positive int — consecutive clean probe windows before promote
+    "videoDemotePer": 0.05,          // probability [0,1] — video PER threshold that triggers demote
+    "emergencyLossRate": 0.05,       // probability [0,1] — residual loss rate for emergency demote
+    "emergencyFecPressure": 0.80,    // probability [0,1] — FEC work rate for emergency demote
+    "holdModesDownMs": 2000,         // ms >= 0 — cooldown after a demote before next promote
+    "minBetweenChangesMs": 200,      // ms >= 0 — minimum interval between any MCS changes
+    "starvationWindows": 5           // positive int — consecutive starved windows before emergency demote
   },
-  "radioProfile": "m8812eu2",  // string — packaged radio profile (fpvdgs/dynlink/profiles/<name>.json)
-  "droneAddr": null,           // string|null — drone UDP address; null => host parsed from drone.endpoint
-  "dronePort": 9999,           // integer, 1..65535 — drone dynamic-link UDP listener port
-  "videoStreamId": "video",    // string — substring matched against the wfb stats record id to
-                               //   select the VIDEO rx stream (mavlink/tunnel rx are ignored)
-  "tuning": {}                 // object — opaque passthrough of advanced policy knobs (see below)
+
+  // Smoothing: EWMA weights for signal aggregation
+  "smoothing": {
+    "ewmaAlphaRssi": 0.2,            // alpha (0,1] — RSSI EWMA decay
+    "ewmaAlphaFec": 0.2,             // alpha (0,1] — FEC work rate EWMA decay
+    "ewmaAlphaBurst": 0.1,           // alpha (0,1] — burst rate EWMA decay
+    "starvationThresholdPps": 50.0   // number >= 0 — pps below which link is considered starved
+  },
+
+  "flightlog": { "enabled": true },  // bool — write per-tick JSONL flight logs
+  "rssiNorm":  { "enabled": true }   // bool — EIRP-normalize RSSI by per-MCS TX power
 }
 ```
 
@@ -627,45 +655,24 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
 |-------|------|---------|--------------|
 | `enabled` | boolean | `false` | — |
 | `maxMcs` | integer | `5` | 0 – 7 |
-| `bandwidth` | integer | `20` | `20` or `40` |
-| `txpower.min` | integer (dBm) | `18` | `<= txpower.max` |
-| `txpower.max` | integer (dBm) | `28` | `>= txpower.min` |
-| `radioProfile` | string | `"m8812eu2"` | a packaged profile name (`fpvdgs/dynlink/profiles/<name>.json`) |
-| `droneAddr` | string \| null | `null` | UDP address; `null` ⇒ host parsed from `drone.endpoint` |
-| `dronePort` | integer | `9999` | 1 – 65535 |
-| `videoStreamId` | string | `"video"` | non-empty string |
-| `tuning` | object | `{}` | see [Tuning passthrough](#tuning-passthrough) |
+| `radioProfile` | string | `"m8812eu2"` | any non-empty string |
+| `dronePort` | integer | `9999` | 1 – 65535 (drone UDP host comes from `drone.host`) |
+| `selector.*` | — | see above | see [Tuning reference](gs-dynamic-link-tuning.md) |
+| `smoothing.*` | — | see above | see [Tuning reference](gs-dynamic-link-tuning.md) |
+| `flightlog.enabled` | boolean | `true` | — |
+| `rssiNorm.enabled` | boolean | `true` | — |
+
+All other knobs — learned-prior internals, probe measurement constants, rssi-norm EIRP curve, flightlog storage settings, and the `videoStreamId` constant — are **frozen code constants** not exposed in config. See [`docs/gs-dynamic-link-tuning.md`](gs-dynamic-link-tuning.md) for the full inventory with source file references.
 
 > **The IDR-token relay moved out of `dynamicLink`.** It is now a top-level [`idrForward`](#idrforward--idr-token-relay) block that runs **independently** of the controller. The old `dynamicLink.idrForward` (bool) and `dynamicLink.idrPort` keys are gone.
 
-Note `txpower.min`/`.max` are the **controller's** dBm request range and are unrelated to the static [`link.txPowerDbm`](#gs-config-schema) key.
-
 **Operating model.** Enabling, disabling, or tuning is applied at runtime via `PATCH /gs/config` + `POST /gs/apply` with **no wfb restart** — the GS runner is never bounced for `dynamicLink`-only changes. The controller reads wfb-ng stats on `:8103` (fpvd renders `log_interval = 100` so the feed is 10 Hz). The drone side must be armed **independently** (its own `dynamicLink.enabled`, applied via the GS `/air` proxy — the client orchestrates both halves). `GET /gs/status.dynamicLink` reports the GS controller state only (no drone round-trip); to check the drone's own dynamic-link/adapter state and detect a GS-armed/drone-not mismatch, the client reads `GET /air/status`.
 
-**`videoStreamId`.** The wfb stats feed interleaves rx records for every service (`video rx`, `mavlink rx`, `tunnel rx`). The policy must be driven by the **video** stream only — the low-rate uplink streams would trip the starvation detector and pin MCS at the floor. The default `"video"` substring matches the video record id.
-
-#### Tuning passthrough
-
-`tuning` is an opaque object deep-merged over the controller's built-in defaults; the **curated keys above always win** over the same field inside `tuning`. It mirrors the section layout of the standalone `dynamic-link` `gs.yaml` and accepts these sub-objects:
-
-| Sub-object | Selected keys |
-|---|---|
-| `gate` | `snr_safety_margin`, `hysteresis_up_db` / `hysteresis_down_db`, `emergency_loss_rate`, `emergency_fec_pressure`, `loss_margin_weight`, `fec_margin_weight`, `snr_ema_alpha`, `snr_slope_alpha`, `snr_predict_horizon_ticks` |
-| `profile_selection` | `upward_confidence_loops`, `hold_modes_down_ms`, `min_between_changes_ms`, `fast_downgrade` |
-| `fec` | `k_bounds.{min,max}`, `base_redundancy_ratio`, `max_redundancy_ratio`, `blocks_per_frame`, `n_loss_threshold`/`n_loss_windows`/`n_loss_step`, `n_recover_windows`/`n_recover_step`, `max_n_escalation`, `depth_max` |
-| `smoothing` | `ewma_alpha_rssi`, `ewma_alpha_fec`, `ewma_alpha_burst`, `starvation_threshold_pps` |
-| `cooldown` | `min_change_interval_ms_{fec,depth,radio,cross}` |
-| `policy` | `starvation_windows`, `bitrate.{utilization_factor,min_bitrate_kbps,max_bitrate_kbps}` |
-| `video` | `per_packet_airtime_us`, `max_latency_ms` (predictor latency budget) |
-| `safe_defaults` | `video.{k,n}`, `depth`, `mcs` — emitted until the drone HELLO handshake completes |
-
-A complete, production-tuned example for the BL-M8812EU2 airframe ships at **`deploy/gs/config.json`** (installed as the GS overlay on first deploy). Unknown or legacy keys are ignored with a log warning.
-
-> **Tip:** the controller computes the FEC block size `k` from the target bitrate, so a high-bitrate (high-MCS) link uses larger FEC blocks, which raises block-fill latency. If steady latency matters more than FEC granularity, raise `tuning.fec.blocks_per_frame` and/or lower `tuning.fec.k_bounds.max`. Also ensure the link runs at the intended channel **width** — a 10 MHz channel has half the airtime of 20 MHz, so a bitrate sized for 20 MHz will saturate and bufferbloat at 10 MHz.
+**PATCH validation.** On `PATCH /gs/config`, unknown `dynamicLink` sub-keys are rejected immediately (typo protection). Sub-block value ranges are validated on `POST /gs/apply`. On boot/upgrade load, unknown keys are warned and ignored so a config from an older build never bricks startup.
 
 ## `idrForward` — IDR-token relay
 
-A top-level GS config block (a **sibling** of `dynamicLink` and `pixelpilot`) that runs the IDR/keyframe-token relay. It is **independent of `dynamicLink.enabled`**: it forwards PixelPilot keyframe/IDR tokens from `0.0.0.0:<port>` to `<droneHost>:<port>`, where `droneHost` is derived from `drone.endpoint`, bridging PixelPilot keyframe requests to the drone's `idr_listen`.
+A top-level GS config block (a **sibling** of `dynamicLink` and `pixelpilot`) that runs the IDR/keyframe-token relay. It is **independent of `dynamicLink.enabled`**: it forwards PixelPilot keyframe/IDR tokens from `0.0.0.0:<port>` to `<droneHost>:<port>`, where `droneHost` is `drone.host`, bridging PixelPilot keyframe requests to the drone's `idr_listen`.
 
 ```jsonc
 "idrForward": {
@@ -871,7 +878,7 @@ curl -X POST http://127.0.0.1:8080/apply
 Enable `dl-applier` supervision with custom safe ceilings for a long-range airframe.
 
 ```bash
-# Stage: configure safe ceilings and enable adaptive link
+# Stage: configure safe floor and enable adaptive link
 curl -X PATCH http://127.0.0.1:8080/config \
   -H 'content-type: application/json' \
   -d '{
@@ -879,8 +886,7 @@ curl -X PATCH http://127.0.0.1:8080/config \
       "enabled": true,
       "safe": {
         "mcs": 2,
-        "bitrateKbps": 6000,
-        "txPowerDbm": 25
+        "bitrateKbps": 6000
       }
     }
   }'
@@ -908,13 +914,13 @@ curl -X PATCH http://127.0.0.1:8080/config \
 
 The ground-station `fpvd` (Python, `gs/fpvdgs/`) owns the **GS** wfb radio config and supervises the GS wfb data plane, replacing the stock `wfb-server`/`S98wifibroadcast`. A supervisor process owns the config + this HTTP API; a runner child imports the `wfb_ng` library to run `wfb_rx`/`wfb_tx` and continues to serve the wfb stats APIs on `:8103` (JSON) / `:8003` (MsgPack), so `dynamic-link-gs` and `wfb-cli` are unaffected.
 
-Binds `0.0.0.0:8080` (same posture as the drone). Source of truth: `/etc/fpvd/{defaults,config}.json`; the daemon renders these to `/etc/wifibroadcast.cfg` (a generated artifact — do not edit). The stage→apply lifecycle (effective vs pending, `?pending=true`) is identical to the drone's.
+Binds `0.0.0.0:8080` (same posture as the drone). Source of truth: `/etc/fpvd/config.json`; the daemon renders these to `/etc/wifibroadcast.cfg` (a generated artifact — do not edit). The stage→apply lifecycle (effective vs pending, `?pending=true`) is identical to the drone's.
 
 ### Differences from the drone API at a glance
 
 | | Drone | Ground station |
 |--|--|--|
-| Config schema | link + video + image + telemetry + recording + dynamicLink + services | **radio-only**: `link` + `wfb` + `drone` |
+| Config schema | link + video + image + telemetry + recording + dynamicLink + services | `link` + `wfb` + `drone` + `dynamicLink` + `idrForward` + `pixelpilot` |
 | `link` fields | channel, width, txPowerDbm, **mcs, fec, stbc, ldpc**, mtu, … | channel, width, txPowerDbm, region, linkId, beamforming, wlans — **no mcs/fec/stbc/ldpc** (drone-owned for video; GS uplink uses wfb-ng defaults) |
 | Config tree route | `/config`, `/apply`, … (root) | `/gs/config`, `/gs/apply`, … (`/gs/*`) |
 | `GET /healthz` body | `{}` | `{"ok": true}` (both at root) |
@@ -1018,12 +1024,12 @@ curl -X POST  http://127.0.0.1:8080/gs/apply
 
 ## Drone proxy — `/air/*`
 
-`GET/PATCH /air/config`, `POST /air/apply`, `GET /air/status` forward the request **opaquely** (no schema parsing) to the drone fpvd at `drone.endpoint`, relaying its response verbatim. This is the single front door for the drone's own config — both drone-only config (video bitrate, codec, ROI, …) and the drone's `link` block during a [client-orchestrated](#client-orchestration-of-cross-device-link-changes) shared-link or beamforming change. The GS daemon never models the drone schema.
+`GET/PATCH /air/config`, `POST /air/apply`, `GET /air/status` forward the request **opaquely** (no schema parsing) to the drone fpvd at `drone.host`:`drone.apiPort`, relaying its response verbatim. This is the single front door for the drone's own config — both drone-only config (video bitrate, codec, ROI, …) and the drone's `link` block during a [client-orchestrated](#client-orchestration-of-cross-device-link-changes) shared-link or beamforming change. The GS daemon never models the drone schema.
 
 | Code | Meaning |
 |------|---------|
 | 2xx/4xx/5xx | Relayed from the drone fpvd. |
-| 502 | `{"error":"drone unreachable: ..."}` — could not reach `drone.endpoint`. |
+| 502 | `{"error":"drone unreachable: ..."}` — could not reach the drone (`drone.host`:`drone.apiPort`). |
 
 ```bash
 curl http://127.0.0.1:8080/air/status                       # drone's /status, proxied
@@ -1056,8 +1062,8 @@ curl -X PATCH http://127.0.0.1:8080/air/config \            # drone-only config
     "port": 11223
   },
   "drone": {
-    "endpoint": "http://10.5.0.10:8080"  // where the /air proxy reaches the drone fpvd (over the wfb tunnel);
-                                         //   also the source of droneHost for the idrForward relay
+    "host": "10.5.0.10",     // the drone's address on the wfb tunnel; reused by the /air proxy,
+    "apiPort": 8080          //   the IDR relay, and the dynamic-link decision UDP
   }
 }
 ```
@@ -1076,7 +1082,8 @@ curl -X PATCH http://127.0.0.1:8080/air/config \            # drone-only config
 | `wfb.raw` | object | `{}` | passthrough escape hatch |
 | `idrForward.enabled` | boolean | `true` | run the relay — see [`idrForward`](#idrforward--idr-token-relay) |
 | `idrForward.port` | integer | `11223` | UDP relay port |
-| `drone.endpoint` | string | `http://10.5.0.10:8080` | drone fpvd base URL (and the source of the relay's droneHost) |
+| `drone.host` | string | `10.5.0.10` | the drone's address; reused by the /air proxy, IDR relay, and DL decision UDP |
+| `drone.apiPort` | integer | `8080` | the drone fpvd HTTP API port |
 
 There is intentionally **no** `mcs`/`fec`/`ldpc`/`stbc` on the GS: video downlink FEC/modulation is auto-detected by `wfb_rx` (drone-owned), and the GS uplink TX uses wfb-ng's defaults. There are also no `video`/`image`/`telemetry`/`recording`/`services` sections — those are drone-only. (`dynamicLink`, `idrForward`, and `pixelpilot` are GS-side sections — see their dedicated sections.)
 

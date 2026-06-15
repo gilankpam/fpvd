@@ -22,20 +22,14 @@ TEST_CASE("buildDlSnapshot maps schema + derived inputs") {
 TEST_CASE("buildDlSnapshot maps all DynamicLink fields") {
     Config c{};
     c.dynamicLink.healthTimeoutMs    = 5000;
-    c.dynamicLink.minIdrIntervalMs   = 200;
     c.dynamicLink.applyStaggerMs     = 25;
     c.dynamicLink.applySubPaceMs     = 10;
-    c.dynamicLink.osd.enabled        = false;
-    c.dynamicLink.osd.debugLatency   = true;
 
     auto s = buildDlSnapshot(c, "wlan0");
 
     CHECK(s.healthTimeoutMs     == 5000u);
-    CHECK(s.minIdrIntervalMs    == 200u);
     CHECK(s.applyStaggerMs      == 25u);
     CHECK(s.applySubPaceMs      == 10u);
-    CHECK(s.osdEnabled          == false);
-    CHECK(s.osdDebugLatency     == true);
     // debug field is absent from schema — must default to false
     CHECK(s.debug               == false);
 }
@@ -45,8 +39,6 @@ TEST_CASE("buildDlSnapshot maps safe defaults correctly") {
     c.dynamicLink.safe.mcs         = 2;
     c.dynamicLink.safe.k           = 6;
     c.dynamicLink.safe.n           = 10;
-    c.dynamicLink.safe.bandwidth   = 40;
-    c.dynamicLink.safe.txPowerDbm  = 15;
     c.dynamicLink.safe.bitrateKbps = 3000;
 
     auto s = buildDlSnapshot(c, "wlan0");
@@ -54,8 +46,6 @@ TEST_CASE("buildDlSnapshot maps safe defaults correctly") {
     CHECK(s.safe.mcs         == 2u);
     CHECK(s.safe.k           == 6u);
     CHECK(s.safe.n           == 10u);
-    CHECK(s.safe.bandwidth   == 40u);
-    CHECK(s.safe.txPowerDbm  == 15);
     CHECK(s.safe.bitrateKbps == 3000u);
 }
 
@@ -80,11 +70,8 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
 
     // DynamicLink defaults from schema
     CHECK(s.healthTimeoutMs      == 10000u);
-    CHECK(s.minIdrIntervalMs     == 500u);
     CHECK(s.applyStaggerMs       == 50u);
     CHECK(s.applySubPaceMs       == 5u);
-    CHECK(s.osdEnabled           == true);
-    CHECK(s.osdDebugLatency      == false);
     CHECK(s.debug                == false);
 
     // Link/video defaults
@@ -102,8 +89,6 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
     CHECK(s.safe.mcs         == 1u);
     CHECK(s.safe.k           == 8u);
     CHECK(s.safe.n           == 12u);
-    CHECK(s.safe.bandwidth   == 20u);
-    CHECK(s.safe.txPowerDbm  == 20);
     CHECK(s.safe.bitrateKbps == 2000u);
 }
 
@@ -111,12 +96,12 @@ TEST_CASE("buildDlSnapshot maps the Phase-3a bitrate-engine knobs") {
     fpvd::Config c{};
     c.link.mtu  = 1400;
     c.video.fps = 90;
-    c.dynamicLink.bitrate.minBitrateKbps = 1500;
-    c.dynamicLink.bitrate.maxBitrateKbps = 20000;
-    c.dynamicLink.fec.baseRedundancyRatio = 0.5;
-    c.dynamicLink.fec.blocksPerFrame      = 2.0;
-    c.dynamicLink.fec.kMin = 3;
-    c.dynamicLink.fec.kMax = 40;
+    c.dynamicLink.compute.minBitrateKbps = 1500;
+    c.dynamicLink.compute.maxBitrateKbps = 20000;
+    c.dynamicLink.compute.baseRedundancyRatio = 0.5;
+    c.dynamicLink.compute.blocksPerFrame      = 2.0;
+    c.dynamicLink.compute.kMin = 3;
+    c.dynamicLink.compute.kMax = 40;
 
     auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
 
@@ -161,6 +146,24 @@ TEST_CASE("buildDlSnapshot: swfec fields from link.fec + safe") {
 
 TEST_CASE("buildDlSnapshot: rs mode -> swfec false") {
     fpvd::Config c{};
+    c.link.fec.mode = "rs";  // default is now swfec; set rs explicitly to exercise the rs path
     auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
     CHECK_FALSE(s.swfec);
+}
+
+TEST_CASE("buildDlSnapshot maps dynamicLink.compute -> BitrateEngineConfig") {
+    Config c{};
+    c.dynamicLink.compute.minBitrateKbps      = 1500;
+    c.dynamicLink.compute.maxBitrateKbps      = 20000;
+    c.dynamicLink.compute.baseRedundancyRatio = 0.4;
+    c.dynamicLink.compute.blocksPerFrame      = 3.0;
+    c.dynamicLink.compute.kMin                = 4;
+    c.dynamicLink.compute.kMax                = 40;
+    auto s = buildDlSnapshot(c, "wlan0");
+    CHECK(s.bitrate.minBitrateKbps     == 1500);
+    CHECK(s.bitrate.maxBitrateKbps     == 20000);
+    CHECK(s.bitrate.baseRedundancyRatio == doctest::Approx(0.4));
+    CHECK(s.bitrate.blocksPerFrame     == doctest::Approx(3.0));
+    CHECK(s.bitrate.kMin               == 4);
+    CHECK(s.bitrate.kMax               == 40);
 }

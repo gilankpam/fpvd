@@ -23,7 +23,7 @@
 using namespace fpvd::dynlink;
 
 static Endpoints ephemeral() {
-    Endpoints e; e.listenPort = 45800; e.idrPort = 0;   // fixed test port; idr disabled
+    Endpoints e; e.listenPort = 45800;   // fixed test port
     return e;
 }
 
@@ -159,11 +159,6 @@ struct FakeEnc {
             hits.push_back(r.target);
             res.set_content("ok", "text/plain");
         });
-        srv.Get("/request/idr", [&](const httplib::Request&, httplib::Response& res) {
-            std::lock_guard<std::mutex> lk(mu);
-            hits.push_back("/request/idr");
-            res.set_content("ok", "text/plain");
-        });
         port = srv.bind_to_any_port("127.0.0.1");
         th = std::thread([&] { srv.listen_after_bind(); });
         srv.wait_until_ready();
@@ -223,18 +218,13 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     ep.wfbCtlPort = wfb.port;
     ep.encHost    = "127.0.0.1";
     ep.encPort    = static_cast<uint16_t>(enc.port);
-    ep.idrPort    = 0;                      // idr disabled (Task 16)
     ep.gsTunnelPort = 0;
-    ep.osdMsgPath = "/tmp/fpvd_test_osd.msg";
     ep.osdUpdateIntervalMs = 1000;
 
     DlRuntimeConfig snap{};
     snap.healthTimeoutMs       = 300;       // small -> watchdog trips fast
-    snap.minIdrIntervalMs      = 500;
     snap.applyStaggerMs        = 0;         // single-shot dispatch
     snap.applySubPaceMs        = 0;
-    snap.osdEnabled            = false;
-    snap.osdDebugLatency       = false;
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.stbc                  = true;      // preserved on every setRadio (incl. safe)
@@ -243,7 +233,7 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     snap.iface                 = "wlan-test-nonexistent";  // iw will fail, not hang
     snap.safe = SafeDefaults{
         /*mcs=*/1, /*k=*/8, /*n=*/12,
-        /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
+        /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -281,9 +271,10 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     CHECK(wfb.sawRadioFlags(/*stbc=*/1, /*ldpc=*/true));
 
     // 2) Go silent past healthTimeoutMs -> watchdog trips -> safe-defaults push.
+    //    Safe radio uses operating linkBandwidth (40), not a separate safe.bandwidth.
     CHECK(waitFor([&] {
         return wfb.sawFec(8, 12) &&
-               wfb.sawRadio(1, 20) &&
+               wfb.sawRadio(1, 40) &&
                enc.sawContaining("video0.bitrate=2000");
     }, 2000));
     CHECK(waitFor([&] { return c.status().watchdogTripped == true; }, 1000));
@@ -312,22 +303,17 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
     ep.wfbCtlPort = wfb.port;
     ep.encHost    = "127.0.0.1";
     ep.encPort    = static_cast<uint16_t>(enc.port);
-    ep.idrPort    = 0;
     ep.gsTunnelPort = 0;
-    ep.osdMsgPath = "/tmp/fpvd_test_osd2.msg";
     ep.osdUpdateIntervalMs = 1000;
 
     DlRuntimeConfig snap{};
     snap.healthTimeoutMs       = 5000;      // large -> watchdog won't trip mid-test
-    snap.minIdrIntervalMs      = 500;
     snap.applyStaggerMs        = 120;       // non-zero -> staggered dispatch
     snap.applySubPaceMs        = 0;
-    snap.osdEnabled            = false;
-    snap.osdDebugLatency       = false;
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{1, 8, 12, 20, 5, 2000};
+    snap.safe = SafeDefaults{1, 8, 12, 2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -366,92 +352,6 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
 }
 
 // ---------------------------------------------------------------------------
-// IDR token listener -> encoder requestIdr
-// ---------------------------------------------------------------------------
-
-namespace {
-
-// Send a short UDP datagram to localhost:<port> (simulates a PixelPilot IDR token).
-void sendIdrToken(uint16_t port) {
-    int s = ::socket(AF_INET, SOCK_DGRAM, 0);
-    REQUIRE(s >= 0);
-    sockaddr_in dst{};
-    dst.sin_family = AF_INET;
-    dst.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    dst.sin_port = htons(port);
-    const char tok[] = "IDR";  // 3-byte token (mimics PixelPilot_rk)
-    ssize_t w = ::sendto(s, tok, sizeof(tok) - 1, 0,
-                         reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
-    CHECK(w == 3);
-    ::close(s);
-}
-
-} // namespace (anonymous, IDR helpers)
-
-TEST_CASE("controller IDR: datagram -> requestIdr; second immediate datagram is throttled") {
-    FakeWfbTx wfb;
-    FakeEnc enc;
-
-    const uint16_t kIdrPort = 41223;
-
-    Endpoints ep;
-    ep.listenAddr        = "127.0.0.1";
-    ep.listenPort        = 45804;           // fixed test port
-    ep.wfbCtlAddr        = "127.0.0.1";
-    ep.wfbCtlPort        = wfb.port;
-    ep.encHost           = "127.0.0.1";
-    ep.encPort           = static_cast<uint16_t>(enc.port);
-    ep.idrAddr           = "127.0.0.1";
-    ep.idrPort           = kIdrPort;        // IDR listener enabled
-    ep.gsTunnelPort      = 0;
-    ep.osdMsgPath        = "/tmp/fpvd_test_osd_idr.msg";
-    ep.osdUpdateIntervalMs = 1000;
-
-    DlRuntimeConfig snap{};
-    snap.healthTimeoutMs       = 10000;     // won't trip during test
-    snap.minIdrIntervalMs      = 500;       // 500 ms throttle window
-    snap.applyStaggerMs        = 0;
-    snap.applySubPaceMs        = 0;
-    snap.osdEnabled            = false;
-    snap.osdDebugLatency       = false;
-    snap.debug                 = false;
-    snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
-    snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{1, 8, 12, 20, 5, 2000};
-
-    DynamicLinkController c(ep);
-    c.start(snap);
-    CHECK(c.status().running == true);
-
-    // 1) Send an IDR token; assert the controller forwards it to the encoder.
-    //    Re-send in a loop (controller binds idr socket asynchronously).
-    bool gotIdr = waitFor([&] {
-        sendIdrToken(kIdrPort);
-        return enc.sawContaining("/request/idr");
-    }, 2000);
-    CHECK(gotIdr);
-
-    // 2) Count how many /request/idr hits arrived so far.
-    auto countIdr = [&] {
-        std::lock_guard<std::mutex> lk(enc.mu);
-        int n = 0;
-        for (auto& h : enc.hits) if (h == "/request/idr") ++n;
-        return n;
-    };
-    int firstCount = countIdr();
-    CHECK(firstCount >= 1);
-
-    // 3) Send a second token immediately — must be throttled (minIdrIntervalMs=500 ms).
-    //    Wait 100 ms and assert no new /request/idr was added.
-    sendIdrToken(kIdrPort);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    CHECK(countIdr() == firstCount);   // throttled: encoder count unchanged
-
-    c.stop();
-    CHECK(c.status().running == false);
-}
-
-// ---------------------------------------------------------------------------
 // Hot config reload: setConfig applies new knobs without restart
 // ---------------------------------------------------------------------------
 
@@ -466,25 +366,20 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     ep.wfbCtlPort        = wfb.port;
     ep.encHost           = "127.0.0.1";
     ep.encPort           = static_cast<uint16_t>(enc.port);
-    ep.idrPort           = 0;
     ep.gsTunnelPort      = 0;
-    ep.osdMsgPath        = "/tmp/fpvd_test_osd_hotreload.msg";
     ep.osdUpdateIntervalMs = 1000;
 
     // Start with a long watchdog timeout and safe.mcs=1
     DlRuntimeConfig snap{};
     snap.healthTimeoutMs       = 10000;     // long -> won't trip during setup
-    snap.minIdrIntervalMs      = 500;
     snap.applyStaggerMs        = 0;
     snap.applySubPaceMs        = 0;
-    snap.osdEnabled            = false;
-    snap.osdDebugLatency       = false;
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.iface                 = "wlan-test-nonexistent";
     snap.safe = SafeDefaults{
         /*mcs=*/1, /*k=*/8, /*n=*/12,
-        /*bandwidth=*/20, /*txPowerDbm=*/5, /*bitrateKbps=*/2000};
+        /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -551,17 +446,14 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
     ep.wfbCtlPort = wfb.port;
     ep.encHost    = "127.0.0.1";
     ep.encPort    = static_cast<uint16_t>(enc.port);
-    ep.idrPort    = 0;
     ep.gsTunnelPort = 0;
-    ep.osdMsgPath = "/tmp/fpvd_test_osd_swfec.msg";
     ep.osdUpdateIntervalMs = 1000;
 
     DlRuntimeConfig snap{};
     snap.healthTimeoutMs  = 300;            // watchdog trips fast
-    snap.minIdrIntervalMs = 500;
     snap.applyStaggerMs   = 0;
     snap.applySubPaceMs   = 0;
-    snap.osdEnabled = false; snap.osdDebugLatency = false; snap.debug = false;
+    snap.debug = false;
     snap.roiQp = RoiCurve{6000, 2000, -24, 3};
     snap.stbc = true; snap.ldpc = true;
     snap.linkBandwidth = 40;
@@ -570,7 +462,6 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
     snap.swfecOverheadPct = 50;
     snap.swfecDeadlineMs  = 30;
     snap.safe = SafeDefaults{/*mcs=*/1, /*k=*/8, /*n=*/12,
-                             /*bandwidth=*/20, /*txPowerDbm=*/5,
                              /*bitrateKbps=*/2000};
     snap.safe.overheadPct = 100;            // trailing NSDMI fields, set by name
     snap.safe.deadlineMs  = 35;

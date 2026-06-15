@@ -26,7 +26,7 @@ def _api(retune_ok=True):
     cfg_out = os.path.join(tempfile.mkdtemp(), "wifibroadcast.cfg")
     store = ConfigStore({"link": {"channel": 132, "width": 40, "region": "US"},
                          "wfb": {"profile": "gs"}, "drone": {"endpoint": "http://x"}},
-                        overlay_path=None)
+                        config_path=None)
     drone = FakeDrone()
     runner = FakeRunner()
     retunes = []
@@ -126,9 +126,8 @@ def _api_with_dynlink(tmp_path):
                 "wfb": {"profile": "gs", "raw": {}},
                 "drone": {"endpoint": "http://10.5.0.10:8080"},
                 "dynamicLink": {"enabled": False, "maxMcs": 5,
-                                "txpower": {"min": 18, "max": 28},
-                                "radioProfile": "m8812eu2", "droneAddr": None,
-                                "dronePort": 9999, "tuning": {}}}
+                                "radioProfile": "m8812eu2",
+                                "dronePort": 9999}}
     store = ConfigStore(defaults)
     ctrl = _FakeController()
     runner = _FakeRunner()
@@ -284,9 +283,8 @@ def _api_with_dl_and_probe(tmp_path):
                 "wfb": {"profile": "gs", "raw": {}},
                 "drone": {"endpoint": "http://10.5.0.10:8080"},
                 "dynamicLink": {"enabled": False, "maxMcs": 5,
-                                "txpower": {"min": 18, "max": 28},
-                                "radioProfile": "m8812eu2", "droneAddr": None,
-                                "dronePort": 9999, "tuning": {}}}
+                                "radioProfile": "m8812eu2",
+                                "dronePort": 9999}}
     store = ConfigStore(defaults)
     ctrl = _FakeController()     # existing fake dynlink controller in this file
     probe = _FakeProbe()
@@ -329,7 +327,7 @@ def test_idr_forward_apply_starts_and_stops():
     store = ConfigStore({"link": {"channel": 132, "width": 40, "region": "US"},
                          "wfb": {"profile": "gs"}, "drone": {"endpoint": "http://x"},
                          "idrForward": {"enabled": False, "port": 11223}},
-                        overlay_path=None)
+                        config_path=None)
     relay = FakeRelay()
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=FakeRunner(),
               drone=FakeDrone(), status_fn=lambda: {}, cfg_out=cfg_out,

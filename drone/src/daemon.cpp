@@ -29,6 +29,9 @@ static std::string nowIso() {
 Daemon::Daemon(DaemonPaths paths)
     : paths_(std::move(paths)),
       waybeam_(paths_.dlEndpoints.encHost, paths_.dlEndpoints.encPort),
+      idrRelay_(waybeam_, idr::kIdrBindAddr,
+                static_cast<uint16_t>(paths_.idrPort), idr::kIdrMinIntervalMs),
+      osd_(paths_.osdMsgPath, /*enabled=*/true),
       dl_(paths_.dlEndpoints),
       startedAt_(std::chrono::steady_clock::now()) {
 }
@@ -37,22 +40,24 @@ Daemon::~Daemon() {
     // Stop the OSD heartbeat (it touches mu_ + dl_) before tearing those down.
     osdStop_.store(true);
     if (osdThread_.joinable()) osdThread_.join();
+    // Stop the always-on IDR relay (joins its thread) while waybeam_ is still alive.
+    idrRelay_.stop();
     // Stop the in-process control loop (joins its thread) before any member is destroyed.
     dl_.stop();
 }
 
 nlohmann::json Daemon::defaultsJson() {
-    std::ifstream f(paths_.defaultsPath);
-    return nlohmann::json::parse(f);
+    return nlohmann::json(Config{});
 }
 
 void Daemon::bootstrap(bool startProcesses) {
-    effective_ = loadEffective(paths_.defaultsPath, paths_.overlayPath);
+    effective_ = loadEffective(paths_.configPath);
     pending_ = effective_;
     auto errs = validate(effective_);
     if (!errs.empty()) {
         throw StoreError("invalid configuration on bootstrap");
     }
+    osd_.setEnabled(effective_.osd.enabled);   // daemon owns top-level osd.enabled
     rewriteWaybeamJson();
     if (startProcesses) {
         auto rr = bringUpRadio(paths_.radioUpScript, effective_);
@@ -65,6 +70,10 @@ void Daemon::bootstrap(bool startProcesses) {
         orch_.startAll();
         reconcileBeamforming(true);
         dl_.setBfCodeProvider([this] { return bfOsdCode(); });
+        dl_.setIdrCountProvider([this] { return idrRelay_.count(); });
+        dl_.setOsdWriter(&osd_);   // controller pushes its status line to the shared writer
+        // Always-on: keyframe requests must work whether dynamicLink is on or off.
+        idrRelay_.start();
         if (effective_.dynamicLink.enabled) {
             startController();
         } else {
@@ -190,25 +199,13 @@ void Daemon::restateStaticLink() {
 }
 
 void Daemon::writeOsdBaseLine() {
-    // System-stats OSD line shown when dynamic-link isn't feeding the OSD (the DL
-    // OsdWriter owns the msg file while DL runs). msposd holds + re-renders the
-    // last message, substituting the & placeholders (bitrate+fps, board/wifi
-    // temp, cpu%) at render time. No-op unless the router is msposd. Atomic
-    // (tmp + rename) so msposd never reads a half-written line.
+    // System-stats OSD line shown when dynamic-link isn't feeding the OSD. The
+    // shared always-on osd_ owns the msg file + atomic write + osd.enabled
+    // gating; msposd holds + re-renders the line, substituting the &
+    // placeholders (bitrate+fps, board/wifi temp, cpu%) at render time. No-op
+    // unless the router is msposd (only msposd renders the OSD).
     if (effective_.telemetry.router != "msposd") return;
-    const std::string& path = paths_.dlEndpoints.osdMsgPath;
-    if (path.empty()) return;
-    const std::string tmp = path + ".tmp";
-    {
-        std::ofstream f(tmp, std::ios::trunc);
-        if (!f) return;
-        const int bfc = bfOsdCode();
-        const char* bf = bfc == 2 ? " B+" : bfc == 1 ? " B-" : "";
-        f << "&L50&F30 &B  T&T  W&W  CPU&C" << bf << "\n";
-    }
-    std::error_code ec;
-    std::filesystem::rename(tmp, path, ec);
-    if (ec) std::filesystem::remove(tmp, ec);
+    osd_.writeBaseLine(bfOsdCode());
 }
 
 void Daemon::osdHeartbeat() {
@@ -328,13 +325,12 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         }
     }
 
-    // Persist overlay (sparse diff vs defaults).
-    auto defaultsJ = defaultsJson();
-    auto pendingJ = nlohmann::json(pending_);
-    auto overlay = computeOverlay(defaultsJ, pendingJ);
-    atomicWriteJson(paths_.overlayPath, overlay);
+    // Persist the full config (code defaults are the implicit baseline; the
+    // on-disk file is the complete config, not a sparse overlay).
+    atomicWriteJson(paths_.configPath, nlohmann::json(pending_));
 
     effective_ = pending_;
+    osd_.setEnabled(effective_.osd.enabled);   // hot-reconcile top-level osd.enabled (gates both lines)
     rewriteWaybeamJson();
 
     std::vector<std::string> restarted;
@@ -546,8 +542,8 @@ ApplyResult Daemon::apply(bool reallyRestart) {
 void Daemon::reset() {
     std::lock_guard<std::mutex> g(mu_);
     std::error_code ec;
-    std::filesystem::remove(paths_.overlayPath, ec);
-    pending_ = loadEffective(paths_.defaultsPath, "/no/such/path");
+    std::filesystem::remove(paths_.configPath, ec);
+    pending_ = Config{};   // reset to code defaults
 }
 
 } // namespace fpvd

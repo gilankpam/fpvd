@@ -34,21 +34,24 @@ Host/user can also come from `DRONE_HOST` / `DRONE_USER` env vars (defaults:
 1. Cross-builds `fpvd` (`build/ssc338q/fpvd`, Release/static) and strips it (~1.6 MB).
 2. Pushes: `/usr/bin/fpvd` (staged as `fpvd.new`, then atomically `mv`'d to dodge
    `ETXTBSY` on a running binary), `radio-up.sh`/`radio-tune.sh` →
-   `/usr/libexec/fpvd/`, `defaults.json` → `/etc/fpvd/`, and `/etc/init.d/S99fpvd`.
+   `/usr/libexec/fpvd/`, and `/etc/init.d/S99fpvd`.
 3. **First install:** backs up the old init scripts + `waybeam.json`/`wfb.yaml`
    to `/root/fpvd-rollback/`, stops & removes the old stack, starts fpvd.
    **Update:** restarts fpvd with the new binary.
-4. Verifies (process list, radio channel/txpower, dynamicLink state).
+4. Seeds `/etc/fpvd/config.json` from the code defaults (`fpvd --dump-config`)
+   if the file is absent — preserves any existing operator config.
+5. Verifies (process list, radio channel/txpower, dynamicLink state).
 
-The sparse user overlay `/etc/fpvd/config.json` (API edits like a txpower
-override) is **never** touched — only the baseline `defaults.json` is overwritten.
+The daemon uses **code-baked defaults** (serialised `Config{}`) plus a single
+`/etc/fpvd/config.json` that is deep-merged over them at startup. There is no
+`defaults.json` file. `/etc/fpvd/config.json` is never clobbered on update
+deploys; only a fresh install (or an absent file) triggers the seed step.
 
 ## Notes / gotchas
 
-- `/rom` is read-only on a live system, so the deployed `S99fpvd` points
-  `--defaults` at the writable `/etc/fpvd/defaults.json` (not the Buildroot
-  image path `/rom/etc/fpvd/defaults.json`).
-- The deploy uses fpvd's baseline **channel 161** — set the GS to match.
+- The deploy uses fpvd's baseline **channel 132** — set the GS to match.
+- To materialise the full default config for inspection or manual editing:
+  `fpvd --dump-config > /etc/fpvd/config.json` (safe to run while fpvd is stopped).
 - Enabling adaptive link: the in-process controller listens on UDP **:5800**
   (the old `dl-applier` used `:9999`); point the GS dynamic-link config at :5800.
   `curl -X PATCH http://<drone>:8080/config -d '{"dynamicLink":{"enabled":true}}' && curl -X POST http://<drone>:8080/apply`

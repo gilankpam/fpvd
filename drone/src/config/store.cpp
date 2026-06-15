@@ -1,34 +1,14 @@
 #include "config/store.hpp"
 #include <fstream>
 #include <sstream>
+#include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
 #include <filesystem>
+#include <vector>
 
 namespace fpvd {
-
-static nlohmann::json readJsonFile(const std::string& path,
-                                    const std::string& what) {
-    std::ifstream f(path);
-    if (!f) throw StoreError("failed to open " + what + ": " + path);
-    std::stringstream buf;
-    buf << f.rdbuf();
-    try {
-        return nlohmann::json::parse(buf.str());
-    } catch (const nlohmann::json::exception& e) {
-        throw StoreError(what + " parse error: " + e.what());
-    }
-}
-
-Config loadDefaults(const std::string& path) {
-    auto j = readJsonFile(path, "defaults");
-    try {
-        return j.get<Config>();
-    } catch (const nlohmann::json::exception& e) {
-        throw StoreError(std::string("defaults schema: ") + e.what());
-    }
-}
 
 nlohmann::json deepMergeJson(const nlohmann::json& base,
                               const nlohmann::json& overlay) {
@@ -47,49 +27,47 @@ nlohmann::json deepMergeJson(const nlohmann::json& base,
     return out;
 }
 
-Config loadEffective(const std::string& defaultsPath,
-                     const std::string& overlayPath) {
-    auto baseJ = readJsonFile(defaultsPath, "defaults");
-    std::ifstream f(overlayPath);
-    if (!f) {
-        try { return baseJ.get<Config>(); }
-        catch (const nlohmann::json::exception& e) {
-            throw StoreError(std::string("defaults schema: ") + e.what());
-        }
-    }
-    std::stringstream buf;
-    buf << f.rdbuf();
-    nlohmann::json overlayJ;
-    try { overlayJ = nlohmann::json::parse(buf.str()); }
-    catch (const nlohmann::json::exception& e) {
-        throw StoreError(std::string("overlay parse error: ") + e.what());
-    }
-    auto merged = deepMergeJson(baseJ, overlayJ);
-    try { return merged.get<Config>(); }
-    catch (const nlohmann::json::exception& e) {
-        throw StoreError(std::string("merged schema: ") + e.what());
+// Recursively collect dotted paths of keys in `cfg` absent from the
+// reference (code-default) object `ref`. Recurses only where both sides are
+// objects; the top-level `services` map is skipped (free-form user processes).
+static void collectUnknown(const nlohmann::json& cfg, const nlohmann::json& ref,
+                           const std::string& prefix,
+                           std::vector<std::string>& out) {
+    if (!cfg.is_object() || !ref.is_object()) return;
+    for (auto it = cfg.begin(); it != cfg.end(); ++it) {
+        std::string path = prefix.empty() ? it.key() : prefix + "." + it.key();
+        if (prefix.empty() && it.key() == "services") continue;  // free-form map
+        if (!ref.contains(it.key())) { out.push_back(path); continue; }
+        if (it.value().is_object() && ref[it.key()].is_object())
+            collectUnknown(it.value(), ref[it.key()], path, out);
     }
 }
 
-nlohmann::json computeOverlay(const nlohmann::json& defaults,
-                               const nlohmann::json& effective) {
-    if (!defaults.is_object() || !effective.is_object()) {
-        return (defaults == effective) ? nlohmann::json::object() : effective;
+std::vector<std::string> unknownConfigKeys(const nlohmann::json& cfg) {
+    std::vector<std::string> out;
+    collectUnknown(cfg, nlohmann::json(Config{}), "", out);
+    return out;
+}
+
+Config loadEffective(const std::string& configPath) {
+    nlohmann::json base = Config{};
+    std::ifstream f(configPath);
+    if (!f) return Config{};
+    std::stringstream buf;
+    buf << f.rdbuf();
+    nlohmann::json fileJ;
+    try { fileJ = nlohmann::json::parse(buf.str()); }
+    catch (const nlohmann::json::exception& e) {
+        throw StoreError(std::string("config parse error: ") + e.what());
     }
-    nlohmann::json diff = nlohmann::json::object();
-    for (auto it = effective.begin(); it != effective.end(); ++it) {
-        if (!defaults.contains(it.key())) {
-            diff[it.key()] = it.value();
-        } else if (defaults[it.key()] != it.value()) {
-            if (defaults[it.key()].is_object() && it.value().is_object()) {
-                auto sub = computeOverlay(defaults[it.key()], it.value());
-                if (!sub.empty()) diff[it.key()] = sub;
-            } else {
-                diff[it.key()] = it.value();
-            }
-        }
+    for (auto& k : unknownConfigKeys(fileJ))
+        std::fprintf(stderr, "fpvd: warning: unknown config key '%s' (ignored)\n",
+                     k.c_str());
+    auto merged = deepMergeJson(base, fileJ);
+    try { return merged.get<Config>(); }
+    catch (const nlohmann::json::exception& e) {
+        throw StoreError(std::string("config schema: ") + e.what());
     }
-    return diff;
 }
 
 void atomicWriteJson(const std::string& path, const nlohmann::json& j) {

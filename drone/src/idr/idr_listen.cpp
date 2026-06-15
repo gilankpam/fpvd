@@ -1,5 +1,5 @@
 /* idr_listen.cpp — UDP listener for PixelPilot IDR-token bursts. */
-#include "dynlink/idr_listen.hpp"
+#include "idr/idr_listen.hpp"
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -8,7 +8,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-namespace fpvd::dynlink {
+namespace fpvd::idr {
 
 IdrListener::IdrListener(const std::string& bindAddr, uint16_t port) {
     if (port == 0) return;  // disabled — fd_ stays -1
@@ -60,4 +60,4 @@ size_t IdrListener::drain() {
     return count;
 }
 
-} // namespace fpvd::dynlink
+} // namespace fpvd::idr

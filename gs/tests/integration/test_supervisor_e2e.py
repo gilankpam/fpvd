@@ -28,16 +28,15 @@ def _req(base, method, path, body=None):
 
 @pytest.fixture
 def daemon(tmp_path, fake_drone):
-    defaults = tmp_path / "defaults.json"
-    overlay = tmp_path / "config.json"
+    config_json = tmp_path / "config.json"
     cfg_out = tmp_path / "wifibroadcast.cfg"
     ready_port = _free_port()
     api_port = _free_port()
-    defaults.write_text(json.dumps({
-        "link": {"channel": 132, "width": 40, "region": "US", "txpower": 19,
+    config_json.write_text(json.dumps({
+        "link": {"channel": 132, "width": 40, "region": "US",
                  "linkId": 7669206, "wlans": ["wlan0"]},
         "wfb": {"profile": "gs"},
-        "drone": {"endpoint": fake_drone["endpoint"]},
+        "drone": {"host": fake_drone["host"], "apiPort": fake_drone["port"]},
         "pixelpilot": {"enabled": False},
     }))
     fake_runner = ["python3", "-c",
@@ -45,7 +44,7 @@ def daemon(tmp_path, fake_drone):
                     "s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);"
                     f"s.bind(('127.0.0.1',{ready_port}));s.listen(1);time.sleep(30)")]
     app = supervisor.build_app(
-        defaults_path=str(defaults), overlay_path=str(overlay),
+        str(config_json),
         cfg_out=str(cfg_out), host="127.0.0.1", port=api_port,
         runner_cmd=fake_runner, ready_port=ready_port, ready_timeout=5.0)
     app.start()
@@ -114,17 +113,17 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
     from fpvdgs.probe import config_build as _probe_cb
     monkeypatch.setattr(_probe_cb, "resolve_wlans", lambda cfg: ["wlan0"])
 
-    defaults = tmp_path / "defaults.json"
-    defaults.write_text(json.dumps({
+    config_json = tmp_path / "config.json"
+    config_json.write_text(json.dumps({
         "link": {"channel": 132, "width": 40, "region": "US"},
         "wfb": {"profile": "gs", "raw": {}},
-        "drone": {"endpoint": "http://127.0.0.1:1"},
+        "drone": {"host": "127.0.0.1", "apiPort": 1},
         "dynamicLink": {"enabled": False, "maxMcs": 5,
-                        "radioProfile": "m8812eu2", "droneAddr": None,
-                        "dronePort": 9999, "tuning": {}}}))
+                        "radioProfile": "m8812eu2",
+                        "dronePort": 9999}}))
     cfg_out = tmp_path / "wfb.cfg"
 
-    app = supervisor.build_app(str(defaults), str(tmp_path / "config.json"),
+    app = supervisor.build_app(str(config_json),
                                str(cfg_out), "127.0.0.1", 0,
                                runner_cmd=["true"])
     code, body = app.api.handle("GET", "/gs/status", {}, b"")
@@ -166,18 +165,17 @@ def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
             async def wait(self): return 0
         return _P()
 
-    defaults = tmp_path / "defaults.json"
-    defaults.write_text(json.dumps({
+    config_json = tmp_path / "config.json"
+    config_json.write_text(json.dumps({
         "link": {"channel": 132, "width": 40, "region": "US", "linkId": 7669206},
         "wfb": {"profile": "gs", "raw": {}},
-        "drone": {"endpoint": "http://127.0.0.1:1"},
+        "drone": {"host": "127.0.0.1", "apiPort": 1},
         "pixelpilot": {"enabled": False},
         "dynamicLink": {"enabled": True, "maxMcs": 5,
-                        "radioProfile": "m8812eu2", "dronePort": 9999,
-                        "tuning": {}}}))
+                        "radioProfile": "m8812eu2", "dronePort": 9999}}))
     cfg_out = tmp_path / "wfb.cfg"
     api_port = _free_port()
-    app = supervisor.build_app(str(defaults), str(tmp_path / "config.json"),
+    app = supervisor.build_app(str(config_json),
                                str(cfg_out), "127.0.0.1", api_port,
                                runner_cmd=["true"], probe_spawn=fake_spawn)
     app.start()

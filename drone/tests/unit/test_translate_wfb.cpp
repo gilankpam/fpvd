@@ -17,8 +17,10 @@ TEST_CASE("translate.wfb: video tx argv") {
     CHECK(contains("-K")); CHECK(contains("/etc/drone.key"));
     CHECK(contains("-M")); CHECK(contains("2"));
     CHECK(contains("-B")); CHECK(contains("20"));
-    CHECK(contains("-k")); CHECK(contains("8"));
-    CHECK(contains("-n")); CHECK(contains("12"));
+    // Default mode is swfec: -z flag + overhead_pct=50 / deadline_ms=30
+    CHECK(contains("-z"));
+    CHECK(contains("-k")); CHECK(contains("50"));
+    CHECK(contains("-n")); CHECK(contains("30"));
     CHECK(contains("-U")); CHECK(contains("venc_wfb"));
     CHECK(contains("-i")); CHECK(contains("7669206"));
     CHECK(contains("-C")); CHECK(contains("8000"));

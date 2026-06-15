@@ -1,9 +1,8 @@
 #pragma once
 #include "dynlink/dedup.hpp"
 #include "dynlink/encoder_client.hpp"
-#include "dynlink/idr_listen.hpp"
-#include "dynlink/osd.hpp"
 #include "dynlink/radio_txpower.hpp"
+#include "osd/writer.hpp"
 #include "dynlink/runtime_config.hpp"
 #include "dynlink/watchdog.hpp"
 #include "dynlink/wire.hpp"
@@ -33,6 +32,16 @@ public:
     // Set once before start(): supplies the BF OSD code (0/1/2) for the status
     // line. Invoked on the control thread; must be set while stopped.
     void setBfCodeProvider(std::function<int()> f) { bfCodeProvider_ = std::move(f); }
+
+    // Set once before start(): supplies the running IDR-request count for the
+    // status line. The relay that owns this count lives outside the controller
+    // (always-on, daemon-supervised), so the OSD reads it through this provider.
+    void setIdrCountProvider(std::function<uint64_t()> f) { idrCountProvider_ = std::move(f); }
+
+    // Set once before start(): the daemon-owned, always-on OSD writer the loop
+    // pushes its status/event lines to (non-owning; must outlive the controller).
+    // nullptr disables OSD writes from the loop.
+    void setOsdWriter(osd::OsdWriter* w) { osd_ = w; }
 
     // Probe rung selector: the observe-only probe rides one rung above the video
     // MCS, clamped to the hardware ceiling. Static + header-inline so it is unit
@@ -71,9 +80,8 @@ private:
     int lastProbeMcs_{-1};                          // last rung pushed to the probe
     std::optional<EncoderClient>      enc_;
     std::optional<RadioTxpower>       radio_;
-    std::optional<OsdWriter>          osd_;
+    osd::OsdWriter*                   osd_{nullptr};   // non-owning; set via setOsdWriter()
     std::optional<Watchdog>           watchdog_;
-    std::optional<IdrListener>        idr_;        // constructed in start(); fd owned by IdrListener
     Dedup                             dedup_;
 
     // Per-backend prev-state (diff baselines). lastTx_ is diffed against new
@@ -93,6 +101,7 @@ private:
     Decision lastApplied_{};   // for OSD display only
     uint64_t lastDecisionMs_{0};
     std::function<int()> bfCodeProvider_;   // 0 if unset
+    std::function<uint64_t()> idrCountProvider_;   // 0 if unset
 };
 
 } // namespace fpvd::dynlink

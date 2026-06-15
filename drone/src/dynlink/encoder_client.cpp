@@ -9,9 +9,8 @@
 
 namespace fpvd::dynlink {
 
-EncoderClient::EncoderClient(WaybeamClient& client, uint32_t minIdrIntervalMs,
-                             RoiCurve roi)
-    : client_(&client), minIdrIntervalMs_(minIdrIntervalMs), roi_(roi) {}
+EncoderClient::EncoderClient(WaybeamClient& client, RoiCurve roi)
+    : client_(&client), roi_(roi) {}
 
 int EncoderClient::apply(uint16_t bitrateKbps, uint8_t fps) {
     if (bitrateKbps == 0) return 0;  // sentinel: don't push
@@ -39,17 +38,6 @@ int EncoderClient::apply(uint16_t bitrateKbps, uint8_t fps) {
         lastFps_     = fps;
         lastValid_   = true;
     }
-    return ok ? 0 : -1;
-}
-
-int EncoderClient::requestIdr(uint64_t nowMs) {
-    if (idrEverSent_ &&
-        (nowMs - lastIdrMs_) < static_cast<uint64_t>(minIdrIntervalMs_)) {
-        return 1;  // throttled
-    }
-    bool ok = client_->get("/request/idr");
-    lastIdrMs_   = nowMs;       // arm throttle on ANY attempt (even failure)
-    idrEverSent_ = true;
     return ok ? 0 : -1;
 }
 

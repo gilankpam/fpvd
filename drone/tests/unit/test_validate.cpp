@@ -125,16 +125,6 @@ TEST_CASE("validate: dynamicLink.safe k<n and both in [1,32]") {
     CHECK(errs3[0].path == "dynamicLink.safe.fec");
 }
 
-TEST_CASE("validate: dynamicLink.safe.bandwidth must be 10, 20, or 40") {
-    Config c{}; c.dynamicLink.safe.bandwidth = 80;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.bandwidth");
-
-    Config ok{}; ok.dynamicLink.safe.bandwidth = 10;
-    CHECK(validate(ok).empty());
-}
-
 TEST_CASE("validate: link.txPowerDbm in [-10,30]") {
     Config c{}; c.link.txPowerDbm = 31;
     auto errs = validate(c);
@@ -154,18 +144,6 @@ TEST_CASE("validate: link.txPowerDbm in [-10,30]") {
     for (auto& e : errs3) CHECK(e.path != "link.txPowerDbm");
 }
 
-TEST_CASE("validate: dynamicLink.safe.txPowerDbm in [-10,30]") {
-    Config c{}; c.dynamicLink.safe.txPowerDbm = 31;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.txPowerDbm");
-
-    Config c2{}; c2.dynamicLink.safe.txPowerDbm = -11;
-    auto errs2 = validate(c2);
-    REQUIRE(errs2.size() == 1);
-    CHECK(errs2[0].path == "dynamicLink.safe.txPowerDbm");
-}
-
 TEST_CASE("validate: dynamicLink.safe.bitrateKbps > 0") {
     Config c{}; c.dynamicLink.safe.bitrateKbps = 0;
     auto errs = validate(c);
@@ -180,12 +158,6 @@ TEST_CASE("validate: dynamicLink.healthTimeoutMs >= 1000") {
     CHECK(errs[0].path == "dynamicLink.healthTimeoutMs");
 }
 
-TEST_CASE("validate: dynamicLink.minIdrIntervalMs >= 16") {
-    Config c{}; c.dynamicLink.minIdrIntervalMs = 10;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.minIdrIntervalMs");
-}
 
 TEST_CASE("validate: dynamicLink.applyStaggerMs in [0,500]") {
     Config c{}; c.dynamicLink.applyStaggerMs = 501;
@@ -277,6 +249,27 @@ TEST_CASE("validate: beamforming ackTimeout and intervalMs ranges") {
     c.link.beamforming.intervalMs = 0;      // below 1
     REQUIRE(validate(c).size() == 1);
     CHECK(validate(c)[0].path == "link.beamforming.intervalMs");
+}
+
+TEST_CASE("validate: dynamicLink.compute maxBitrateKbps > minBitrateKbps") {
+    Config c{}; c.dynamicLink.compute.maxBitrateKbps = c.dynamicLink.compute.minBitrateKbps;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.compute");
+}
+
+TEST_CASE("validate: dynamicLink.compute kMax >= kMin") {
+    Config c{}; c.dynamicLink.compute.kMax = c.dynamicLink.compute.kMin - 1;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.compute.k");
+}
+
+TEST_CASE("validate: dynamicLink.compute.baseRedundancyRatio > 0") {
+    Config c{}; c.dynamicLink.compute.baseRedundancyRatio = 0.0;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "dynamicLink.compute.baseRedundancyRatio");
 }
 
 TEST_CASE("validate: link.fec swfec rules") {
