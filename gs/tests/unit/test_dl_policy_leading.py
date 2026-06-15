@@ -25,7 +25,6 @@ def _selector(*,
               probe_freshness_ms: float = 500.0,
               promote_debounce_windows: int = 3,
               video_demote_per: float = 0.05,
-              emergency_loss_rate: float = 0.05,
               emergency_fec_pressure: float = 0.80,
               max_mcs: int = 7,
               hold_modes_down_ms: int = 0,
@@ -37,7 +36,6 @@ def _selector(*,
         probe_freshness_ms=probe_freshness_ms,
         promote_debounce_windows=promote_debounce_windows,
         video_demote_per=video_demote_per,
-        emergency_loss_rate=emergency_loss_rate,
         emergency_fec_pressure=emergency_fec_pressure,
         max_mcs=max_mcs,
         hold_modes_down_ms=hold_modes_down_ms,
@@ -57,9 +55,10 @@ def _probe(viable_mcs, *, per=0.0, age_ms=0.0):
     return {"running": True, "streams": 1, "mcs": mcs}
 
 
-def _select(s, *, probe=None, loss=0.0, fec=0.0, link_starved=False, ts_ms=0.0):
+def _select(s, *, probe=None, loss=0.0, loss_demote=False, fec=0.0,
+            link_starved=False, ts_ms=0.0):
     return s.select(probe=probe if probe is not None else _probe(7),
-                    loss_rate=loss, fec_pressure=fec,
+                    loss_rate=loss, loss_demote=loss_demote, fec_pressure=fec,
                     link_starved=link_starved, ts_ms=ts_ms)
 
 
@@ -158,11 +157,11 @@ def test_no_promote_without_probe():
 # ── Reactive demote: Channel-B emergency ────────────────────────────────────
 
 
-def test_emergency_loss_still_demotes_one_step():
-    s = _selector(emergency_loss_rate=0.05, max_mcs=5, promote_debounce_windows=1)
+def test_loss_demote_one_step():
+    s = _selector(max_mcs=5, promote_debounce_windows=1)
     _drive_to_mcs_probe(s, 5)
     pre = s.state.current_mcs
-    mcs, changed = _select(s, loss=0.06, ts_ms=99999.0)
+    mcs, changed = _select(s, loss=0.06, loss_demote=True, ts_ms=99999.0)
     assert changed and mcs == pre - 1
 
 
@@ -183,16 +182,12 @@ def test_emergency_link_starved_demotes_one_step():
     assert changed and mcs == pre - 1
 
 
-def test_emergency_below_threshold_no_demote():
-    """loss=0.04 (below 0.05 default, also below video_demote_per=0.05) →
-    no emergency, MCS holds."""
-    s = _selector(emergency_loss_rate=0.05, video_demote_per=0.05, max_mcs=5,
-                  promote_debounce_windows=1)
+def test_loss_not_demoted_when_loss_demote_false():
+    s = _selector(max_mcs=5, promote_debounce_windows=1)
     _drive_to_mcs_probe(s, 5)
     pre = s.state.current_mcs
-    mcs, changed = _select(s, loss=0.04, ts_ms=99999.0)
-    assert not changed
-    assert mcs == pre
+    mcs, changed = _select(s, loss=0.06, loss_demote=False, ts_ms=99999.0)
+    assert not changed and mcs == pre
 
 
 def test_emergency_at_mcs0_cannot_force_below():
@@ -211,17 +206,12 @@ def test_emergency_at_mcs0_cannot_force_below():
 # ── Reactive demote: video-PER breach ───────────────────────────────────────
 
 
-def test_video_per_breach_demotes():
-    # Separate the thresholds so ONLY the video-PER branch can fire
-    # (emergency_loss_rate high enough that _emergency_active stays False).
-    s = _selector(video_demote_per=0.03, emergency_loss_rate=0.50,
-                  max_mcs=5, promote_debounce_windows=1)
+def test_loss_demote_reason_is_video_per_not_emergency():
+    s = _selector(max_mcs=5, promote_debounce_windows=1)
     _drive_to_mcs_probe(s, 5)
-    pre = s.state.current_mcs
-    # loss between video_demote_per (0.03) and emergency_loss_rate (0.50):
-    # emergency stays inactive, video-PER breach fires.
-    mcs, changed = _select(s, loss=0.04, ts_ms=99999.0)
-    assert changed and mcs == pre - 1
+    _select(s, loss=0.07, loss_demote=True, ts_ms=99999.0)
+    assert any("video_per_demote" in r for r in s._reasons)
+    assert not any("emergency" in r for r in s._reasons)
 
 
 def test_strong_rssi_does_not_raise_mcs_without_probe_or_prior(tmp_path):

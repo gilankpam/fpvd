@@ -29,7 +29,6 @@ def test_selector_block_overrides_defaults():
     assert s.starvation_windows == 9
     # unspecified selector knobs keep their defaults
     assert s.video_demote_per == 0.05
-    assert s.emergency_loss_rate == 0.05
 
 
 def test_selector_defaults_when_absent():

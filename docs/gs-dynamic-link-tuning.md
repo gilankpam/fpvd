@@ -36,8 +36,7 @@ Source: `gs/fpvdgs/dynlink/policy.py` (`SelectorConfig`).
 | `probeViableThreshold` | float | `0.99` | [0, 1] | Minimum EWMA probe-success rate on the `current+1` rung required to begin a promote. |
 | `probeFreshnessMs` | float | `500.0` | >= 0 ms | Maximum age of the last probe measurement accepted for a promote decision. Consistent with `PROBE_RX_L=50` ms so a probed rung is never considered stale between wfb_rx stats batches. |
 | `promoteDebounceWindows` | int | `3` | positive int | Number of consecutive ticks the probe rung must read clean+fresh before a promote fires. At 10 Hz, the default 3 = 300 ms debounce. |
-| `videoDemotePer` | float | `0.05` | [0, 1] | Video on-air residual-loss rate (PER) threshold — a window above this triggers an immediate reactive demote. |
-| `emergencyLossRate` | float | `0.05` | [0, 1] | Residual packet-loss rate threshold for the Channel-B emergency demote. |
+| `videoDemotePer` | float | `0.05` | [0, 1] | Residual-loss rate (PER) threshold for a loss demote (the single loss-demote threshold). |
 | `emergencyFecPressure` | float | `0.80` | [0, 1] | FEC work rate threshold for the Channel-B emergency demote (FEC pressure ≥ this means the link is close to saturation). |
 | `holdModesDownMs` | int | `2000` | >= 0 ms | Cooldown after any demote before the selector may promote again. Demotes bypass this cooldown (they are always immediate). |
 | `minBetweenChangesMs` | int | `200` | >= 0 ms | Minimum interval between any two MCS changes (promote or demote). |

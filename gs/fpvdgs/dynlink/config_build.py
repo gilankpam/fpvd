@@ -23,7 +23,6 @@ def build_policy_config(block: dict) -> PolicyConfig:
         probe_freshness_ms=float(sel.get("probeFreshnessMs", d.probe_freshness_ms)),
         promote_debounce_windows=int(sel.get("promoteDebounceWindows", d.promote_debounce_windows)),
         video_demote_per=float(sel.get("videoDemotePer", d.video_demote_per)),
-        emergency_loss_rate=float(sel.get("emergencyLossRate", d.emergency_loss_rate)),
         emergency_fec_pressure=float(sel.get("emergencyFecPressure", d.emergency_fec_pressure)),
         max_mcs=int(block.get("maxMcs", d.max_mcs)),
         hold_modes_down_ms=int(sel.get("holdModesDownMs", d.hold_modes_down_ms)),

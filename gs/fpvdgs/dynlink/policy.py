@@ -35,10 +35,10 @@ class SelectorConfig:
     Promote: the `current+1` probe rung must read clean (EWMA success
     >= probe_viable_threshold) and fresh (within probe_freshness_ms) for
     promote_debounce_windows consecutive ticks, and clear the
-    hold_modes_down_ms / min_between_changes_ms cooldowns. Demote: a kept
-    Channel-B emergency (loss/fec/starvation), or a video-PER breach
-    (video_demote_per). starvation_windows is the consecutive-starved-window
-    count before link_starved feeds the emergency demote.
+    hold_modes_down_ms / min_between_changes_ms cooldowns. Demote: a
+    caller-hysteresis-gated loss breach (`residual_loss_w >= video_demote_per`)
+    or a Channel-B emergency (fec/starvation). starvation_windows is the
+    consecutive-starved-window count before link_starved feeds the emergency demote.
     """
     # Probe-driven promote
     probe_viable_threshold: float = 0.99
@@ -46,7 +46,6 @@ class SelectorConfig:
     promote_debounce_windows: int = 3
     # Reactive demote
     video_demote_per: float = 0.05
-    emergency_loss_rate: float = 0.05
     emergency_fec_pressure: float = 0.80
     # MCS bound
     max_mcs: int = 7
@@ -93,10 +92,10 @@ class LeadingSelector:
     consecutive ticks. The climb naturally stops at the ceiling — a
     cliffed `current+1` rung (per≈1.0, or absent) never debounces.
 
-    Demote (fast/reactive): the Channel-B emergency triggers (loss_rate,
-    fec_pressure, or link_starved) and a video on-air PER breach
-    (`loss_rate >= video_demote_per`) force an immediate one-step
-    downgrade, bypassing the promote rate limit and hold timers.
+    Demote (fast/reactive): a caller-hysteresis-gated loss breach
+    (`loss_demote`, i.e. `residual_loss_w >= video_demote_per`) or a
+    Channel-B emergency (fec_pressure or link_starved) forces an immediate
+    one-step downgrade, bypassing the promote rate limit and hold timers.
     """
 
     def __init__(self, cfg: SelectorConfig):
@@ -117,12 +116,9 @@ class LeadingSelector:
 
     # ---- helpers ----
 
-    def _emergency_active(
-        self, loss_rate: float, fec_pressure: float, link_starved: bool
-    ) -> bool:
+    def _emergency_active(self, fec_pressure: float, link_starved: bool) -> bool:
         return (
-            loss_rate >= self.cfg.emergency_loss_rate
-            or fec_pressure >= self.cfg.emergency_fec_pressure
+            fec_pressure >= self.cfg.emergency_fec_pressure
             or link_starved
         )
 
@@ -133,6 +129,7 @@ class LeadingSelector:
         *,
         probe: dict | None,
         loss_rate: float,
+        loss_demote: bool = False,
         fec_pressure: float,
         link_starved: bool,
         ts_ms: float,
@@ -164,17 +161,18 @@ class LeadingSelector:
                 self._promote_clean = 0
                 reasons.append(why)
 
-        # --- Demote: emergency (Channel B) or video-PER breach (reactive) ---
-        if self._emergency_active(loss_rate, fec_pressure, link_starved):
-            commit(
-                prev - 1,
-                f"emergency loss={loss_rate:.3f} fec={fec_pressure:.3f} "
-                f"starved={link_starved}",
-            )
+        # --- Demote (reactive, bypasses the promote rate limit) ---
+        # Loss (caller-hysteresis-gated) is the common case and is attributed
+        # first; FEC pressure / sustained starvation are the other emergencies.
+        if loss_demote:
+            commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
             self._reasons = reasons
             return (st.current_mcs, st.current_mcs != prev)
-        if loss_rate >= self.cfg.video_demote_per:
-            commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
+        if self._emergency_active(fec_pressure, link_starved):
+            commit(
+                prev - 1,
+                f"emergency fec={fec_pressure:.3f} starved={link_starved}",
+            )
             self._reasons = reasons
             return (st.current_mcs, st.current_mcs != prev)
 
@@ -330,9 +328,11 @@ class Policy:
         # reactive demote. The drone computes its own bitrate / FEC /
         # depth / tx_power locally, so we emit {mcs} only.
         probe_snap = self._probe_status() if self._probe_status else None
+        loss_demote = signals.residual_loss_w >= self.cfg.selector.video_demote_per
         new_mcs, _changed = self.leading.select(
             probe=probe_snap,
             loss_rate=signals.residual_loss_w,
+            loss_demote=loss_demote,
             fec_pressure=signals.fec_work,
             link_starved=sustained_starved,
             ts_ms=ts_ms,

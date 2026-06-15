@@ -630,8 +630,7 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
     "probeViableThreshold": 0.99,    // probability [0,1] — min EWMA probe success rate to promote
     "probeFreshnessMs": 500.0,       // ms >= 0 — max probe age to accept for a promote decision
     "promoteDebounceWindows": 3,     // positive int — consecutive clean probe windows before promote
-    "videoDemotePer": 0.05,          // probability [0,1] — video PER threshold that triggers demote
-    "emergencyLossRate": 0.05,       // probability [0,1] — residual loss rate for emergency demote
+    "videoDemotePer": 0.05,          // probability [0,1] — residual-loss threshold for a loss demote
     "emergencyFecPressure": 0.80,    // probability [0,1] — FEC work rate for emergency demote
     "holdModesDownMs": 2000,         // ms >= 0 — cooldown after a demote before next promote
     "minBetweenChangesMs": 200,      // ms >= 0 — minimum interval between any MCS changes
