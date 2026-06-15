@@ -616,15 +616,14 @@ An object whose keys are service names and whose values are service definitions.
 
 The adaptive link has two halves. The drone runs the **applier** — the [`dynamicLink`](#dynamiclink--adaptive-link-controller) block in the Config schema above — which receives decisions and applies them to the radio and encoder. The **controller** (the brain that *decides*) runs on the ground station as a separate daemon, `fpvdgs`, with its own HTTP+JSON API on the GS (same shapes as this document, but rooted under `/gs/*`: `GET`/`PATCH /gs/config`, `POST /gs/apply`, `GET /gs/status`, plus an opaque `/air/*` proxy to the drone fpvd).
 
-The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the probe-driven MCS selector, and emits `{mcs}`-only decision packets over UDP to the drone applier (`droneAddr:dronePort`, default `:9999`). It is configured by the GS daemon's own `dynamicLink` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
+The controller is an in-process thread that subscribes to wfb-ng's link stats at 10 Hz, runs the probe-driven MCS selector, and emits `{mcs}`-only decision packets over UDP to the drone applier (`drone.host`:`dynamicLink.dronePort`, default `:9999`). It is configured by the GS daemon's own `dynamicLink` block — **distinct from, and differently shaped than, the drone-side `dynamicLink` above**:
 
 ```jsonc
 "dynamicLink": {
   "enabled": false,            // boolean — arm the in-process control loop
   "maxMcs": 5,                 // integer, 0..7 — operator MCS ceiling
   "radioProfile": "m8812eu2",  // string — keys the learned-prior persistence file
-  "droneAddr": null,           // string|null — drone UDP address; null => host parsed from drone.endpoint
-  "dronePort": 9999,           // integer, 1..65535 — drone dynamic-link UDP listener port
+  "dronePort": 9999,           // integer, 1..65535 — drone DL UDP port (host comes from drone.host)
 
   // Selector: probe-driven promote + reactive demote + timing/cadence
   "selector": {
@@ -657,8 +656,7 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
 | `enabled` | boolean | `false` | — |
 | `maxMcs` | integer | `5` | 0 – 7 |
 | `radioProfile` | string | `"m8812eu2"` | any non-empty string |
-| `droneAddr` | string \| null | `null` | UDP address; `null` ⇒ host parsed from `drone.endpoint` |
-| `dronePort` | integer | `9999` | 1 – 65535 |
+| `dronePort` | integer | `9999` | 1 – 65535 (drone UDP host comes from `drone.host`) |
 | `selector.*` | — | see above | see [Tuning reference](gs-dynamic-link-tuning.md) |
 | `smoothing.*` | — | see above | see [Tuning reference](gs-dynamic-link-tuning.md) |
 | `flightlog.enabled` | boolean | `true` | — |
@@ -674,7 +672,7 @@ All other knobs — learned-prior internals, probe measurement constants, rssi-n
 
 ## `idrForward` — IDR-token relay
 
-A top-level GS config block (a **sibling** of `dynamicLink` and `pixelpilot`) that runs the IDR/keyframe-token relay. It is **independent of `dynamicLink.enabled`**: it forwards PixelPilot keyframe/IDR tokens from `0.0.0.0:<port>` to `<droneHost>:<port>`, where `droneHost` is derived from `drone.endpoint`, bridging PixelPilot keyframe requests to the drone's `idr_listen`.
+A top-level GS config block (a **sibling** of `dynamicLink` and `pixelpilot`) that runs the IDR/keyframe-token relay. It is **independent of `dynamicLink.enabled`**: it forwards PixelPilot keyframe/IDR tokens from `0.0.0.0:<port>` to `<droneHost>:<port>`, where `droneHost` is `drone.host`, bridging PixelPilot keyframe requests to the drone's `idr_listen`.
 
 ```jsonc
 "idrForward": {
@@ -1026,12 +1024,12 @@ curl -X POST  http://127.0.0.1:8080/gs/apply
 
 ## Drone proxy — `/air/*`
 
-`GET/PATCH /air/config`, `POST /air/apply`, `GET /air/status` forward the request **opaquely** (no schema parsing) to the drone fpvd at `drone.endpoint`, relaying its response verbatim. This is the single front door for the drone's own config — both drone-only config (video bitrate, codec, ROI, …) and the drone's `link` block during a [client-orchestrated](#client-orchestration-of-cross-device-link-changes) shared-link or beamforming change. The GS daemon never models the drone schema.
+`GET/PATCH /air/config`, `POST /air/apply`, `GET /air/status` forward the request **opaquely** (no schema parsing) to the drone fpvd at `drone.host`:`drone.apiPort`, relaying its response verbatim. This is the single front door for the drone's own config — both drone-only config (video bitrate, codec, ROI, …) and the drone's `link` block during a [client-orchestrated](#client-orchestration-of-cross-device-link-changes) shared-link or beamforming change. The GS daemon never models the drone schema.
 
 | Code | Meaning |
 |------|---------|
 | 2xx/4xx/5xx | Relayed from the drone fpvd. |
-| 502 | `{"error":"drone unreachable: ..."}` — could not reach `drone.endpoint`. |
+| 502 | `{"error":"drone unreachable: ..."}` — could not reach the drone (`drone.host`:`drone.apiPort`). |
 
 ```bash
 curl http://127.0.0.1:8080/air/status                       # drone's /status, proxied
@@ -1064,8 +1062,8 @@ curl -X PATCH http://127.0.0.1:8080/air/config \            # drone-only config
     "port": 11223
   },
   "drone": {
-    "endpoint": "http://10.5.0.10:8080"  // where the /air proxy reaches the drone fpvd (over the wfb tunnel);
-                                         //   also the source of droneHost for the idrForward relay
+    "host": "10.5.0.10",     // the drone's address on the wfb tunnel; reused by the /air proxy,
+    "apiPort": 8080          //   the IDR relay, and the dynamic-link decision UDP
   }
 }
 ```
@@ -1084,7 +1082,8 @@ curl -X PATCH http://127.0.0.1:8080/air/config \            # drone-only config
 | `wfb.raw` | object | `{}` | passthrough escape hatch |
 | `idrForward.enabled` | boolean | `true` | run the relay — see [`idrForward`](#idrforward--idr-token-relay) |
 | `idrForward.port` | integer | `11223` | UDP relay port |
-| `drone.endpoint` | string | `http://10.5.0.10:8080` | drone fpvd base URL (and the source of the relay's droneHost) |
+| `drone.host` | string | `10.5.0.10` | the drone's address; reused by the /air proxy, IDR relay, and DL decision UDP |
+| `drone.apiPort` | integer | `8080` | the drone fpvd HTTP API port |
 
 There is intentionally **no** `mcs`/`fec`/`ldpc`/`stbc` on the GS: video downlink FEC/modulation is auto-detected by `wfb_rx` (drone-owned), and the GS uplink TX uses wfb-ng's defaults. There are also no `video`/`image`/`telemetry`/`recording`/`services` sections — those are drone-only. (`dynamicLink`, `idrForward`, and `pixelpilot` are GS-side sections — see their dedicated sections.)
 

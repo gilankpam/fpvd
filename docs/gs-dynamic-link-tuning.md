@@ -22,8 +22,9 @@ Everything else is frozen.
 | `enabled` | bool | `false` | — | Arm the in-process control loop. |
 | `maxMcs` | int | `5` | 0 – 7 | Operator MCS ceiling — the controller never selects above this rung regardless of probe results. Distinct from the internal `SelectorConfig.max_mcs` HW-ceiling fallback (7). |
 | `radioProfile` | string | `"m8812eu2"` | non-empty string | Keys the learned-prior persistence file at `/etc/fpvd/learned/<radioProfile>.json`. No hardware lookup — it is a free identifier. |
-| `droneAddr` | string \| null | `null` | UDP address | Drone UDP target. `null` ⇒ hostname parsed from `drone.endpoint`. |
-| `dronePort` | int | `9999` | 1 – 65535 | Drone dynamic-link UDP listener port (matches `drone/src/dynlink/wire.hpp`). |
+| `dronePort` | int | `9999` | 1 – 65535 | Drone dynamic-link UDP **port**; the host is the shared `drone.host` (see below). Matches `drone/src/dynlink/wire.hpp`. |
+
+> **Drone address.** The GS reaches the drone via one top-level `drone.host` (default `10.5.0.10`), reused by all three components — the HTTP `/air` proxy (`drone.apiPort`, default `8080`), the IDR relay (`idrForward.port`), and the dynamic-link decision UDP (`dynamicLink.dronePort`). Only the host is shared; each service keeps its own port.
 
 ### `dynamicLink.selector` — operational tuning
 
