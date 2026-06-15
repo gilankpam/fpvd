@@ -276,7 +276,7 @@ TEST_CASE("validate: video.resilience accepts every known preset") {
     for (const char* p : {"off","rescue","quality","sprint","racing",
                           "endurance","patrol","rally","range","fpv"}) {
         Config c{}; c.video.resilience = p;
-        CHECK(validate(c).empty());
+        CHECK_MESSAGE(validate(c).empty(), "unexpected error for preset: " << p);
     }
 }
 
