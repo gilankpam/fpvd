@@ -434,7 +434,8 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
   "fps": 60,                // integer, 1..120 — frames per second
   "bitrate": 8192,          // integer, > 0 — target bitrate in kbps
   "rcMode": "cbr",          // string — "cbr" or "vbr"
-  "gopSize": 1.0,           // number — GOP size in seconds
+  "gopSize": 1.0,           // number — GOP size in seconds (ignored when resilience != "off")
+  "resilience": "off",      // string — waybeam error-resilience preset (see note below)
   "qpDelta": -4,            // integer — QP delta applied to the encoder baseline
   "roi": {
     "enabled": true,        // boolean — enable ROI (region of interest) encoding
@@ -452,12 +453,21 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 | `fps` | integer | `60` | 1 – 120 |
 | `bitrate` | integer | `8192` | > 0 (kbps) |
 | `rcMode` | string | `"cbr"` | `"cbr"` or `"vbr"` |
-| `gopSize` | number | `1.0` | — |
+| `gopSize` | number | `1.0` | — (ignored when `resilience` ≠ `"off"`) |
+| `resilience` | string | `"off"` | `"off"`, `"rescue"`, `"quality"`, `"sprint"`, `"racing"`, `"endurance"`, `"patrol"`, `"rally"`, `"range"`, `"fpv"` |
 | `qpDelta` | integer | `-4` | — |
 | `roi.enabled` | boolean | `true` | — |
 | `roi.qp` | integer | `0` | — |
 | `roi.center` | number | `0.4` | — |
 | `roi.steps` | integer | `2` | — |
+
+#### `video.resilience` — error-resilience preset
+
+`resilience` selects a waybeam error-resilience profile. waybeam derives intra-refresh (rolling GDR stripe), the SVC-T reference pyramid, and the GOP length from the named preset — there are no separate per-feature knobs. `"off"` (the default) preserves the classic GOP behavior driven by `gopSize`; any other preset makes waybeam own intra-refresh and GOP, and `gopSize` is then ignored.
+
+- **Validation:** unknown values are rejected by `PATCH /config` with a `validation` error on path `video.resilience`.
+- **Apply class:** a change is **restart-class** — `POST /apply` rewrites `/etc/waybeam.json` and bounces the encoder (it appears as `"encoder"` in the `restarted` array), rather than being hot-pushed to the running encoder.
+- **Not adaptive-link-locked:** unlike `video.bitrate`/`qpDelta`/`roi`, `resilience` is an operator-owned flight-profile choice and stays editable while `dynamicLink.enabled` (see [Adaptive-link lock](#adaptive-link-lock)).
 
 ### `image` — sensor orientation
 
@@ -806,7 +816,7 @@ To prevent this, `PATCH /config` rejects any body that touches the following pat
 | `video.qpDelta` | Encoder QP delta via encoder HTTP API |
 | `video.roi` | Encoder ROI settings via encoder HTTP API (entire subtree) |
 
-Note: `link.channel` is **not** locked — dl-applier never changes frequency.
+Note: `link.channel` is **not** locked — dl-applier never changes frequency. `video.resilience` is **not** locked either — it is an operator-owned encoder preset the controller never writes, so it stays editable while `dynamicLink.enabled`.
 
 ### Lock evaluation rule
 
