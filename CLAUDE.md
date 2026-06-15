@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 FPV drone link stack with two cooperating daemons, each the single supervisor + HTTP API (`:8080`) for its device:
 
-- `drone/` — **fpvd**, C++17, runs on the OpenIPC ssc338q camera. Supervises waybeam (encoder), wfb-ng (radio), msposd/mavfwd; owns one unified config (defaults + sparse overlay, deep-merged) exposed as `GET/PATCH /config` → `POST /apply` (restarts only affected children).
+- `drone/` — **fpvd**, C++17, runs on the OpenIPC ssc338q camera. Supervises waybeam (encoder), wfb-ng (radio), msposd/mavfwd; owns one unified config (defaults + sparse overlay, deep-merged) exposed as `GET/PATCH /config` → `POST /apply` (restarts only affected children). The encoder's error-resilience profile is a single operator knob, `video.resilience` (waybeam preset; restart-class, never DL-locked).
 - `gs/` — **fpvdgs**, Python ≥3.11, runs on the ground station. Supervises the wfb data plane (built on the `wfb_ng` library), pixelpilot (display), the dynamic-link controller, the probe receiver, the beamforming armer, and the IDR relay.
 
 ## Commands
