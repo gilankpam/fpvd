@@ -128,7 +128,11 @@ else:
   projected RSSI drop over `predictive_horizon_ticks` to permit a demote (≈ slope ≤
   −0.33 dBm/tick ≈ −3.3 dB/s; from the "genuine downtrend" cut in both logs).
 - The debounce (`predictive_debounce_windows = 3`) now counts consecutive ticks meeting
-  **both** conditions; any non-qualifying tick resets it via the existing `else`.
+  **both** conditions; any non-qualifying tick resets it via the existing `else`. A
+  consequence: a fade hovering *exactly* at the threshold (slope oscillating around the
+  cut) can keep resetting the debounce so the predictive path never commits. This is
+  intentional and fail-safe — a real fade that bites is caught by the reactive demote
+  (loss/FEC/PER), which is untouched; the predictive path is only the head start.
 
 This eliminates the 34–39% flat/rising demotes outright; with §4.1 it leaves only
 genuine-downtrend demotes (~20% of today's volume).
