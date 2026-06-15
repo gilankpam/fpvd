@@ -117,6 +117,23 @@ TEST_CASE("osd: setEnabled gates writes at runtime") {
     std::remove(path.c_str());
 }
 
+TEST_CASE("osd: setEnabled(false) clears the overlay") {
+    std::string path = "/tmp/fpvd-osd-toggle-off.msg";
+    std::remove(path.c_str());
+
+    OsdWriter osd(path, /*enabled=*/true);
+    osd.writeBaseLine(0);
+    CHECK(readFile(path).find("CPU&C") != std::string::npos);   // rendered
+
+    /* Toggling OSD off must actively clear the msg file: msposd holds + re-
+     * renders the last bytes forever, so flipping the flag alone leaves a stale
+     * overlay on screen. The file must be emptied. */
+    osd.setEnabled(false);
+    CHECK(readFile(path).empty());
+
+    std::remove(path.c_str());
+}
+
 TEST_CASE("osd: event line written before status line") {
     std::string path = "/tmp/fpvd-osd-test4.msg";
     OsdWriter osd(path, /*enabled=*/true);

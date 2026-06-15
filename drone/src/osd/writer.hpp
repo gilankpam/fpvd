@@ -38,7 +38,8 @@ public:
 
 private:
     /* Write eventLine_ (if set) + statusLine_ atomically to msgPath_. Assumes
-     * mu_ is held and enabled_ is true. */
+     * mu_ is held. With both lines unset this truncates the file to empty,
+     * which clears the msposd overlay (see setEnabled's on->off path). */
     void flushLocked();
 
     std::mutex  mu_;

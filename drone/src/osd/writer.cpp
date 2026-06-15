@@ -22,7 +22,17 @@ OsdWriter::OsdWriter(std::string msgPath, bool enabled)
 
 void OsdWriter::setEnabled(bool e) {
     std::lock_guard<std::mutex> lk(mu_);
+    const bool wasEnabled = enabled_;
     enabled_ = e;
+    /* On an on->off toggle, actively clear the overlay. msposd holds + re-
+     * renders the last bytes we wrote, and every write path no-ops while
+     * disabled, so flipping the flag alone leaves a stale line on screen
+     * forever. Unset both lines and flush an empty file so msposd clears it. */
+    if (wasEnabled && !e) {
+        statusLine_[0] = '\0';
+        eventLine_[0]  = '\0';
+        flushLocked();
+    }
 }
 
 void OsdWriter::flushLocked() {

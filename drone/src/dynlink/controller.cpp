@@ -123,6 +123,7 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap) {
     lastApplied_ = Decision{};
     lastProbeMcs_ = -1;            // force the probe to re-tune on the first decision
     lastDecisionMs_ = 0;
+    lastOsdWriteMs_ = 0;           // first decision writes the OSD immediately
 
     int efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     eventFd_.store(efd);                // -1 tolerated (run() handles it)
@@ -423,10 +424,18 @@ void DynamicLinkController::run(int evfd) {
                         }
 
                         lastApplied_ = d;
-                        if (osd_)
+                        // Throttle OSD status writes to osdUpdateIntervalMs
+                        // (default 1 Hz). Decisions arrive ~10 Hz; the OSD only
+                        // needs ~1 Hz, so most writes are coalesced — but mcs/
+                        // bitrate still display within one interval. The watchdog
+                        // event line is untouched (it fires on the tick).
+                        if (osd_ && osdWriteDue(now, lastOsdWriteMs_,
+                                                ep_.osdUpdateIntervalMs)) {
                             osd_->writeStatus(lastApplied_, 0,
                                               bfCodeProvider_ ? bfCodeProvider_() : 0,
                                               idrCountProvider_ ? idrCountProvider_() : 0);
+                            lastOsdWriteMs_ = now;
+                        }
                         watchdog_->notifyDecision(now);
                         lastDecisionMs_ = now;
                         {
