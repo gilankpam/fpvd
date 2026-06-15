@@ -50,6 +50,16 @@ public:
         return mcs + 1 < ceiling ? mcs + 1 : ceiling;
     }
 
+    // OSD status-write throttle gate. The GS sends decisions ~10 Hz, but the OSD
+    // is a human-readable display that only needs refreshing at
+    // osdUpdateIntervalMs (default 1 Hz); rewriting the msg file on every
+    // decision is wasted I/O + msposd churn. lastMs==0 means "never written" ->
+    // always due. Static + header-inline so the gate is unit-testable without
+    // constructing the controller.
+    static bool osdWriteDue(uint64_t nowMs, uint64_t lastMs, uint32_t intervalMs) {
+        return lastMs == 0 || nowMs - lastMs >= intervalMs;
+    }
+
 private:
     void run(int evfd);                            // the poll(2) loop (Tasks 14-17); evfd passed from start()
     void stopLocked();                             // assumes lifetimeMu_ is already held
@@ -100,6 +110,7 @@ private:
     Decision lastEnc_{};
     Decision lastApplied_{};   // for OSD display only
     uint64_t lastDecisionMs_{0};
+    uint64_t lastOsdWriteMs_{0};   // throttle baseline for osdWriteDue (0 = never written)
     std::function<int()> bfCodeProvider_;   // 0 if unset
     std::function<uint64_t()> idrCountProvider_;   // 0 if unset
 };
