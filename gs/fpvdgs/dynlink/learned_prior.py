@@ -20,6 +20,20 @@ log = logging.getLogger("fpvdgs.dynlink")
 MAX_MCS = 7   # rung ceiling (matches SelectorConfig.max_mcs default and the drone)
 
 
+def lsq_slope(samples) -> float:
+    """Least-squares gradient (dBm per tick) over an evenly-spaced sample
+    sequence (x = 0, 1, ..., n-1). Unlike a single-tick delta, a lone spike
+    barely moves the fit. Fewer than 2 samples → 0.0 (no trend yet)."""
+    n = len(samples)
+    if n < 2:
+        return 0.0
+    mean_x = (n - 1) / 2.0
+    mean_y = sum(samples) / n
+    num = sum((i - mean_x) * (y - mean_y) for i, y in enumerate(samples))
+    den = sum((i - mean_x) ** 2 for i in range(n))
+    return num / den if den else 0.0
+
+
 @dataclass
 class LearnedPriorConfig:
     bin_width_db: float = 2.0
@@ -32,6 +46,8 @@ class LearnedPriorConfig:
     warmstart_margin: int = 0
     predictive_horizon_ticks: int = 3
     predictive_debounce_windows: int = 3
+    predictive_slope_window_ticks: int = 10   # least-squares RSSI window (1.0 s @ 10 Hz)
+    predictive_min_drop_db: float = 1.0       # min projected RSSI drop over the horizon to demote
     flush_interval_observations: int = 50
     persist_dir: str = "/etc/fpvd/learned"
 

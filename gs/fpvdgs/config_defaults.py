@@ -22,11 +22,11 @@ def _dynamic_link_defaults() -> dict:
             "probeFreshnessMs": sel.probe_freshness_ms,
             "promoteDebounceWindows": sel.promote_debounce_windows,
             "videoDemotePer": sel.video_demote_per,
-            "emergencyLossRate": sel.emergency_loss_rate,
             "emergencyFecPressure": sel.emergency_fec_pressure,
             "holdModesDownMs": sel.hold_modes_down_ms,
             "minBetweenChangesMs": sel.min_between_changes_ms,
             "starvationWindows": sel.starvation_windows,
+            "lossWindows": sel.loss_windows,
         },
         "smoothing": {
             "ewmaAlphaRssi": agg.ewma_alpha_rssi,

@@ -198,3 +198,29 @@ def test_to_status_shape(tmp_path):
     st = p.to_status()
     assert st["key"] == "m8812eu2"
     assert any(entry["ceiling"] == 5 for entry in st["bins"])
+
+
+def test_lsq_slope_flat_is_zero():
+    from fpvdgs.dynlink.learned_prior import lsq_slope
+    assert lsq_slope([-50.0, -50.0, -50.0]) == 0.0
+
+
+def test_lsq_slope_linear_ramp_is_exact():
+    from fpvdgs.dynlink.learned_prior import lsq_slope
+    # -0.5 dBm per tick ramp
+    assert abs(lsq_slope([-50.0, -50.5, -51.0, -51.5, -52.0]) - (-0.5)) < 1e-9
+
+
+def test_lsq_slope_rejects_lone_spike():
+    from fpvdgs.dynlink.learned_prior import lsq_slope
+    # a -0.5/tick ramp with one +10 dB spike stays a clear downtrend;
+    # a single-tick delta at the spike would read ~+9.5
+    ramp = [-0.5 * i for i in range(10)]
+    ramp[5] += 10.0
+    assert -0.6 < lsq_slope(ramp) < -0.35
+
+
+def test_lsq_slope_under_two_samples_is_zero():
+    from fpvdgs.dynlink.learned_prior import lsq_slope
+    assert lsq_slope([]) == 0.0
+    assert lsq_slope([-50.0]) == 0.0

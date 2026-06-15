@@ -123,3 +123,22 @@ def test_stale_dynamic_link_keys_do_not_brick_boot(tmp_path):
     schema.validate_effective(s.effective())  # must NOT raise (boot path)
     assert "tuning" not in s.effective()["dynamicLink"]
     assert "bandwidth" not in s.effective()["dynamicLink"]
+
+
+def test_stale_nested_selector_key_does_not_brick_boot(tmp_path):
+    """A removed selector knob (e.g. emergencyLossRate) left in a stale
+    config.json must be stripped, not bricked — validate_effective is strict on
+    dynamicLink.selector keys. This is the live-GS migration after the key was
+    dropped; without nested pruning the boot path crash-loops."""
+    from fpvdgs import schema
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"dynamicLink": {
+        "enabled": True, "maxMcs": 5, "radioProfile": "m8812eu2", "dronePort": 9999,
+        "selector": {"videoDemotePer": 0.05, "emergencyLossRate": 0.05,
+                     "starvationWindows": 5},
+        "smoothing": {"ewmaAlphaRssi": 0.2, "bogusSmoothing": 1}}}))
+    s = ConfigStore.load(str(cfg))            # warns + strips
+    schema.validate_effective(s.effective())  # must NOT raise (boot path)
+    sel = s.effective()["dynamicLink"]["selector"]
+    assert "emergencyLossRate" not in sel and sel["videoDemotePer"] == 0.05
+    assert "bogusSmoothing" not in s.effective()["dynamicLink"]["smoothing"]

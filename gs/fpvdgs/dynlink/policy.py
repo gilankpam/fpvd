@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 from .decision import Decision
 from .flightlog import FlightLog, FlightLogConfig
-from .learned_prior import LearnedPrior, LearnedPriorConfig
+from .learned_prior import LearnedPrior, LearnedPriorConfig, lsq_slope
 from .signals import Signals
 
 log = logging.getLogger(__name__)
@@ -34,10 +35,10 @@ class SelectorConfig:
     Promote: the `current+1` probe rung must read clean (EWMA success
     >= probe_viable_threshold) and fresh (within probe_freshness_ms) for
     promote_debounce_windows consecutive ticks, and clear the
-    hold_modes_down_ms / min_between_changes_ms cooldowns. Demote: a kept
-    Channel-B emergency (loss/fec/starvation), or a video-PER breach
-    (video_demote_per). starvation_windows is the consecutive-starved-window
-    count before link_starved feeds the emergency demote.
+    hold_modes_down_ms / min_between_changes_ms cooldowns. Demote: a
+    caller-hysteresis-gated loss breach (`residual_loss_w >= video_demote_per`)
+    or a Channel-B emergency (fec/starvation). starvation_windows is the
+    consecutive-starved-window count before link_starved feeds the emergency demote.
     """
     # Probe-driven promote
     probe_viable_threshold: float = 0.99
@@ -45,7 +46,6 @@ class SelectorConfig:
     promote_debounce_windows: int = 3
     # Reactive demote
     video_demote_per: float = 0.05
-    emergency_loss_rate: float = 0.05
     emergency_fec_pressure: float = 0.80
     # MCS bound
     max_mcs: int = 7
@@ -55,6 +55,9 @@ class SelectorConfig:
     # Total-blackout failsafe: consecutive starved windows before link_starved
     # feeds the emergency demote (10 Hz → 5 windows = 0.5 s).
     starvation_windows: int = 5
+    # Loss hysteresis: consecutive breaching windows (residual_loss_w >=
+    # video_demote_per) before a loss demote — filters single-window transients.
+    loss_windows: int = 2
 
 
 @dataclass
@@ -92,10 +95,10 @@ class LeadingSelector:
     consecutive ticks. The climb naturally stops at the ceiling — a
     cliffed `current+1` rung (per≈1.0, or absent) never debounces.
 
-    Demote (fast/reactive): the Channel-B emergency triggers (loss_rate,
-    fec_pressure, or link_starved) and a video on-air PER breach
-    (`loss_rate >= video_demote_per`) force an immediate one-step
-    downgrade, bypassing the promote rate limit and hold timers.
+    Demote (fast/reactive): a caller-hysteresis-gated loss breach
+    (`loss_demote`, i.e. `residual_loss_w >= video_demote_per`) or a
+    Channel-B emergency (fec_pressure or link_starved) forces an immediate
+    one-step downgrade, bypassing the promote rate limit and hold timers.
     """
 
     def __init__(self, cfg: SelectorConfig):
@@ -116,12 +119,9 @@ class LeadingSelector:
 
     # ---- helpers ----
 
-    def _emergency_active(
-        self, loss_rate: float, fec_pressure: float, link_starved: bool
-    ) -> bool:
+    def _emergency_active(self, fec_pressure: float, link_starved: bool) -> bool:
         return (
-            loss_rate >= self.cfg.emergency_loss_rate
-            or fec_pressure >= self.cfg.emergency_fec_pressure
+            fec_pressure >= self.cfg.emergency_fec_pressure
             or link_starved
         )
 
@@ -132,6 +132,7 @@ class LeadingSelector:
         *,
         probe: dict | None,
         loss_rate: float,
+        loss_demote: bool = False,
         fec_pressure: float,
         link_starved: bool,
         ts_ms: float,
@@ -163,17 +164,18 @@ class LeadingSelector:
                 self._promote_clean = 0
                 reasons.append(why)
 
-        # --- Demote: emergency (Channel B) or video-PER breach (reactive) ---
-        if self._emergency_active(loss_rate, fec_pressure, link_starved):
-            commit(
-                prev - 1,
-                f"emergency loss={loss_rate:.3f} fec={fec_pressure:.3f} "
-                f"starved={link_starved}",
-            )
+        # --- Demote (reactive, bypasses the promote rate limit) ---
+        # Loss (caller-hysteresis-gated) is the common case and is attributed
+        # first; FEC pressure / sustained starvation are the other emergencies.
+        if loss_demote:
+            commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
             self._reasons = reasons
             return (st.current_mcs, st.current_mcs != prev)
-        if loss_rate >= self.cfg.video_demote_per:
-            commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
+        if self._emergency_active(fec_pressure, link_starved):
+            commit(
+                prev - 1,
+                f"emergency fec={fec_pressure:.3f} starved={link_starved}",
+            )
             self._reasons = reasons
             return (st.current_mcs, st.current_mcs != prev)
 
@@ -257,10 +259,12 @@ class Policy:
         # glitches). At 10 Hz, starvation_windows=5 = 0.5 s of below-
         # threshold packet rate before declaring blackout.
         self._starvation_count: int = 0
+        self._loss_count: int = 0
         # Learned per-card prior (always-on), keyed by the operator-set
         # dynamicLink.radioProfile; GS-local, the live probe stays authoritative.
         self.learned_prior = LearnedPrior(profile_name, cfg.learned_prior)
-        self._prev_rssi: float | None = None
+        self._rssi_window: deque[float] = deque(
+            maxlen=cfg.learned_prior.predictive_slope_window_ticks)
         self._predict_demote_count = 0
         self._last_healthy_mono = None   # monotonic ts of last non-starved tick (flight-gap roll)
         self.flightlog = FlightLog(cfg.flightlog)
@@ -279,6 +283,19 @@ class Policy:
             self._starvation_count >= self.cfg.selector.starvation_windows
         )
 
+        # Loss hysteresis (mirrors starvation): residual_loss_w is raw and
+        # spikes on a single bad window. Require loss_windows consecutive
+        # breaching windows before a loss demote; flag suppressed ones.
+        if signals.residual_loss_w >= self.cfg.selector.video_demote_per:
+            self._loss_count += 1
+        else:
+            self._loss_count = 0
+        sustained_loss = self._loss_count >= self.cfg.selector.loss_windows
+        loss_gated = (
+            signals.residual_loss_w >= self.cfg.selector.video_demote_per
+            and not sustained_loss
+        )
+
         # Warm-start seed (one-shot). Uses the learned per-card curve ONLY —
         # there is no RSSI hand-table fallback. Under per-MCS dynamic TX power
         # RSSI is not a reliable absolute MCS predictor, so when the prior is
@@ -295,23 +312,34 @@ class Policy:
         # pre-demote ahead of the reactive path. The probe still owns promotes;
         # the reactive Channel-B demote in select() remains the backstop.
         predict_reason = ""
-        slope = (None if signals.rssi is None
-                 else (0.0 if self._prev_rssi is None
-                       else signals.rssi - self._prev_rssi))
+        predict_gated = False
+        if signals.rssi is None:
+            slope = None
+        else:
+            self._rssi_window.append(signals.rssi)
+            slope = lsq_slope(self._rssi_window)
         pc = None
         if signals.rssi is not None:
             pc = self.learned_prior.predictive_ceiling(signals.rssi, slope)
             cur = self.leading.state.current_mcs
+            projected_drop = -slope * self.cfg.learned_prior.predictive_horizon_ticks
             if pc is not None and pc < cur:
-                self._predict_demote_count += 1
-                if (self._predict_demote_count
-                        >= self.cfg.learned_prior.predictive_debounce_windows):
-                    self.leading.state.current_mcs = max(pc, 0)
-                    self.leading._promote_clean = 0
-                    predict_reason = f"predict_demote mcs{cur}->{pc}"
+                if projected_drop >= self.cfg.learned_prior.predictive_min_drop_db:
+                    self._predict_demote_count += 1
+                    if (self._predict_demote_count
+                            >= self.cfg.learned_prior.predictive_debounce_windows):
+                        self.leading.state.current_mcs = max(pc, 0)
+                        self.leading._promote_clean = 0
+                        predict_reason = f"predict_demote mcs{cur}->{pc}"
+                else:
+                    # pc says demote but RSSI isn't falling fast enough to matter
+                    # (flat/rising = a static prior-vs-probe disagreement, or a
+                    # fade too shallow to clear predictive_min_drop_db). Not a
+                    # real fade — suppress (the flapping fix) and log it.
+                    predict_gated = True
+                    self._predict_demote_count = 0
             else:
                 self._predict_demote_count = 0
-        self._prev_rssi = signals.rssi
 
         # Selector (Phase 2) is the only decision now: probe-promote +
         # reactive demote. The drone computes its own bitrate / FEC /
@@ -320,6 +348,7 @@ class Policy:
         new_mcs, _changed = self.leading.select(
             probe=probe_snap,
             loss_rate=signals.residual_loss_w,
+            loss_demote=sustained_loss,
             fec_pressure=signals.fec_work,
             link_starved=sustained_starved,
             ts_ms=ts_ms,
@@ -372,11 +401,13 @@ class Policy:
             "residual_loss_w": signals.residual_loss_w,
             "fec_work": signals.fec_work,
             "link_starved": sustained_starved,
+            "loss_gated": loss_gated,
             "ceiling": (self.learned_prior.ceiling(signals.rssi)
                         if signals.rssi is not None else None),
             "probe": probe_log,
             "pc": pc,
             "slope": slope,
+            "predict_gated": predict_gated,
             "promote_clean": self.leading._promote_clean,
         })
         return Decision(

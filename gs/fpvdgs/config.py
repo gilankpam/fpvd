@@ -12,7 +12,7 @@ import os
 import threading
 
 from .config_defaults import default_config
-from .schema import DRONE_KEYS, DYNAMIC_LINK_KEYS
+from .schema import DRONE_KEYS, DYNAMIC_LINK_KEYS, SELECTOR_KEYS, SMOOTHING_KEYS
 
 log = logging.getLogger("fpvdgs.config")
 
@@ -34,6 +34,18 @@ def _warn_unknown(loaded: dict, defaults: dict) -> dict:
             for key in sorted(set(sub) - known):
                 log.warning("ignoring unknown %s key: %s", block, key)
                 del sub[key]
+    # dynamicLink's nested selector/smoothing blocks are ALSO strict in
+    # validate_effective, so strip their unknown keys too — otherwise a removed
+    # knob (e.g. a dropped emergencyLossRate) left in a stale config.json reaches
+    # validate_effective and bricks boot.
+    dl = pruned.get("dynamicLink")
+    if isinstance(dl, dict):
+        for block, known in (("selector", SELECTOR_KEYS), ("smoothing", SMOOTHING_KEYS)):
+            sub = dl.get(block)
+            if isinstance(sub, dict):
+                for key in sorted(set(sub) - known):
+                    log.warning("ignoring unknown dynamicLink.%s key: %s", block, key)
+                    del sub[key]
     return pruned
 
 

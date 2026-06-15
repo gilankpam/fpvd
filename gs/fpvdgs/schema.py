@@ -8,9 +8,9 @@ DYNAMIC_LINK_KEYS = {"enabled", "maxMcs", "radioProfile", "dronePort",
                      "selector", "smoothing", "flightlog", "rssiNorm"}
 DRONE_KEYS = {"host", "apiPort"}   # the drone's address; reused by HTTP/IDR/DL
 SELECTOR_KEYS = {"probeViableThreshold", "probeFreshnessMs",
-                 "promoteDebounceWindows", "videoDemotePer", "emergencyLossRate",
+                 "promoteDebounceWindows", "videoDemotePer",
                  "emergencyFecPressure", "holdModesDownMs", "minBetweenChangesMs",
-                 "starvationWindows"}
+                 "starvationWindows", "lossWindows"}
 SMOOTHING_KEYS = {"ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst",
                   "starvationThresholdPps"}
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
@@ -131,10 +131,10 @@ def _validate_dynamic_link(dl: dict) -> None:
     sel = dl.get("selector")
     if sel is not None:
         _validate_block_keys("dynamicLink.selector", sel, SELECTOR_KEYS)
-        for k in ("probeViableThreshold", "videoDemotePer", "emergencyLossRate",
+        for k in ("probeViableThreshold", "videoDemotePer",
                   "emergencyFecPressure"):
             _validate_prob(f"dynamicLink.selector.{k}", sel.get(k))
-        for k in ("promoteDebounceWindows", "starvationWindows"):
+        for k in ("promoteDebounceWindows", "starvationWindows", "lossWindows"):
             _validate_pos_int(f"dynamicLink.selector.{k}", sel.get(k))
         for k in ("probeFreshnessMs", "holdModesDownMs", "minBetweenChangesMs"):
             _validate_non_neg_num(f"dynamicLink.selector.{k}", sel.get(k))

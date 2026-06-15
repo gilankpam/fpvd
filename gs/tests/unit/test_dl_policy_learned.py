@@ -148,6 +148,56 @@ def test_decision_and_flightlog_carry_rssi_raw(tmp_path):
     assert last["rssi_raw"] == -65.0
 
 
+def test_predictive_demote_blocked_when_rssi_flat(tmp_path):
+    """Static prior-vs-probe disagreement at flat RSSI must NOT demote: the
+    probe legitimately climbed above the prior's learned ceiling, but with no
+    fade the slope-direction gate suppresses the predictive demote. This is the
+    000010/000012 flapping root cause."""
+    prof = _profile()
+    p = Policy(_cfg(tmp_path, ewma_alpha=1.0, min_samples_warmstart=10_000,
+                    min_samples_predictive=3, predictive_horizon_ticks=3,
+                    predictive_debounce_windows=2), prof)
+    # learned ceiling at -50 = 2 (rungs 0..2 clean; rung 3 dirty)
+    for _ in range(5):
+        for rung in range(3):
+            p.learned_prior.ingest(rssi=-50.0, probed_rung=rung, probe_clean=True,
+                                   operating_mcs=rung, operating_clean=True)
+        p.learned_prior.ingest(rssi=-50.0, probed_rung=3, probe_clean=False,
+                               operating_mcs=2, operating_clean=True)
+    p.leading.state.current_mcs = 5      # probe pushed above the learned ceiling
+    dec = None
+    for ts in (1.0, 1.1, 1.2, 1.3, 1.4):
+        dec = p.tick(_sig(-50.0, ts=ts))
+    assert dec.mcs == 5                   # flat RSSI → never predict-demoted
+    p.close()
+
+
+def test_predictive_demote_blocked_when_fade_too_shallow(tmp_path):
+    """A real but shallow downtrend whose projected drop is below
+    predictive_min_drop_db must NOT demote — only a genuine fade should."""
+    prof = _profile()
+    p = Policy(_cfg(tmp_path, ewma_alpha=1.0, min_samples_warmstart=10_000,
+                    min_samples_predictive=3, predictive_horizon_ticks=3,
+                    predictive_debounce_windows=2, predictive_min_drop_db=1.0), prof)
+
+    def prime(rssi, ceiling, n=50):
+        b = p.learned_prior.rssi_bin(rssi)
+        for rung in range(ceiling + 1):
+            p.learned_prior._cells[b][rung] = [1.0, float(n)]
+
+    # Ceiling 2 across a band so the small fade stays in the ceiling-2 region.
+    for r in (-52.0, -51.0, -50.0, -49.0, -48.0):
+        prime(r, 2)
+    p.leading.state.current_mcs = 5
+    # shallow -0.2 dBm/tick fade: projected drop over horizon = 0.6 dB < 1.0
+    dec = None
+    for rssi, ts in [(-50.0, 1.0), (-50.2, 1.1), (-50.4, 1.2),
+                     (-50.6, 1.3), (-50.8, 1.4)]:
+        dec = p.tick(_sig(rssi, ts=ts))
+    assert dec.mcs == 5                   # shallow fade gated out
+    p.close()
+
+
 def test_predictive_demote_does_not_misfire_on_detrended_rssi(tmp_path):
     """Promote MCS->MCS+ drops the drone's power → raw RSSI steps down →
     negative raw slope → predictive_ceiling at the projected raw RSSI lands
