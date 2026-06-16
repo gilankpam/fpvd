@@ -4,6 +4,7 @@ Mirrors the drone: code holds every default; config.json is the full effective
 config, merged onto these defaults. `--dump-config` materializes this tree."""
 from __future__ import annotations
 
+from .dynlink.learned_prior import LearnedPriorConfig
 from .dynlink.policy import SelectorConfig
 from .dynlink.signals import SignalAggregator
 
@@ -11,6 +12,7 @@ from .dynlink.signals import SignalAggregator
 def _dynamic_link_defaults() -> dict:
     sel = SelectorConfig()
     agg = SignalAggregator()
+    lp = LearnedPriorConfig()
     return {
         "enabled": False,
         # maxMcs 5 = operator runtime cap (distinct from SelectorConfig.max_mcs=7 HW ceiling fallback)
@@ -33,6 +35,14 @@ def _dynamic_link_defaults() -> dict:
             "ewmaAlphaFec": agg.ewma_alpha_fec,
             "ewmaAlphaBurst": agg.ewma_alpha_burst,
             "starvationThresholdPps": agg.starvation_threshold_pps,
+        },
+        "learnedPrior": {
+            "settleTicks": lp.settle_ticks,
+            "viableLoss": lp.viable_loss,
+            "alphaTighten": lp.alpha_tighten,
+            "alphaRelax": lp.alpha_relax,
+            "minSamples": lp.min_samples,
+            "recencyDecay": lp.recency_decay,
         },
         "flightlog": {"enabled": True},
         "rssiNorm": {"enabled": True},

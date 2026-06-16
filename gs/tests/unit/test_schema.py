@@ -246,3 +246,27 @@ def test_smoothing_alpha_above_one_rejected():
 def test_selector_non_dict_rejected():
     with pytest.raises(schema.SchemaError):
         schema.validate_effective(_dl(selector=0))
+
+
+def test_learned_prior_block_accepted_in_patch():
+    validate_config_patch({"dynamicLink": {"learnedPrior": {"settleTicks": 8,
+                                                            "alphaTighten": 0.4}}})  # no raise
+
+
+def test_learned_prior_unknown_key_rejected():
+    with pytest.raises(SchemaError, match="learnedPrior"):
+        validate_effective(_dl(learnedPrior={"bogus": 1}))
+
+
+def test_learned_prior_value_ranges_validated():
+    # all valid defaults — must not raise
+    validate_effective(_dl(learnedPrior={
+        "settleTicks": 5, "viableLoss": 0.05, "alphaTighten": 0.25,
+        "alphaRelax": 0.05, "minSamples": 8, "recencyDecay": 0.9995,
+    }))
+    with pytest.raises(SchemaError):
+        validate_effective(_dl(learnedPrior={"settleTicks": 0}))      # pos int required
+    with pytest.raises(SchemaError):
+        validate_effective(_dl(learnedPrior={"alphaTighten": 1.5}))   # (0,1]
+    with pytest.raises(SchemaError):
+        validate_effective(_dl(learnedPrior={"viableLoss": 2.0}))     # 0..1

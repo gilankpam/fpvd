@@ -5,7 +5,8 @@ LINK_KEYS = {"channel", "width", "txPowerDbm", "region", "linkId",
 CONFIG_TOP_KEYS = {"link", "wfb", "drone", "dynamicLink", "pixelpilot",
                    "idrForward"}
 DYNAMIC_LINK_KEYS = {"enabled", "maxMcs", "radioProfile", "dronePort",
-                     "selector", "smoothing", "flightlog", "rssiNorm"}
+                     "selector", "smoothing", "flightlog", "rssiNorm",
+                     "learnedPrior"}
 DRONE_KEYS = {"host", "apiPort"}   # the drone's address; reused by HTTP/IDR/DL
 SELECTOR_KEYS = {"probeViableThreshold", "probeFreshnessMs",
                  "promoteDebounceWindows", "videoDemotePer",
@@ -13,6 +14,8 @@ SELECTOR_KEYS = {"probeViableThreshold", "probeFreshnessMs",
                  "starvationWindows", "lossWindows"}
 SMOOTHING_KEYS = {"ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst",
                   "starvationThresholdPps"}
+LEARNED_PRIOR_KEYS = {"settleTicks", "viableLoss", "alphaTighten",
+                      "alphaRelax", "minSamples", "recencyDecay"}
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
@@ -145,6 +148,14 @@ def _validate_dynamic_link(dl: dict) -> None:
             _validate_alpha(f"dynamicLink.smoothing.{k}", sm.get(k))
         _validate_non_neg_num("dynamicLink.smoothing.starvationThresholdPps",
                               sm.get("starvationThresholdPps"))
+    lp = dl.get("learnedPrior")
+    if lp is not None:
+        _validate_block_keys("dynamicLink.learnedPrior", lp, LEARNED_PRIOR_KEYS)
+        _validate_pos_int("dynamicLink.learnedPrior.settleTicks", lp.get("settleTicks"))
+        _validate_non_neg_num("dynamicLink.learnedPrior.minSamples", lp.get("minSamples"))
+        _validate_prob("dynamicLink.learnedPrior.viableLoss", lp.get("viableLoss"))
+        for k in ("alphaTighten", "alphaRelax", "recencyDecay"):
+            _validate_alpha(f"dynamicLink.learnedPrior.{k}", lp.get(k))
     for sub in ("flightlog", "rssiNorm"):
         blk = dl.get(sub)
         if blk is not None:

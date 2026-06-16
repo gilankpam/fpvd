@@ -112,3 +112,15 @@ def test_loss_windows_reads_and_defaults():
     over = build_policy_config(_block(selector={"lossWindows": 4}))
     assert over.selector.loss_windows == 4
     assert build_policy_config(_block()).selector.loss_windows == 2  # default
+
+
+def test_learned_prior_knob_survives_loader_and_reaches_policy(tmp_path):
+    import json
+    from fpvdgs.config import ConfigStore
+    from fpvdgs.dynlink.config_build import build_policy_config
+    cfgfile = tmp_path / "config.json"
+    cfgfile.write_text(json.dumps({"dynamicLink": {"learnedPrior": {"settleTicks": 9}}}))
+    store = ConfigStore.load(str(cfgfile))
+    dl = store.effective()["dynamicLink"]
+    assert dl["learnedPrior"]["settleTicks"] == 9          # survived the strip
+    assert build_policy_config(dl).learned_prior.settle_ticks == 9  # reached policy
