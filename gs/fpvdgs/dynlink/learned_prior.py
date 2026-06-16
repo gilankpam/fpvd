@@ -78,3 +78,22 @@ class KneeModel:
         elif (not clean) and rssi > k:
             self._knee[rung] = k + self.cfg.alpha_tighten * (rssi - k)
         self._count[rung] += 1.0
+
+    def _eff_knees(self) -> list[float | None]:
+        """Confident knees made non-decreasing in rung (cumulative max)."""
+        eff: list[float | None] = [None] * (MAX_MCS + 1)
+        run: float | None = None
+        for K in range(MAX_MCS + 1):
+            if (self._knee[K] is not None
+                    and self._count[K] >= self.cfg.min_samples):
+                run = self._knee[K] if run is None else max(run, self._knee[K])
+                eff[K] = run
+        return eff
+
+    def ceiling(self, rssi: float) -> int | None:
+        eff = self._eff_knees()
+        best = None
+        for K in range(MAX_MCS + 1):
+            if eff[K] is not None and eff[K] <= rssi:
+                best = K
+        return best

@@ -51,3 +51,41 @@ def test_observe_ignores_out_of_range_rung():
     m = _model()
     m.observe(rung=99, rssi=-50.0, clean=True)
     assert all(k is None for k in m._knee)
+
+
+def _confident(m, rung, knee, *, n=10):
+    """Force a confident knee directly (bypass learning dynamics)."""
+    m._knee[rung] = knee
+    m._count[rung] = float(n)
+
+
+def test_ceiling_none_when_cold():
+    m = _model()
+    assert m.ceiling(-50.0) is None
+
+
+def test_ceiling_highest_confident_rung_at_or_below_rssi():
+    m = _model(min_samples=8)
+    _confident(m, 1, -80.0)
+    _confident(m, 4, -60.0)
+    assert m.ceiling(-55.0) == 4     # -60 and -80 both <= -55
+    assert m.ceiling(-70.0) == 1     # only -80 <= -70
+    assert m.ceiling(-90.0) is None  # nothing low enough
+
+
+def test_ceiling_ignores_unconfident_knee():
+    m = _model(min_samples=8)
+    _confident(m, 4, -60.0, n=10)
+    m._knee[5] = -55.0
+    m._count[5] = 3.0                # below min_samples
+    assert m.ceiling(-50.0) == 4     # rung 5 not confident -> ignored
+
+
+def test_ceiling_enforces_rung_monotonicity_on_inversion():
+    # Physically-impossible inversion: rung 4 viable at LOWER rssi than rung 2.
+    m = _model(min_samples=8)
+    _confident(m, 2, -60.0)
+    _confident(m, 4, -70.0)          # inverted
+    # cumulative-max raises rung 4's effective knee to -60 (pessimistic).
+    assert m.ceiling(-65.0) is None  # neither effective knee (-60) <= -65
+    assert m.ceiling(-58.0) == 4
