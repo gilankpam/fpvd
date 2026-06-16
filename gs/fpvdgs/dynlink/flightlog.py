@@ -32,6 +32,7 @@ class FlightLog:
         self._fh = None
         self._bytes = 0
         self._since_sync = 0
+        self._reopen_pending = 0
         self._max_bytes = int(cfg.max_mb * 1024 * 1024)
         self._open()
 
@@ -80,7 +81,16 @@ class FlightLog:
 
     def write(self, record: dict) -> None:
         if self._fh is None:
-            return
+            # _open() may have raced the DVR autofs automount at startup (mounts
+            # on access, with latency) and failed -> writes were no-ops. Lazily
+            # retry, throttled, so logging starts once the mount is up instead of
+            # staying dead the whole flight (how cold-boot flights were lost).
+            self._reopen_pending += 1
+            if self._reopen_pending >= self.cfg.sync_interval:
+                self._reopen_pending = 0
+                self._open()
+            if self._fh is None:
+                return
         if self._bytes >= self._max_bytes:
             return  # this session hit its size cap; stop appending
         try:

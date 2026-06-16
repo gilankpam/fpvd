@@ -21,6 +21,23 @@ def test_disabled_is_noop(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_write_recovers_when_open_failed_at_startup(tmp_path):
+    # The DVR is an autofs automount; if _open() races the mount at startup it
+    # fails (_fh=None) and writes silently no-op for the whole flight. Once the
+    # mount is up, write() must lazily re-open and resume logging.
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), sync_interval=2))
+    fl._fh.close()                       # simulate "open failed at startup"
+    fl._fh = None
+    fl.write({"mcs": 1})                 # retry throttle not reached -> still down
+    assert fl._fh is None
+    fl.write({"mcs": 2})                 # throttle reached -> re-open + write
+    assert fl._fh is not None
+    fl.close()
+    recs = [json.loads(line) for f in sorted(tmp_path.glob("*.jsonl"))
+            for line in f.read_text().splitlines() if line.strip()]
+    assert {"mcs": 2} in recs            # logging resumed once the mount was up
+
+
 def test_rotation_keeps_max_files(tmp_path):
     # create 5 sessions with max_files=3 → oldest pruned on close
     for i in range(5):
