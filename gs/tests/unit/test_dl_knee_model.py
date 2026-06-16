@@ -89,3 +89,27 @@ def test_ceiling_enforces_rung_monotonicity_on_inversion():
     # cumulative-max raises rung 4's effective knee to -60 (pessimistic).
     assert m.ceiling(-65.0) is None  # neither effective knee (-60) <= -65
     assert m.ceiling(-58.0) == 4
+
+
+def test_recency_decay_ages_out_unreinforced_knee():
+    # A knee that stops being reinforced loses confidence as OTHER rungs are
+    # observed, and eventually drops below min_samples (no longer in ceiling).
+    m = _model(min_samples=8.0, recency_decay=0.9, alpha_relax=0.0,
+               alpha_tighten=0.0)
+    for _ in range(20):                      # rung 4 becomes confident
+        m.observe(4, -60.0, clean=True)
+    assert m.ceiling(-50.0) == 4
+    for _ in range(60):                      # hammer rung 1; rung 4 decays
+        m.observe(1, -80.0, clean=True)
+    assert m._count[4] < 8.0                 # rung 4 confidence aged out
+    assert m.ceiling(-50.0) == 1             # rung 4 no longer a confident ceiling
+
+
+def test_recency_decay_one_keeps_confidence_forever():
+    m = _model(min_samples=8.0, recency_decay=1.0)
+    for _ in range(10):
+        m.observe(4, -60.0, clean=True)
+    for _ in range(1000):
+        m.observe(1, -80.0, clean=True)
+    assert m._count[4] == 10.0               # no decay
+    assert m.ceiling(-50.0) == 4
