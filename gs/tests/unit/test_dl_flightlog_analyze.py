@@ -67,3 +67,17 @@ def test_summarize_counts_loss_gated(tmp_path):
         f.write(json.dumps({"ts": 1.2, "mcs": 5, "reason": ""}) + "\n")  # pre-field
     s = mod.summarize(str(log))
     assert s["loss_gated_demotes"] == 1
+
+
+def test_summarize_counts_prior_learn_and_last_knees(tmp_path):
+    mod = _load_tool()
+    log = tmp_path / "f.jsonl"
+    with open(log, "w") as f:
+        f.write(json.dumps({"ts": 1.0, "mcs": 4, "reason": "",
+                            "prior_learn": True, "knees": [None, -80, None, None, -60, None, None, None]}) + "\n")
+        f.write(json.dumps({"ts": 1.1, "mcs": 4, "reason": "",
+                            "prior_learn": False, "knees": [None, -80, None, None, -60, None, None, None]}) + "\n")
+        f.write(json.dumps({"ts": 1.2, "mcs": 4, "reason": ""}) + "\n")  # pre-field
+    s = mod.summarize(str(log))
+    assert s["prior_learn_ticks"] == 1
+    assert s["last_knees"] == [None, -80, None, None, -60, None, None, None]

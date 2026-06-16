@@ -38,6 +38,8 @@ def summarize(path) -> dict:
     recs = list(_records(path))
     time_at_mcs = Counter()
     predictive = reactive = warm_fallback = gated = loss_gated = 0
+    prior_learn = 0
+    last_knees = None
     ceilings, mcss = [], []
     for r in recs:
         time_at_mcs[r.get("mcs")] += 1
@@ -50,6 +52,10 @@ def summarize(path) -> dict:
             gated += 1
         if r.get("loss_gated"):
             loss_gated += 1
+        if r.get("prior_learn"):
+            prior_learn += 1
+        if r.get("knees") is not None:
+            last_knees = r["knees"]
         if r.get("mcs") is not None:
             mcss.append(r["mcs"])
         if r.get("ceiling") is not None:
@@ -61,6 +67,8 @@ def summarize(path) -> dict:
         "reactive_demotes": reactive,
         "gated_demotes": gated,
         "loss_gated_demotes": loss_gated,
+        "prior_learn_ticks": prior_learn,
+        "last_knees": last_knees,
         "mean_mcs": (sum(mcss) / len(mcss)) if mcss else None,
         "mean_ceiling": (sum(ceilings) / len(ceilings)) if ceilings else None,
     }
@@ -73,6 +81,8 @@ def _print_summary(s: dict) -> None:
     print(f"reactive demotes:   {s['reactive_demotes']}")
     print(f"gated demotes:      {s['gated_demotes']}")
     print(f"loss-gated demotes: {s['loss_gated_demotes']}")
+    print(f"prior-learn ticks:  {s['prior_learn_ticks']}")
+    print(f"last knees:          {s['last_knees']}")
     print(f"mean MCS: {s['mean_mcs']}   mean ceiling: {s['mean_ceiling']}")
 
 
