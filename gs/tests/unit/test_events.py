@@ -63,3 +63,11 @@ def test_state_caches_latest_drone_payload():
     assert bus.state("drone") == {"state": "connected"}
     bus.publish(DRONE_DISCONNECTED, {"state": "disconnected", "reason": "tunnel_lost"})
     assert bus.state("drone")["state"] == "disconnected"
+
+
+def test_state_returns_independent_copy():
+    bus = EventBus()
+    bus.publish(DRONE_CONNECTED, {"state": "connected"})
+    got = bus.state("drone")
+    got["state"] = "mutated"               # callers must not be able to corrupt the cache
+    assert bus.state("drone")["state"] == "connected"

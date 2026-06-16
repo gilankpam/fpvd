@@ -4,7 +4,8 @@ Thread-safe, synchronous, exception-isolated dispatch. Publishers and
 subscribers may live on different threads; each callback runs on the
 PUBLISHER's thread, so a callback must be quick, non-blocking, and thread-safe
 (marshal real work onto its own loop). The bus caches the latest payload per
-event so a late subscriber can read current state via state()."""
+state key (see _STATE_KEY) so a late subscriber can read current state via
+state()."""
 from __future__ import annotations
 
 import logging
@@ -40,14 +41,16 @@ class EventBus:
                 subs.remove(cb)
 
     def publish(self, event: str, payload: dict | None = None) -> None:
-        payload = payload or {}
+        payload = payload if payload is not None else {}
         # Snapshot subscribers + update the state cache under the lock, then
         # dispatch OUTSIDE it so a callback can safely re-enter the bus.
         with self._lock:
             subs = list(self._subs.get(event, ()))
             key = _STATE_KEY.get(event)
             if key is not None:
-                self._state[key] = payload
+                # Store a copy so a callback mutating its payload can't corrupt
+                # the cached state read later via state().
+                self._state[key] = dict(payload)
         for cb in subs:
             try:
                 cb(payload)
