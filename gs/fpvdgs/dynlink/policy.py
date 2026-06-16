@@ -133,6 +133,7 @@ class LeadingSelector:
         probe: dict | None,
         loss_rate: float,
         loss_demote: bool = False,
+        loss_demote_target: int | None = None,
         fec_pressure: float,
         link_starved: bool,
         ts_ms: float,
@@ -168,7 +169,13 @@ class LeadingSelector:
         # Loss (caller-hysteresis-gated) is the common case and is attributed
         # first; FEC pressure / sustained starvation are the other emergencies.
         if loss_demote:
-            commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
+            # Jump straight to the rung the live SNR supports (one move, no
+            # overshoot). target None (cold SNR knee) -> today's one-step demote.
+            if loss_demote_target is not None:
+                tgt = min(prev, int(loss_demote_target))
+                commit(tgt, f"video_per_demote loss={loss_rate:.3f} -> mcs{tgt}")
+            else:
+                commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
             self._reasons = reasons
             return (st.current_mcs, st.current_mcs != prev)
         if self._emergency_active(fec_pressure, link_starved):
