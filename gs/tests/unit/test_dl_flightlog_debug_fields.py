@@ -150,3 +150,24 @@ def test_record_predict_gated_false_when_no_demote_intent(tmp_path):
     p.tick(_sig(-50.0))
     p.close()
     assert _records(tmp_path)[-1]["predict_gated"] is False
+
+
+def test_record_carries_snr_and_evm(tmp_path):
+    from fpvdgs.dynlink.signals import Signals
+    p = Policy(_cfg(tmp_path), _profile())
+    sig = Signals(rssi=-55.0, residual_loss_w=0.0, fec_work=0.0,
+                  link_starved_w=False, timestamp=1.0,
+                  snr_w=27.0, evm_w=89.0, evm_lo_w=80.0, evm_min_w=75.0)
+    p.tick(sig)
+    p.close()
+    rec = _records(tmp_path)[-1]
+    assert rec["snr"] == 27.0
+    assert rec["evm"] == 89.0 and rec["evm_lo"] == 80.0 and rec["evm_min"] == 75.0
+
+
+def test_record_snr_evm_none_when_absent(tmp_path):
+    p = Policy(_cfg(tmp_path), _profile())
+    p.tick(_sig(-55.0))   # no snr/evm on the signal -> None
+    p.close()
+    rec = _records(tmp_path)[-1]
+    assert rec["snr"] is None and rec["evm"] is None

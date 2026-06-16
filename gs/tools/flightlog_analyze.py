@@ -41,6 +41,8 @@ def summarize(path) -> dict:
     prior_learn = 0
     last_knees = None
     ceilings, mcss = [], []
+    snrs, evms = [], []
+    min_evm = None
     for r in recs:
         time_at_mcs[r.get("mcs")] += 1
         reason = r.get("reason") or ""
@@ -60,6 +62,12 @@ def summarize(path) -> dict:
             mcss.append(r["mcs"])
         if r.get("ceiling") is not None:
             ceilings.append(r["ceiling"])
+        if r.get("snr") is not None:
+            snrs.append(r["snr"])
+        if r.get("evm") is not None:
+            evms.append(r["evm"])
+        if r.get("evm_min") is not None:
+            min_evm = r["evm_min"] if min_evm is None else min(min_evm, r["evm_min"])
     return {
         "records": len(recs),
         "time_at_mcs": dict(time_at_mcs),
@@ -71,6 +79,9 @@ def summarize(path) -> dict:
         "last_knees": last_knees,
         "mean_mcs": (sum(mcss) / len(mcss)) if mcss else None,
         "mean_ceiling": (sum(ceilings) / len(ceilings)) if ceilings else None,
+        "mean_snr": (sum(snrs) / len(snrs)) if snrs else None,
+        "mean_evm": (sum(evms) / len(evms)) if evms else None,
+        "min_evm": min_evm,
     }
 
 
@@ -83,6 +94,7 @@ def _print_summary(s: dict) -> None:
     print(f"loss-gated demotes: {s['loss_gated_demotes']}")
     print(f"prior-learn ticks:  {s['prior_learn_ticks']}")
     print(f"last knees:          {s['last_knees']}")
+    print(f"mean SNR / EVM:      {s['mean_snr']} / {s['mean_evm']}   min EVM: {s['min_evm']}")
     print(f"mean MCS: {s['mean_mcs']}   mean ceiling: {s['mean_ceiling']}")
 
 

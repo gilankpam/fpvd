@@ -81,3 +81,18 @@ def test_summarize_counts_prior_learn_and_last_knees(tmp_path):
     s = mod.summarize(str(log))
     assert s["prior_learn_ticks"] == 1
     assert s["last_knees"] == [None, -80, None, None, -60, None, None, None]
+
+
+def test_summarize_snr_evm(tmp_path):
+    mod = _load_tool()
+    log = tmp_path / "f.jsonl"
+    with open(log, "w") as f:
+        f.write(json.dumps({"ts": 1.0, "mcs": 4, "reason": "",
+                            "snr": 28, "evm": 89, "evm_min": 81}) + "\n")
+        f.write(json.dumps({"ts": 1.1, "mcs": 4, "reason": "",
+                            "snr": 24, "evm": 80, "evm_min": 70}) + "\n")
+        f.write(json.dumps({"ts": 1.2, "mcs": 4, "reason": ""}) + "\n")  # pre-field
+    s = mod.summarize(str(log))
+    assert s["mean_snr"] == 26.0       # (28+24)/2
+    assert s["mean_evm"] == 84.5       # (89+80)/2
+    assert s["min_evm"] == 70          # worst evm_min seen
