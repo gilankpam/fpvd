@@ -111,7 +111,7 @@ def test_loss_windows_reads_and_defaults():
     from fpvdgs.dynlink.config_build import build_policy_config
     over = build_policy_config(_block(selector={"lossWindows": 4}))
     assert over.selector.loss_windows == 4
-    assert build_policy_config(_block()).selector.loss_windows == 2  # default
+    assert build_policy_config(_block()).selector.loss_windows == 1  # default (SNR-jump = react fast)
 
 
 def test_learned_prior_knob_survives_loader_and_reaches_policy(tmp_path):

@@ -209,3 +209,24 @@ def test_reactive_demote_jumps_to_snr_ceiling(tmp_path):
     dec = p.tick(sig(1.1))      # loss count 2 -> sustained -> jump to snr_ceiling(12)=1
     assert dec.mcs == 1         # 5 -> 1 in one move, not 5 -> 4
     p.close()
+
+
+def test_proactive_snr_demote_before_loss(tmp_path):
+    from fpvdgs.dynlink.signals import Signals
+    p = Policy(_cfg(tmp_path, min_samples=3), _profile())
+    # SNR knee: rung3 viable at snr>=15, rung4 at >=30. Current snr 20 -> ceiling 3.
+    for _ in range(12):
+        p.learned_prior.ingest(rssi=None, snr=15.0, operating_mcs=3,
+                               operating_clean=True, settled=True)
+        p.learned_prior.ingest(rssi=None, snr=30.0, operating_mcs=4,
+                               operating_clean=True, settled=True)
+    p.leading.state.current_mcs = 4
+
+    def sig(ts):  # NO loss, NO rssi (isolates the SNR proactive path)
+        return Signals(rssi=None, residual_loss_w=0.0, fec_work=0.0,
+                       link_starved_w=False, timestamp=ts, snr=20.0)
+
+    decs = [p.tick(sig(1.0 + 0.1 * k)) for k in range(4)]   # debounce then demote
+    assert decs[-1].mcs == 3                   # demoted 4->3 with zero loss
+    assert any("snr_demote mcs4->3" in d.reason for d in decs)
+    p.close()

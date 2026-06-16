@@ -56,8 +56,13 @@ class SelectorConfig:
     # feeds the emergency demote (10 Hz → 5 windows = 0.5 s).
     starvation_windows: int = 5
     # Loss hysteresis: consecutive breaching windows (residual_loss_w >=
-    # video_demote_per) before a loss demote — filters single-window transients.
-    loss_windows: int = 2
+    # video_demote_per) before a loss demote. 1 = react on the first window:
+    # safe because the reactive demote is now an SNR-jump that lands on the
+    # right rung in one move (nothing to cascade), so faster is strictly better.
+    loss_windows: int = 1
+    # Proactive SNR demote: consecutive ticks snr_ceiling must stay below the
+    # current rung before demoting to it (debounce; snr is already EWMA'd).
+    snr_demote_debounce: int = 2
 
 
 @dataclass
@@ -134,6 +139,7 @@ class LeadingSelector:
         loss_rate: float,
         loss_demote: bool = False,
         loss_demote_target: int | None = None,
+        promote_ceiling: int | None = None,
         fec_pressure: float,
         link_starved: bool,
         ts_ms: float,
@@ -212,8 +218,12 @@ class LeadingSelector:
         )
         if clean:
             self._promote_clean += 1
+            # SNR ceiling caps the probe's optimism: never promote to a rung the
+            # live SNR doesn't support (the 4<->3 oscillation driver — the probe
+            # measures rung+1 at the current rung's TX power and reads it clean).
+            capped = promote_ceiling is not None and target > promote_ceiling
             if (self._promote_clean >= self.cfg.promote_debounce_windows
-                    and not within_hold and not within_rate):
+                    and not within_hold and not within_rate and not capped):
                 commit(target, f"probe_promote mcs{target} per={rung['per']:.4f}")
         else:
             self._promote_clean = 0
@@ -277,6 +287,7 @@ class Policy:
         self._rssi_window: deque[float] = deque(
             maxlen=cfg.learned_prior.predictive_slope_window_ticks)
         self._predict_demote_count = 0
+        self._snr_demote_count = 0
         self._last_healthy_mono = None   # monotonic ts of last non-starved tick (flight-gap roll)
         self.flightlog = FlightLog(cfg.flightlog)
 
@@ -356,12 +367,29 @@ class Policy:
         # reactive demote. The drone computes its own bitrate / FEC /
         # depth / tx_power locally, so we emit {mcs} only.
         loss_demote_target = self.learned_prior.snr_ceiling(signals.snr)
+
+        # Proactive SNR demote (down-only, debounced): SNR is the operating
+        # ceiling. If it is confidently below the current rung, jump straight to
+        # it ahead of the loss — catching the interference the RSSI slope-gate
+        # can't see. The promote_ceiling below stops the probe climbing back.
+        snr_demote_reason = ""
+        cur_snr = self.leading.state.current_mcs
+        if loss_demote_target is not None and loss_demote_target < cur_snr:
+            self._snr_demote_count += 1
+            if self._snr_demote_count >= self.cfg.selector.snr_demote_debounce:
+                self.leading.state.current_mcs = loss_demote_target
+                self.leading._promote_clean = 0
+                snr_demote_reason = f"snr_demote mcs{cur_snr}->{loss_demote_target}"
+        else:
+            self._snr_demote_count = 0
+
         probe_snap = self._probe_status() if self._probe_status else None
         new_mcs, _changed = self.leading.select(
             probe=probe_snap,
             loss_rate=signals.residual_loss_w,
             loss_demote=sustained_loss,
             loss_demote_target=loss_demote_target,
+            promote_ceiling=loss_demote_target,
             fec_pressure=signals.fec_work,
             link_starved=sustained_starved,
             ts_ms=ts_ms,
@@ -386,7 +414,7 @@ class Policy:
         )
 
         reason = "; ".join(
-            r for r in ([predict_reason] + self.leading.reasons) if r
+            r for r in ([predict_reason, snr_demote_reason] + self.leading.reasons) if r
         )
         # Flight-boundary roll: a new flight = the link returning healthy after
         # being gone (starved) longer than flight_gap_s. Monotonic time so the

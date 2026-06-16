@@ -265,3 +265,25 @@ def test_loss_demote_cold_target_falls_back_to_one_step():
                             loss_demote_target=None, fec_pressure=0.0,
                             link_starved=False, ts_ms=99999.0)
     assert changed and mcs == 4          # cold SNR knee -> today's one-step demote
+
+
+# ── SNR ceiling as operating ceiling: promote cap + lossWindows default ──────
+
+def test_loss_windows_defaults_to_one():
+    # SNR-jump lands on the right rung in one move (no cascade), so react fast.
+    assert SelectorConfig().loss_windows == 1
+
+
+def test_promote_capped_by_snr_ceiling():
+    s = _selector(max_mcs=5, promote_debounce_windows=1)
+    _drive_to_mcs_probe(s, 3)                 # reach MCS3
+    ts = 500000.0
+    for _ in range(4):                        # clean rung4 probe, but SNR caps at 3
+        ts += 1000.0
+        mcs, _ = s.select(probe=_probe(7), loss_rate=0.0, fec_pressure=0.0,
+                          link_starved=False, ts_ms=ts, promote_ceiling=3)
+    assert mcs == 3                           # promote to 4 blocked by snr ceiling
+    ts += 1000.0
+    mcs, _ = s.select(probe=_probe(7), loss_rate=0.0, fec_pressure=0.0,
+                      link_starved=False, ts_ms=ts, promote_ceiling=4)
+    assert mcs == 4                           # ceiling lifts -> promotes
