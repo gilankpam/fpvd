@@ -1,4 +1,5 @@
-"""GS-local learned link-RSSI → viable-ceiling-MCS prior (Phase 4, spec §3-§7).
+"""GS-local learned link-RSSI → viable-ceiling-MCS prior (knee model; see
+docs/superpowers/specs/2026-06-16-learned-prior-knee-model-design.md).
 
 Per-rung RSSI knee: knee[K] = RSSI below which rung K is unviable in steady
 state; recency-weighted; learns only from settled operating-rung samples.
