@@ -123,7 +123,8 @@ class FlightLog:
         """Ensure a fresh file is open for a new flight: roll to a new file if
         the current one already holds records, keep an already-open empty file,
         or (re)open one if none is open. No-op if disabled. Driven by the
-        drone-connected event."""
+        drone-connected event. When it rolls, the outgoing file is fsynced
+        before close (via roll())."""
         if not self.cfg.enabled:
             return
         if self._fh is not None and self._bytes == 0:

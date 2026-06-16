@@ -174,6 +174,21 @@ def test_begin_flight_noop_when_disabled(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_begin_flight_reopens_when_fh_is_none(tmp_path):
+    # The DVR autofs race can leave _fh=None (open failed at startup). A connect
+    # event then calls begin_flight(), which must (re)open via roll().
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
+    fl._fh.close()
+    fl._fh = None                        # simulate "open failed at startup"
+    fl.begin_flight()
+    assert fl._fh is not None            # reopened
+    fl.write({"ts": 1.0})
+    fl.close()
+    recs = [json.loads(line) for f in sorted(tmp_path.glob("*.jsonl"))
+            for line in f.read_text().splitlines() if line.strip()]
+    assert {"ts": 1.0} in recs           # logging resumed after the reopen
+
+
 def test_sync_fsyncs_open_file(tmp_path, monkeypatch):
     import fpvdgs.dynlink.flightlog as mod
     calls = []
