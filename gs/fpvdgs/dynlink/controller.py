@@ -188,6 +188,7 @@ class DynamicLinkController:
             return
         p.reset_for_new_session()        # new session: re-warm-start, re-climb
         p.flightlog.begin_flight()       # start a fresh flight file
+        log.info("dynlink: drone connected — reset selector + began new flight")
 
     def _disconnected_inloop(self):
         p = self._policy
@@ -195,6 +196,7 @@ class DynamicLinkController:
             return
         p.flightlog.sync()               # make the flight durable at the loss edge
         p.learned_prior.flush()          # persist the session's learning
+        log.info("dynlink: drone disconnected — synced flight + flushed prior")
 
     async def _stats_loop(self, on_event):
         """Run the stats client, reconnecting across runner bounces until

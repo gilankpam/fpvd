@@ -260,6 +260,8 @@ def test_connect_event_resets_selector_and_begins_flight():
         while c._policy is None and time.monotonic() < deadline:
             time.sleep(0.02)
         assert c._policy is not None
+        # GIL-atomic write; a loop tick may run between this and the publish,
+        # but the post-reset assertion (==1) holds regardless of what 5 became.
         c._policy.leading.state.current_mcs = 5
 
         bus.publish(DRONE_CONNECTED, {"state": "connected", "drone": {}})
@@ -297,3 +299,19 @@ def test_disconnect_event_flushes_prior():
     finally:
         c.stop()
         drone_sock.close()
+
+
+def test_publish_after_stop_is_safe_noop():
+    # The _loop-None guard in _marshal must make a connection event a harmless
+    # no-op once the controller has stopped (e.g. dynamicLink disabled).
+    from fpvdgs.events import EventBus, DRONE_CONNECTED, DRONE_DISCONNECTED
+    bus = EventBus()
+    drone_sock, drone_port = _free_udp_port()
+    c = DynamicLinkController(_snapshot(drone_port),
+                              stats_client_factory=_RepeatStatsClient, bus=bus)
+    c.start()
+    c.stop()
+    # _loop is None now -> these must not raise
+    bus.publish(DRONE_CONNECTED, {"state": "connected", "drone": {}})
+    bus.publish(DRONE_DISCONNECTED, {"state": "disconnected", "reason": "tunnel_lost"})
+    drone_sock.close()   # reaching here without an exception is the assertion
