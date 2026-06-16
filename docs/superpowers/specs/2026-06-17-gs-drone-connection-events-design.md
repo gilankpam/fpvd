@@ -48,8 +48,8 @@ loop with an async-native bus (large rearchitecture, YAGNI).
 
 - `gs/fpvdgs/supervisor.py` — build/own/start/stop the bus + monitor; add a `connection`
   block to `status_fn`.
-- `gs/fpvdgs/dynlink/controller.py` — take the bus; subscribe on loop-up, unsubscribe on
-  stop; drive flight-log roll/sync, selector reset, prior flush (all marshaled onto its
+- `gs/fpvdgs/dynlink/controller.py` — take the bus; subscribe once at construction (handlers
+  no-op while its loop is down); drive flight-log roll/sync, selector reset, prior flush (all marshaled onto its
   own loop).
 - `gs/fpvdgs/dynlink/policy.py` — retire the inline gap-roll; add `reset_for_new_session()`.
 - `gs/fpvdgs/dynlink/flightlog.py` — add `begin_flight()` + `sync()`; drop the now-unused `flight_gap_s` field.
@@ -123,7 +123,7 @@ detected within roughly `max(tunnelStaleS, httpPollS·httpFailCount)` ≈ 3–4 
 
 ### Event payloads (`ConnectionEvent`)
 
-- `DRONE_CONNECTED`: `{state: "connected", at_mono, drone: <get_status snapshot: version, radioProfile, mcs, channel, …>}`
+- `DRONE_CONNECTED`: `{state: "connected", at_mono, drone: {version}}` — a compact summary pulled from the drone `get_status()`; extensible with more `/status` fields as observability needs grow.
 - `DRONE_DISCONNECTED`: `{state: "disconnected", at_mono, reason: "tunnel_lost" | "http_failed", last_seen_mono}`
 
 Monotonic timestamps drive all logic (the GS wall clock is unreliable — see the flight-log
@@ -158,8 +158,9 @@ it with no new machinery.
 
 ## 6. Subscribers
 
-All three live in `DynamicLinkController`, which subscribes on loop-up and unsubscribes on
-`stop()`. Each bus callback fires on the **monitor's** thread and immediately marshals onto
+All three live in `DynamicLinkController`, which subscribes to the bus once at construction;
+its handlers no-op while the loop is down (dynamicLink disabled/stopped). Each bus callback
+fires on the **monitor's** thread and immediately marshals onto
 the dynlink loop via `call_soon_threadsafe`, so the in-loop handlers touch
 `Policy`/`FlightLog`/`learned_prior` on the **same thread** as the per-tick writes — no
 new locks; single-threaded access is preserved.
@@ -204,7 +205,7 @@ the external reboot-on-video-loss watchdog already handles loss) and the statele
 feeds a new `connection` block in `GET /status`:
 
 ```json
-{"state": "connected|armed|disconnected", "sinceMs": 12345, "reason": "", "drone": {"version": "...", "radioProfile": "...", "mcs": 4}}
+{"state": "connected|armed|disconnected", "sinceMs": 12345, "reason": "", "drone": {"version": "..."}}
 ```
 
 Each edge logs at INFO under a `fpvdgs.connection` logger
