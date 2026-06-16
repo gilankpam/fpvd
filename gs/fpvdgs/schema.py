@@ -16,8 +16,6 @@ SMOOTHING_KEYS = {"ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst",
                   "starvationThresholdPps"}
 LEARNED_PRIOR_KEYS = {"settleTicks", "viableLoss", "alphaTighten",
                       "alphaRelax", "minSamples", "recencyDecay"}
-CONNECTION_MONITOR_KEYS = {"enabled", "tunnelStaleS", "httpPollS",
-                           "httpTimeoutS", "httpFailCount", "evalIntervalS"}
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
@@ -220,9 +218,11 @@ def _validate_connection_monitor(cm: dict) -> None:
     _validate_pos_int("connectionMonitor.httpFailCount", cm.get("httpFailCount"))
     # Invariant: the heartbeat's own HTTP return traffic keeps the tunnel 'fresh',
     # so tunnelStaleS must exceed httpPollS or a quiet healthy link false-disconnects.
+    # Fallbacks must track ConnectionMonitorConfig defaults; both values are
+    # already validated numeric above, so a plain comparison is safe.
     stale = cm.get("tunnelStaleS", 4.0)
     poll = cm.get("httpPollS", 1.5)
-    if isinstance(stale, (int, float)) and isinstance(poll, (int, float)) and not stale > poll:
+    if stale <= poll:
         raise SchemaError("connectionMonitor.tunnelStaleS must be > httpPollS")
 
 

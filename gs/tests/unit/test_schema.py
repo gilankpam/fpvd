@@ -296,3 +296,12 @@ def test_connection_monitor_rejects_bad_fail_count():
 
 def test_config_patch_accepts_connection_monitor():
     validate_config_patch({"connectionMonitor": {"enabled": False}})   # no raise
+
+
+def test_connection_monitor_tolerates_unknown_keys():
+    # Leniency is load-bearing: a stale/removed knob in an on-disk config must
+    # NOT brick boot (the loader doesn't deep-strip connectionMonitor subkeys).
+    validate_effective({
+        "link": {"channel": 132, "region": "US"},
+        "connectionMonitor": {"enabled": True, "futureKnob": 99},
+    })  # must not raise
