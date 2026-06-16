@@ -153,6 +153,8 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
     p._loss_count = 3
     p._starvation_count = 4
     p._snr_demote_count = 2
+    p._predict_demote_count = 5
+    p._ticks_at_mcs = 7
     p.leading._promote_clean = 3
 
     p.reset_for_new_session()
@@ -162,6 +164,8 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
     assert p._loss_count == 0
     assert p._starvation_count == 0
     assert p._snr_demote_count == 0
+    assert p._predict_demote_count == 0
+    assert p._ticks_at_mcs == 0
     assert p.leading._promote_clean == 0
     assert p.learned_prior is prior_before      # persistent knees preserved
     p.close()

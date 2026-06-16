@@ -477,10 +477,13 @@ class Policy:
         )
 
     def reset_for_new_session(self) -> None:
-        """Reset volatile selector + hysteresis state to boot. A confirmed drone
-        reconnect is a new session, so re-run the learned-prior warm-start and
-        re-climb from the boot MCS instead of resuming a stale climbed-up rung.
-        The persistent learned_prior knees are kept (cross-session knowledge)."""
+        """Reset volatile selector + hysteresis state to boot (incl. the RSSI
+        slope window, so the first predictive-demote slope is computed fresh).
+        A confirmed drone reconnect is a new session, so re-run the learned-prior
+        warm-start and re-climb from the boot MCS instead of resuming a stale
+        climbed-up rung. The persistent learned_prior knees are kept
+        (cross-session knowledge). This is selector state only — the connect
+        handler also calls self.flightlog.begin_flight() to roll the flight."""
         self.leading = LeadingSelector(self.cfg.selector)
         self._cold_started = False
         self._starvation_count = 0
