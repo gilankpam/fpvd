@@ -71,6 +71,7 @@ class Signals:
     # EWMA-smoothed controller inputs
     rssi: float | None = None
     rssi_raw: float | None = None         # EWMA of the un-normalized RSSI (observability)
+    snr: float | None = None              # EWMA of EIRP-normalized SNR (cross-rung control axis)
     fec_work: float = 0.0
     burst_rate: float = 0.0
     holdoff_rate: float = 0.0
@@ -198,6 +199,12 @@ class SignalAggregator:
             rssi_norm_w = normalize_rssi(s.rssi_max_w, s.mcs_w, self.rssi_norm)
             s.rssi = _ewma(s.rssi, rssi_norm_w, self.ewma_alpha_rssi)
             s.rssi_raw = _ewma(s.rssi_raw, s.rssi_max_w, self.ewma_alpha_rssi)
+            # SNR shares RSSI's per-MCS TX-power offset (SNR scales 1:1 with
+            # TX power, noise unchanged), so reuse normalize_rssi to make SNR
+            # cross-rung comparable, then smooth it like rssi.
+            if s.snr_w is not None:
+                snr_norm_w = normalize_rssi(s.snr_w, s.mcs_w, self.rssi_norm)
+                s.snr = _ewma(s.snr, snr_norm_w, self.ewma_alpha_rssi)
 
         s.fec_work = _ewma(s.fec_work, s.fec_work_rate_w, self.ewma_alpha_fec)
         s.burst_rate = _ewma(s.burst_rate, s.burst_rate_w, self.ewma_alpha_burst)

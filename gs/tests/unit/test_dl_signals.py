@@ -159,10 +159,10 @@ def test_link_starved_false_when_packet_rate_high():
     assert s.link_starved_w is False
 
 
-def test_signals_has_no_snr_fields():
+def test_signals_has_no_unimplemented_snr_fields():
     from fpvdgs.dynlink.signals import Signals
     s = Signals()
-    assert not hasattr(s, "snr") and not hasattr(s, "snr_slope")
+    assert not hasattr(s, "snr_slope")
     assert not hasattr(s, "snr_max_w")
 
 
@@ -273,3 +273,17 @@ def test_snr_w_is_operating_antenna_snr():
     s = _Agg().consume(_evm_rxev([_evm_ant(0, -60, 25, -1, -1),
                                   _evm_ant(256, -55, 30, -1, -1)]))
     assert s.snr_w == 30.0
+
+
+def test_snr_is_eirp_normalized_and_smoothed():
+    # raw SNR 20 at MCS4 (curve 19, P_ref 29) -> +10 offset -> snr_norm 30.
+    # First window: EWMA seeds to the value, so s.snr == 30.
+    s = _Agg().consume(_evm_rxev([_evm_ant(0, -60, 20, -1, -1)]))  # snr_avg=20, mcs=4
+    assert s.snr == 30.0
+
+
+def test_snr_none_before_any_antenna_data():
+    from fpvdgs.dynlink.stats_client import RxEvent
+    s = _Agg().consume(RxEvent(timestamp=1.0, id="rx", packets_window={},
+                               rx_ant_stats=[], session=None))
+    assert s.snr is None
