@@ -105,3 +105,28 @@ def test_first_flight_starts_at_one(tmp_path):
     fl.close()
     files = list(tmp_path.glob("*.jsonl"))
     assert int(files[0].stem) == 1
+
+
+def test_syncs_periodically_to_disk_before_close(tmp_path):
+    # Records must reach the card mid-flight, so a hard reboot doesn't lose
+    # the whole log. With sync_interval=10, after 25 writes >= 20 are on disk
+    # WITHOUT close (the old buffered code left 0 on disk until close).
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), sync_interval=10))
+    for i in range(25):
+        fl.write({"ts": float(i)})
+    f = sorted(tmp_path.glob("*.jsonl"))[-1]
+    assert f.read_text().count("\n") >= 20
+    fl.close()
+
+
+def test_fsyncs_on_roll(tmp_path, monkeypatch):
+    # roll() ends a flight; it must fsync the completed file to the card
+    # BEFORE closing, so the just-finished flight survives a reboot.
+    import fpvdgs.dynlink.flightlog as mod
+    calls = []
+    monkeypatch.setattr(mod.os, "fsync", lambda fd: calls.append(fd))
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
+    fl.write({"ts": 1.0})
+    fl.roll()
+    assert calls, "roll() must fsync before closing the flight file"
+    fl.close()

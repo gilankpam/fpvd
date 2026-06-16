@@ -20,6 +20,10 @@ class FlightLogConfig:
     max_files: int = 8
     max_mb: float = 4.0
     flight_gap_s: float = 15.0   # link gone > this (s) => next healthy tick = new flight file
+    # Records between fsyncs (10 Hz → 50 = 5 s). The GS hard-reboots on video
+    # loss; without fsync the unsynced tail (and on a vfat card, sometimes the
+    # whole file) is lost on reboot. flush()+fsync() forces it to the card.
+    sync_interval: int = 50
 
 
 class FlightLog:
@@ -27,8 +31,20 @@ class FlightLog:
         self.cfg = cfg
         self._fh = None
         self._bytes = 0
+        self._since_sync = 0
         self._max_bytes = int(cfg.max_mb * 1024 * 1024)
         self._open()
+
+    def _sync(self) -> None:
+        """Force the buffered records out to the card. Survives the GS's
+        reboot-on-video-loss, which a plain buffered write does not."""
+        if self._fh is None:
+            return
+        try:
+            self._fh.flush()
+            os.fsync(self._fh.fileno())
+        except OSError as e:
+            log.warning("flightlog: fsync failed: %s", e)
 
     def _next_seq(self) -> int:
         """Next flight number = (highest numeric .jsonl stem on disk) + 1.
@@ -57,6 +73,7 @@ class FlightLog:
             self._path = os.path.join(self.cfg.dir, f"{self._next_seq():06d}.jsonl")
             self._fh = open(self._path, "w")
             self._bytes = 0
+            self._since_sync = 0
         except OSError as e:
             log.warning("flightlog: open failed in %s: %s", self.cfg.dir, e)
             self._fh = None
@@ -70,11 +87,16 @@ class FlightLog:
             line = json.dumps(record, separators=(",", ":")) + "\n"
             self._fh.write(line)
             self._bytes += len(line)
+            self._since_sync += 1
+            if self._since_sync >= self.cfg.sync_interval:
+                self._sync()
+                self._since_sync = 0
         except (OSError, TypeError) as e:
             log.warning("flightlog: write failed: %s", e)
 
     def close(self) -> None:
         if self._fh is not None:
+            self._sync()
             try:
                 self._fh.close()
             except OSError:
@@ -89,6 +111,7 @@ class FlightLog:
         if not self.cfg.enabled:
             return
         if self._fh is not None:
+            self._sync()
             try:
                 self._fh.close()
             except OSError:
