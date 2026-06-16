@@ -167,3 +167,12 @@ def test_v2_flat_file_loads_rssi_keeps_snr_cold(tmp_path):
                                                      min_samples=3))
     assert p2.ceiling(-50.0) == 4            # rssi knee survived the upgrade
     assert p2.snr_ceiling(35.0) is None       # snr starts cold
+
+
+def test_load_tolerates_null_model_subkeys(tmp_path):
+    import json
+    # a file with rssi/snr present but null must NOT boot-brick (AttributeError)
+    (tmp_path / "m8812eu2.json").write_text(
+        json.dumps({"rssi": None, "snr": None, "key": "m8812eu2"}))
+    p = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path)))
+    assert p.ceiling(-50.0) is None and p.snr_ceiling(30.0) is None

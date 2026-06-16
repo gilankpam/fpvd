@@ -53,9 +53,10 @@ class LearnedPriorConfig:
 
 
 class KneeModel:
-    """Per-rung RSSI knee. knee[K] = RSSI below which rung K is unviable in
-    steady state; count[K] = decayed confidence. Monotone-in-rung on read
-    (cumulative max). Caller feeds only settled samples."""
+    """Per-rung viability knee, signal-agnostic (instantiated for RSSI and SNR).
+    knee[K] = the signal value below which rung K is unviable in steady state;
+    count[K] = decayed confidence. Monotone-in-rung on read (cumulative max).
+    Caller feeds only settled samples."""
 
     SCHEMA_VERSION = 2
 
@@ -106,6 +107,8 @@ class KneeModel:
                 "knees": list(self._knee), "counts": list(self._count)}
 
     def load_dict(self, doc: dict) -> bool:
+        if not isinstance(doc, dict):
+            return False          # tolerant boundary: never boot-brick on a malformed file
         if doc.get("schema") != self.SCHEMA_VERSION:
             return False
         knees = doc.get("knees")

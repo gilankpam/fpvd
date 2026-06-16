@@ -141,3 +141,10 @@ def test_knees_snapshot_rounds():
     m._knee[3] = -64.273
     snap = m.knees_snapshot()
     assert snap[3] == -64.3 and snap[0] is None
+
+
+def test_load_dict_rejects_non_dict():
+    m = _model()
+    assert m.load_dict(None) is False
+    assert m.load_dict([1, 2, 3]) is False
+    assert m.ceiling(-50.0) is None       # no crash, stays empty
