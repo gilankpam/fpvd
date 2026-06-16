@@ -97,3 +97,22 @@ class KneeModel:
             if eff[K] is not None and eff[K] <= rssi:
                 best = K
         return best
+
+    def knees_snapshot(self) -> list:
+        return [None if k is None else round(k, 1) for k in self._knee]
+
+    def to_dict(self) -> dict:
+        return {"schema": self.SCHEMA_VERSION,
+                "knees": list(self._knee), "counts": list(self._count)}
+
+    def load_dict(self, doc: dict) -> bool:
+        if doc.get("schema") != self.SCHEMA_VERSION:
+            return False
+        knees = doc.get("knees")
+        counts = doc.get("counts")
+        if (isinstance(knees, list) and len(knees) == MAX_MCS + 1
+                and isinstance(counts, list) and len(counts) == MAX_MCS + 1):
+            self._knee = [None if k is None else float(k) for k in knees]
+            self._count = [float(c) for c in counts]
+            return True
+        return False

@@ -113,3 +113,31 @@ def test_recency_decay_one_keeps_confidence_forever():
         m.observe(1, -80.0, clean=True)
     assert m._count[4] == 10.0               # no decay
     assert m.ceiling(-50.0) == 4
+
+
+def test_to_dict_round_trips_through_load_dict():
+    m = _model()
+    _confident(m, 4, -60.0, n=12)
+    doc = m.to_dict()
+    assert doc["schema"] == 2
+    m2 = _model()
+    assert m2.load_dict(doc) is True
+    assert m2.ceiling(-50.0) == 4
+
+
+def test_load_dict_rejects_v1_schema():
+    m = _model()
+    assert m.load_dict({"schema": 1, "bins": [2.0, -90, -30], "cells": []}) is False
+    assert m.ceiling(-50.0) is None          # stays empty -> retrains
+
+
+def test_load_dict_rejects_malformed():
+    m = _model()
+    assert m.load_dict({"schema": 2, "knees": [1, 2], "counts": []}) is False
+
+
+def test_knees_snapshot_rounds():
+    m = _model()
+    m._knee[3] = -64.273
+    snap = m.knees_snapshot()
+    assert snap[3] == -64.3 and snap[0] is None
