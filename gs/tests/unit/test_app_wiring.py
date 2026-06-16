@@ -83,3 +83,28 @@ def test_build_app_wires_api_collaborators(tmp_path, monkeypatch):
     assert app.api.retune is not None
     assert app.api.wlans_resolver is not None
     assert app.api.armer_tick is not None
+
+
+def test_app_starts_and_stops_connection_monitor():
+    store = ConfigStore({"dynamicLink": {"enabled": False}})
+    runner = _Fake("runner")
+    mon = _Fake("mon")
+    app = App(store, runner, _Fake("http"), api=None, dynlink=_Fake("dynlink"),
+              connection_monitor=mon)
+    app.start()
+    assert "start" in mon.calls          # always-on, regardless of dynamicLink
+    app.shutdown()
+    assert "stop" in mon.calls
+
+
+def test_build_app_wires_connection_monitor_and_bus(tmp_path, monkeypatch):
+    import fpvdgs.supervisor as sup
+    monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
+    monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
+    config = tmp_path / "config.json"
+    config.write_text('{"link": {"region": "US", "channel": 132, "width": 20, '
+                      '"wlans": ["wlan0"]}}')
+    app = sup.build_app(str(config), str(tmp_path / "out.cfg"),
+                        "127.0.0.1", 0, runner_cmd=["true"])
+    assert app.connection_monitor is not None
+    assert app.bus is not None

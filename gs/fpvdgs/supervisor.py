@@ -24,9 +24,11 @@ from .beamforming import BeamformingController
 from .beamforming_armer import BeamformingArmer
 from .config import ConfigStore
 from .config_defaults import default_config
+from .connection_monitor import ConnectionMonitor, ConnectionMonitorConfig
 from .drone_client import DroneClient
 from .dynlink.controller import DynamicLinkController
 from .dynlink.config_build import make_dl_snapshot
+from .events import EventBus
 from .idr_relay import IdrRelay
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .probe.config_build import make_probe_snapshot
@@ -36,7 +38,8 @@ from .runner_supervisor import RunnerSupervisor, ProcessSupervisor, resolve_wlan
 
 class App:
     def __init__(self, store, runner, http_server, api, dynlink,
-                 pixelpilot=None, probe=None, armer=None, idr_relay=None):
+                 pixelpilot=None, probe=None, armer=None, idr_relay=None,
+                 connection_monitor=None, bus=None):
         self.store = store
         self.runner = runner
         self.http = http_server
@@ -46,9 +49,13 @@ class App:
         self.probe = probe
         self.armer = armer
         self.idr_relay = idr_relay
+        self.connection_monitor = connection_monitor
+        self.bus = bus
 
     def start(self):
         self.runner.start()
+        if self.connection_monitor is not None:
+            self.connection_monitor.start()
         if self.armer is not None:
             self.armer.start()   # boot re-arm: keeps the GS beamformee armed to config
         if (self.pixelpilot is not None
@@ -68,6 +75,8 @@ class App:
 
     def shutdown(self):
         self.http.shutdown()
+        if self.connection_monitor is not None:
+            self.connection_monitor.stop()
         if self.armer is not None:
             self.armer.stop()
         self.dynlink.stop()
@@ -99,6 +108,22 @@ def build_app(config_path, cfg_out, host, port,
     drone_cfg = effective.get("drone", {})
     drone_host = drone_cfg.get("host", "10.5.0.10")
     drone = DroneClient(f"http://{drone_host}:{int(drone_cfg.get('apiPort', 8080))}")
+
+    bus = EventBus()
+    cm_cfg = effective.get("connectionMonitor", {})
+    dcm = ConnectionMonitorConfig()
+    mon_cfg = ConnectionMonitorConfig(
+        enabled=bool(cm_cfg.get("enabled", dcm.enabled)),
+        tunnel_stale_s=float(cm_cfg.get("tunnelStaleS", dcm.tunnel_stale_s)),
+        http_poll_s=float(cm_cfg.get("httpPollS", dcm.http_poll_s)),
+        http_timeout_s=float(cm_cfg.get("httpTimeoutS", dcm.http_timeout_s)),
+        http_fail_count=int(cm_cfg.get("httpFailCount", dcm.http_fail_count)),
+        eval_interval_s=float(cm_cfg.get("evalIntervalS", dcm.eval_interval_s)),
+    )
+    mon_drone = DroneClient(
+        f"http://{drone_host}:{int(drone_cfg.get('apiPort', 8080))}",
+        timeout=mon_cfg.http_timeout_s)
+    connection_monitor = ConnectionMonitor(bus, mon_drone, mon_cfg)
 
     idr_cfg = effective.get("idrForward", {})
     idr_relay = IdrRelay(drone_host, port=int(idr_cfg.get("port", 11223)))
@@ -158,7 +183,8 @@ def build_app(config_path, cfg_out, host, port,
                                        dynamic_link=_dynamic_link_status(),
                                        pixelpilot=_pixelpilot_status(),
                                        probe=_probe_status(),
-                                       beamforming=beamforming.status_with_primary(primary))
+                                       beamforming=beamforming.status_with_primary(primary),
+                                       connection=connection_monitor.status())
 
     api = Api(store=store, schema=schema, render_mod=render_mod, runner=runner,
               drone=drone, status_fn=status_fn, cfg_out=cfg_out,
@@ -170,7 +196,7 @@ def build_app(config_path, cfg_out, host, port,
     http_server = make_http_server(api, host, port)
     return App(store, runner, http_server, api, dynlink,
                pixelpilot=pixelpilot, probe=probe_ctrl, armer=armer,
-               idr_relay=idr_relay)
+               idr_relay=idr_relay, connection_monitor=connection_monitor, bus=bus)
 
 
 def main(argv=None):
