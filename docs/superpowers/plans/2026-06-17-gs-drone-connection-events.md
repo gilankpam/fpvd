@@ -1381,8 +1381,14 @@ Expected: `True {'enabled': True, 'tunnelStaleS': 4.0, 'httpPollS': 1.5, 'httpTi
 
 - [ ] **Step 3: Verify a stale config without the block still loads (deep-merge backfill)**
 
-Run: `cd gs && .venv/bin/python -c "from fpvdgs.config import ConfigStore; from fpvdgs.schema import validate_effective; s = ConfigStore({'link': {'region': 'US', 'channel': 132, 'width': 20}}); validate_effective(s.effective()); print('connectionMonitor' in s.effective())"`
-Expected: `True` (defaults backfill the missing block; validate_effective passes)
+Write a config.json that lacks `connectionMonitor`, load it via the real boot path, and confirm the block is backfilled from defaults and validates:
+```sh
+cd gs
+printf '%s' '{"link": {"region": "US", "channel": 132, "width": 20}, "dynamicLink": {"enabled": false}}' > /tmp/stale_cfg.json
+.venv/bin/python -c "from fpvdgs.config import ConfigStore; from fpvdgs.schema import validate_effective; s = ConfigStore.load('/tmp/stale_cfg.json'); eff = s.effective(); validate_effective(eff); print('backfilled:', 'connectionMonitor' in eff)"
+rm -f /tmp/stale_cfg.json
+```
+Expected: `backfilled: True` (deep-merge backfills the missing block from defaults; validate_effective passes). NOTE: do NOT use `ConfigStore({...})` with a partial dict — its first positional arg is the *defaults*, so that would not exercise backfill.
 
 - [ ] **Step 4: Commit (if any verification fixes were needed; otherwise skip)**
 
