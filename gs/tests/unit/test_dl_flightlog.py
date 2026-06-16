@@ -54,11 +54,10 @@ def test_write_after_close_is_safe(tmp_path):
     fl.write({"ts": 1.0})        # no crash
 
 
-def test_config_defaults_dvr_dir_and_gap():
+def test_config_defaults_dvr_dir():
     from fpvdgs.dynlink.flightlog import FlightLogConfig
     c = FlightLogConfig()
     assert c.dir == "/media/dvr/log/dynamic-link/"
-    assert c.flight_gap_s == 15.0
 
 
 def test_roll_starts_new_file_and_both_persist(tmp_path):

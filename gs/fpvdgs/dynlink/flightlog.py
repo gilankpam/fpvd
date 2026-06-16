@@ -19,7 +19,6 @@ class FlightLogConfig:
     dir: str = "/media/dvr/log/dynamic-link/"
     max_files: int = 8
     max_mb: float = 4.0
-    flight_gap_s: float = 15.0   # link gone > this (s) => next healthy tick = new flight file
     # Records between fsyncs (10 Hz → 50 = 5 s). The GS hard-reboots on video
     # loss; without fsync the unsynced tail (and on a vfat card, sometimes the
     # whole file) is lost on reboot. flush()+fsync() forces it to the card.

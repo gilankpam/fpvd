@@ -61,54 +61,13 @@ def test_predictive_demote_on_confident_fade(tmp_path):
     p.close()
 
 
-def _cfg_fl(tmp_path, flight_gap_s=15.0):
+def _cfg_fl(tmp_path):
     from fpvdgs.dynlink.flightlog import FlightLogConfig
     from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
     return PolicyConfig(
         learned_prior=LearnedPriorConfig(persist_dir=str(tmp_path / "lp")),
-        flightlog=FlightLogConfig(dir=str(tmp_path / "fl"), flight_gap_s=flight_gap_s),
+        flightlog=FlightLogConfig(dir=str(tmp_path / "fl")),
     )
-
-
-def _sig_starved(starved, ts=1.0, rssi=-55.0):
-    return Signals(rssi=rssi, residual_loss_w=0.0, fec_work=0.0,
-                   link_starved_w=starved, timestamp=ts)
-
-
-def test_flight_rolls_on_link_gap_recovery(tmp_path, monkeypatch):
-    from fpvdgs.dynlink import policy as policy_mod
-    clock = {"t": 1000.0}
-    monkeypatch.setattr(policy_mod.time, "monotonic", lambda: clock["t"])
-    p = Policy(_cfg_fl(tmp_path, flight_gap_s=15.0), _profile())
-    p.tick(_sig_starved(False, ts=1.0)); clock["t"] += 0.1     # baseline (no roll on 1st)
-    p.tick(_sig_starved(False, ts=1.1))
-    clock["t"] += 20.0                                          # link gone 20 s
-    p.tick(_sig_starved(True, ts=2.0))                         # starved: baseline frozen
-    p.tick(_sig_starved(False, ts=3.0))                        # healthy: 20 > 15 -> ROLL
-    p.close()
-    assert len(list((tmp_path / "fl").glob("*.jsonl"))) == 2
-
-
-def test_brief_gap_does_not_roll(tmp_path, monkeypatch):
-    from fpvdgs.dynlink import policy as policy_mod
-    clock = {"t": 1000.0}
-    monkeypatch.setattr(policy_mod.time, "monotonic", lambda: clock["t"])
-    p = Policy(_cfg_fl(tmp_path, flight_gap_s=15.0), _profile())
-    p.tick(_sig_starved(False, ts=1.0)); clock["t"] += 5.0     # only 5 s gap
-    p.tick(_sig_starved(True, ts=2.0))
-    p.tick(_sig_starved(False, ts=3.0))                        # 5 < 15 -> no roll
-    p.close()
-    assert len(list((tmp_path / "fl").glob("*.jsonl"))) == 1
-
-
-def test_first_healthy_tick_does_not_roll(tmp_path, monkeypatch):
-    from fpvdgs.dynlink import policy as policy_mod
-    clock = {"t": 9999.0}     # large: would exceed any gap if baseline weren't None
-    monkeypatch.setattr(policy_mod.time, "monotonic", lambda: clock["t"])
-    p = Policy(_cfg_fl(tmp_path, flight_gap_s=15.0), _profile())
-    p.tick(_sig_starved(False, ts=1.0))                        # 1st healthy: None baseline -> no roll
-    p.close()
-    assert len(list((tmp_path / "fl").glob("*.jsonl"))) == 1
 
 
 def test_decision_and_flightlog_carry_rssi_raw(tmp_path):
@@ -183,3 +142,26 @@ def test_predictive_demote_does_not_misfire_on_detrended_rssi(tmp_path):
     assert lp.predictive_ceiling(-62.0, -6.0) == 1
     # Normalized: rssi -50, slope 0 -> projected -50 -> ceiling 5 (no demote).
     assert lp.predictive_ceiling(-50.0, 0.0) == 5
+
+
+def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
+    p = Policy(_cfg(tmp_path), _profile())
+    prior_before = p.learned_prior
+    # Simulate a session that climbed + accumulated hysteresis state.
+    p.leading.state.current_mcs = 5
+    p._cold_started = True
+    p._loss_count = 3
+    p._starvation_count = 4
+    p._snr_demote_count = 2
+    p.leading._promote_clean = 3
+
+    p.reset_for_new_session()
+
+    assert p.leading.state.current_mcs == 1     # back to the boot MCS
+    assert p._cold_started is False             # warm-start will re-run
+    assert p._loss_count == 0
+    assert p._starvation_count == 0
+    assert p._snr_demote_count == 0
+    assert p.leading._promote_clean == 0
+    assert p.learned_prior is prior_before      # persistent knees preserved
+    p.close()

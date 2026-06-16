@@ -12,7 +12,6 @@ warm-start seed and starvation hysteresis feeding the emergency demote.
 from __future__ import annotations
 
 import logging
-import time
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -292,7 +291,6 @@ class Policy:
             maxlen=cfg.learned_prior.predictive_slope_window_ticks)
         self._predict_demote_count = 0
         self._snr_demote_count = 0
-        self._last_healthy_mono = None   # monotonic ts of last non-starved tick (flight-gap roll)
         self.flightlog = FlightLog(cfg.flightlog)
 
     def tick(self, signals: Signals) -> Decision:
@@ -430,16 +428,6 @@ class Policy:
         reason = "; ".join(
             r for r in ([predict_reason, snr_demote_reason] + self.leading.reasons) if r
         )
-        # Flight-boundary roll: a new flight = the link returning healthy after
-        # being gone (starved) longer than flight_gap_s. Monotonic time so the
-        # unreliable GS wall-clock can't break it; raw link_starved_w as health.
-        if not signals.link_starved_w:
-            _now_mono = time.monotonic()
-            if (self._last_healthy_mono is not None
-                    and (_now_mono - self._last_healthy_mono)
-                    > self.cfg.flightlog.flight_gap_s):
-                self.flightlog.roll()
-            self._last_healthy_mono = _now_mono
         # Compact per-rung probe view (per + ageMs only) so the record stays
         # small at 10 Hz against the flight-log size cap.
         probe_log = (None if probe_snap is None else {
@@ -487,6 +475,21 @@ class Policy:
                 "mcs": new_mcs,
             },
         )
+
+    def reset_for_new_session(self) -> None:
+        """Reset volatile selector + hysteresis state to boot. A confirmed drone
+        reconnect is a new session, so re-run the learned-prior warm-start and
+        re-climb from the boot MCS instead of resuming a stale climbed-up rung.
+        The persistent learned_prior knees are kept (cross-session knowledge)."""
+        self.leading = LeadingSelector(self.cfg.selector)
+        self._cold_started = False
+        self._starvation_count = 0
+        self._loss_count = 0
+        self._ticks_at_mcs = 0
+        self._last_ingest_mcs = None
+        self._predict_demote_count = 0
+        self._snr_demote_count = 0
+        self._rssi_window.clear()
 
     def close(self) -> None:
         """Flush the learned prior + close the flight log. Called by the
