@@ -48,12 +48,24 @@ def test_smoothing_block_overrides_defaults():
     assert agg.ewma_alpha_fec == 0.2   # default
 
 
-def test_learned_prior_is_frozen_defaults_regardless_of_config():
-    # An attempt to tune learned-prior internals via config is ignored.
-    cfg = build_policy_config(_block(learnedPrior={"binWidthDb": 3.0,
-                                                   "minSamplesWarmstart": 7}))
-    assert cfg.learned_prior.bin_width_db == 2.0
-    assert cfg.learned_prior.min_samples_warmstart == 20
+def test_learned_prior_knobs_tunable():
+    cfg = build_policy_config(_block(learnedPrior={
+        "settleTicks": 8, "alphaTighten": 0.4, "alphaRelax": 0.02,
+        "minSamples": 12, "recencyDecay": 0.999,
+    }))
+    lp = cfg.learned_prior
+    assert lp.settle_ticks == 8
+    assert lp.alpha_tighten == 0.4
+    assert lp.alpha_relax == 0.02
+    assert lp.min_samples == 12
+    assert lp.recency_decay == 0.999
+
+
+def test_learned_prior_defaults_when_absent():
+    lp = build_policy_config(_block()).learned_prior
+    assert lp.settle_ticks == 5
+    assert lp.alpha_tighten == 0.25
+    assert lp.alpha_relax == 0.05
 
 
 def test_flightlog_reads_only_enabled():
