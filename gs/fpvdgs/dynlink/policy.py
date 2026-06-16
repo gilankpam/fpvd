@@ -260,6 +260,10 @@ class Policy:
         # threshold packet rate before declaring blackout.
         self._starvation_count: int = 0
         self._loss_count: int = 0
+        # Knee-prior learning gate: only ingest once the operating rung has
+        # been unchanged for settle_ticks (loss from the last change drained).
+        self._ticks_at_mcs = 0
+        self._last_ingest_mcs: int | None = None
         # Learned per-card prior (always-on), keyed by the operator-set
         # dynamicLink.radioProfile; GS-local, the live probe stays authoritative.
         self.learned_prior = LearnedPrior(profile_name, cfg.learned_prior)
@@ -354,24 +358,22 @@ class Policy:
             ts_ms=ts_ms,
         )
 
-        # Ingest one observation for the learned prior (spec §4): the probe
-        # rung verdict (current+1) and the operating-rung health.
-        if signals.rssi is not None:
-            target = self.leading.state.current_mcs + 1
-            rung = probe_snap or {}
-            rung = rung.get("mcs", {}).get(str(target)) if target <= self.leading._cap_mcs else None
-            probe_clean = bool(
-                rung and rung.get("per") is not None
-                and (1.0 - rung["per"]) >= self.cfg.selector.probe_viable_threshold
-            )
-            operating_clean = signals.residual_loss_w < self.cfg.selector.video_demote_per
-            self.learned_prior.ingest(
-                rssi=signals.rssi,
-                probed_rung=(target if rung is not None else None),
-                probe_clean=probe_clean,
-                operating_mcs=new_mcs,
-                operating_clean=operating_clean,
-            )
+        # Learning gate: feed the knee prior ONLY operating-rung outcomes, and
+        # only once the rung has been settled for settle_ticks (rejects fast-fade
+        # transients where loss is a transition artifact, not rung unviability).
+        if new_mcs != self._last_ingest_mcs:
+            self._ticks_at_mcs = 0
+        else:
+            self._ticks_at_mcs += 1
+        self._last_ingest_mcs = new_mcs
+        prior_settled = self._ticks_at_mcs >= self.cfg.learned_prior.settle_ticks
+        prior_learn = signals.rssi is not None and prior_settled
+        self.learned_prior.ingest(
+            rssi=signals.rssi,
+            operating_mcs=new_mcs,
+            operating_clean=signals.residual_loss_w < self.cfg.learned_prior.viable_loss,
+            settled=prior_settled,
+        )
 
         reason = "; ".join(
             r for r in ([predict_reason] + self.leading.reasons) if r
@@ -406,6 +408,8 @@ class Policy:
                         if signals.rssi is not None else None),
             "probe": probe_log,
             "pc": pc,
+            "knees": self.learned_prior.knees_snapshot(),
+            "prior_learn": prior_learn,
             "slope": slope,
             "predict_gated": predict_gated,
             "promote_clean": self.leading._promote_clean,

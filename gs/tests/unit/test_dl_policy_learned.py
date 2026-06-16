@@ -23,53 +23,41 @@ def _sig(rssi, ts=1.0):
                    link_starved_w=False, timestamp=ts)
 
 
+def _settle_knee(policy, rung, rssi, clean, n=12):
+    """Prime the knee model directly via the facade (settled=True), bypassing
+    the policy's tick-driven settle gate — used only for test setup."""
+    for _ in range(n):
+        policy.learned_prior.ingest(rssi=rssi, operating_mcs=rung,
+                                    operating_clean=clean, settled=True)
+
+
 def test_warm_start_seeds_from_persisted_curve(tmp_path):
-    # Flight 1: build a confident curve at -50 -> ceiling 5, persist.
     prof = _profile()
-    p1 = Policy(_cfg(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3), prof)
-    for _ in range(5):
-        p1.learned_prior.ingest(rssi=-50.0, probed_rung=5, probe_clean=True,
-                                operating_mcs=5, operating_clean=True)
-    p1.close()   # flushes
-    # Flight 2: a fresh Policy warm-starts to the learned ceiling on tick 1,
-    # instead of climbing from MCS 1.
-    p2 = Policy(_cfg(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3), prof)
-    dec = p2.tick(_sig(-50.0))
-    assert dec.mcs == 5
-    p2.close()
+    p1 = Policy(_cfg(tmp_path, min_samples=3), prof)
+    _settle_knee(p1, 5, -50.0, True)
+    p1.close()
+    p2 = Policy(_cfg(tmp_path, min_samples=3), prof)
+    dec = p2.tick(_sig(-50.0, ts=1.0))
+    assert dec.mcs == 5                      # warm-started from the persisted knee
 
 
 def test_unknown_curve_no_seed_stays_at_boot(tmp_path):
-    # Empty store → warm-start unknown → NO RSSI cold-start seed (dropped).
-    # With no probe data the MCS stays at the boot default (1); in production
-    # the probe climbs from there.
-    p = Policy(_cfg(tmp_path, min_samples_warmstart=100), _profile())
-    dec = p.tick(_sig(-50.0))
-    assert dec.mcs == 1
-    p.close()
+    p = Policy(_cfg(tmp_path, min_samples=100), _profile())
+    dec = p.tick(_sig(-50.0, ts=1.0))
+    assert dec.mcs == 1                      # cold prior -> boot MCS
 
 
 def test_predictive_demote_on_confident_fade(tmp_path):
     prof = _profile()
-    p = Policy(_cfg(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3,
-                    min_samples_predictive=3, predictive_horizon_ticks=2,
-                    predictive_debounce_windows=2), prof)
-    # learn: strong RSSI -> ceiling 5, the bin a fast fade lands in -> ceiling 2
-    for _ in range(5):
-        for rung in range(6):
-            p.learned_prior.ingest(rssi=-50.0, probed_rung=rung, probe_clean=True,
-                                   operating_mcs=rung, operating_clean=True)
-        for rung in range(3):
-            p.learned_prior.ingest(rssi=-56.0, probed_rung=rung, probe_clean=True,
-                                   operating_mcs=rung, operating_clean=True)
-        p.learned_prior.ingest(rssi=-56.0, probed_rung=3, probe_clean=False,
-                               operating_mcs=2, operating_clean=True)
-    # warm-start to 5 at -50, then a -3 dB/tick fade; after debounce the
-    # operating MCS pre-demotes toward the projected ceiling (2), down-only.
-    p.tick(_sig(-50.0, ts=1.0))
-    p.tick(_sig(-53.0, ts=1.1))
-    dec = p.tick(_sig(-56.0, ts=1.2))
-    assert dec.mcs <= 2
+    p = Policy(_cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3,
+                    predictive_debounce_windows=1), prof)
+    _settle_knee(p, 1, -80.0, True)          # rung1 viable down to -80
+    _settle_knee(p, 2, -62.0, True)          # rung2 viable down to -62
+    _settle_knee(p, 5, -50.0, True)          # rung5 viable only >= -50
+    p.leading.state.current_mcs = 5
+    p.tick(_sig(-50.0, ts=1.0))              # slope 0 -> no demote yet
+    dec = p.tick(_sig(-56.0, ts=1.1))        # slope -6, projected -56-18=-74 -> ceiling 1
+    assert dec.mcs == 1
     p.close()
 
 
@@ -149,86 +137,49 @@ def test_decision_and_flightlog_carry_rssi_raw(tmp_path):
 
 
 def test_predictive_demote_blocked_when_rssi_flat(tmp_path):
-    """Static prior-vs-probe disagreement at flat RSSI must NOT demote: the
-    probe legitimately climbed above the prior's learned ceiling, but with no
-    fade the slope-direction gate suppresses the predictive demote. This is the
-    000010/000012 flapping root cause."""
+    """Static prior-vs-probe disagreement at flat RSSI must NOT demote — the
+    slope-direction gate suppresses it (the 000010/000012 flapping fix)."""
     prof = _profile()
-    p = Policy(_cfg(tmp_path, ewma_alpha=1.0, min_samples_warmstart=10_000,
-                    min_samples_predictive=3, predictive_horizon_ticks=3,
+    p = Policy(_cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3,
                     predictive_debounce_windows=2), prof)
-    # learned ceiling at -50 = 2 (rungs 0..2 clean; rung 3 dirty)
-    for _ in range(5):
-        for rung in range(3):
-            p.learned_prior.ingest(rssi=-50.0, probed_rung=rung, probe_clean=True,
-                                   operating_mcs=rung, operating_clean=True)
-        p.learned_prior.ingest(rssi=-50.0, probed_rung=3, probe_clean=False,
-                               operating_mcs=2, operating_clean=True)
-    p.leading.state.current_mcs = 5      # probe pushed above the learned ceiling
+    _settle_knee(p, 2, -50.0, True)          # learned ceiling at -50 = 2
+    p.leading.state.current_mcs = 5          # probe pushed above the learned ceiling
     dec = None
     for ts in (1.0, 1.1, 1.2, 1.3, 1.4):
         dec = p.tick(_sig(-50.0, ts=ts))
-    assert dec.mcs == 5                   # flat RSSI → never predict-demoted
+    assert dec.mcs == 5                       # flat RSSI -> never predict-demoted
     p.close()
 
 
 def test_predictive_demote_blocked_when_fade_too_shallow(tmp_path):
-    """A real but shallow downtrend whose projected drop is below
-    predictive_min_drop_db must NOT demote — only a genuine fade should."""
+    """A real but shallow downtrend (projected drop < predictive_min_drop_db)
+    must NOT demote."""
     prof = _profile()
-    p = Policy(_cfg(tmp_path, ewma_alpha=1.0, min_samples_warmstart=10_000,
-                    min_samples_predictive=3, predictive_horizon_ticks=3,
+    p = Policy(_cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3,
                     predictive_debounce_windows=2, predictive_min_drop_db=1.0), prof)
-
-    def prime(rssi, ceiling, n=50):
-        b = p.learned_prior.rssi_bin(rssi)
-        for rung in range(ceiling + 1):
-            p.learned_prior._cells[b][rung] = [1.0, float(n)]
-
-    # Ceiling 2 across a band so the small fade stays in the ceiling-2 region.
-    for r in (-52.0, -51.0, -50.0, -49.0, -48.0):
-        prime(r, 2)
+    _settle_knee(p, 2, -52.0, True)          # ceiling 2 across the band
     p.leading.state.current_mcs = 5
-    # shallow -0.2 dBm/tick fade: projected drop over horizon = 0.6 dB < 1.0
     dec = None
     for rssi, ts in [(-50.0, 1.0), (-50.2, 1.1), (-50.4, 1.2),
                      (-50.6, 1.3), (-50.8, 1.4)]:
         dec = p.tick(_sig(rssi, ts=ts))
-    assert dec.mcs == 5                   # shallow fade gated out
+    assert dec.mcs == 5                       # 0.2 dB/tick -> 0.6 dB over horizon < 1.0
     p.close()
 
 
 def test_predictive_demote_does_not_misfire_on_detrended_rssi(tmp_path):
-    """Promote MCS->MCS+ drops the drone's power → raw RSSI steps down →
-    negative raw slope → predictive_ceiling at the projected raw RSSI lands
-    in a low-ceiling bin and would demote. After EIRP-normalization the RSSI
-    is flat (slope ~0), so predictive_ceiling stays at the operating ceiling
-    and does NOT demote."""
+    """Raw RSSI (steps down on a power change) WOULD demote; EIRP-normalized
+    RSSI (flat) does NOT. Exercises predictive_ceiling's projection directly."""
     from fpvdgs.dynlink.learned_prior import LearnedPrior, LearnedPriorConfig
+    lp = LearnedPrior("test-misfire", LearnedPriorConfig(
+        persist_dir=str(tmp_path), min_samples=3, predictive_horizon_ticks=3))
 
-    cfg = LearnedPriorConfig(persist_dir=str(tmp_path))
-    lp = LearnedPrior("test-misfire", cfg)
+    def settle(rung, rssi, n=12):
+        for _ in range(n):
+            lp.ingest(rssi=rssi, operating_mcs=rung, operating_clean=True, settled=True)
 
-    # White-box: prime the internal cell table directly to isolate
-    # predictive_ceiling's bin/projection math. If the cell storage shape
-    # changes, this may break on churn rather than a real regression.
-    def prime(rssi_lo, ceiling, n=50):
-        b = lp.rssi_bin(rssi_lo)
-        for rung in range(ceiling + 1):
-            lp._cells[b][rung] = [1.0, float(n)]
-
-    # Low-RSSI region tops out at MCS1; high-RSSI region supports MCS5.
-    prime(-80.0, 1)
-    prime(-50.0, 5)
-
-    current_mcs = 5
-    # Raw path: rssi -62, slope -6/tick → projected -80 → ceiling 1 < 5 → DEMOTE.
-    pc_raw = lp.predictive_ceiling(-62.0, -6.0)
-    assert pc_raw == 1
-    assert pc_raw < current_mcs            # raw RSSI WOULD have demoted
-
-    # Normalized path: rssi -50, slope 0 (power step removed) → projected -50
-    # → ceiling 5, not below current → NO demote.
-    pc_norm = lp.predictive_ceiling(-50.0, 0.0)
-    assert pc_norm == 5
-    assert not (pc_norm < current_mcs)     # normalized RSSI does NOT demote
+    settle(1, -80.0); settle(2, -78.0); settle(5, -55.0)
+    # Raw: rssi -62, slope -6/tick -> projected -80 -> ceiling 1 < 5 (would demote).
+    assert lp.predictive_ceiling(-62.0, -6.0) == 1
+    # Normalized: rssi -50, slope 0 -> projected -50 -> ceiling 5 (no demote).
+    assert lp.predictive_ceiling(-50.0, 0.0) == 5

@@ -55,21 +55,19 @@ def test_record_probe_none_without_probe_status(tmp_path):
 
 def test_record_carries_pc_and_slope(tmp_path):
     prof = _profile()
-    p = Policy(_cfg(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3,
-                    min_samples_predictive=3), prof)
+    p = Policy(_cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3), prof)
     for _ in range(5):
-        p.learned_prior.ingest(rssi=-50.0, probed_rung=5, probe_clean=True,
-                               operating_mcs=5, operating_clean=True)
+        p.learned_prior.ingest(rssi=-50.0, operating_mcs=5,
+                                operating_clean=True, settled=True)
     p.tick(_sig(-50.0, ts=1.0))
     p.tick(_sig(-52.0, ts=1.1))
     p.close()
     recs = _records(tmp_path)
-    assert recs[0]["slope"] == 0.0          # no previous RSSI yet
-    assert recs[0]["pc"] == 5
+    assert recs[0]["slope"] == 0.0
     assert recs[1]["slope"] == -2.0
-    # projected -52 + (-2 * 3 ticks) = -58 -> below the only confident bin,
-    # ladder extrapolates from the lowest anchor (5)
-    assert recs[1]["pc"] == 5
+    assert isinstance(recs[1]["knees"], list) and len(recs[1]["knees"]) == 8
+    # ticks_at_mcs is 0 then 1 on these two ticks, below default settle_ticks=5
+    assert recs[1]["prior_learn"] is False
 
 
 def test_record_pc_and_slope_none_when_prior_cold_or_no_rssi(tmp_path):
@@ -132,15 +130,11 @@ def test_record_carries_predict_gated_flag(tmp_path):
     """predict_gated is True when pc < cur but the slope-direction gate blocks
     the demote (flat RSSI = no real fade); the reason carries no predict_demote."""
     prof = _profile()
-    p = Policy(_cfg(tmp_path, ewma_alpha=1.0, min_samples_warmstart=10_000,
-                    min_samples_predictive=3, predictive_horizon_ticks=3,
+    p = Policy(_cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3,
                     predictive_debounce_windows=2), prof)
-    for _ in range(5):
-        for rung in range(3):
-            p.learned_prior.ingest(rssi=-50.0, probed_rung=rung, probe_clean=True,
-                                   operating_mcs=rung, operating_clean=True)
-        p.learned_prior.ingest(rssi=-50.0, probed_rung=3, probe_clean=False,
-                               operating_mcs=2, operating_clean=True)
+    for _ in range(12):
+        p.learned_prior.ingest(rssi=-50.0, operating_mcs=2,
+                               operating_clean=True, settled=True)
     p.leading.state.current_mcs = 5
     p.tick(_sig(-50.0, ts=1.0))
     p.tick(_sig(-50.0, ts=1.1))
