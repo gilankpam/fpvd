@@ -120,3 +120,50 @@ def test_key_sanitized_in_filename(tmp_path):
     p.flush()
     files = list(tmp_path.iterdir())
     assert len(files) == 1 and "/" not in files[0].name
+
+
+def _settle_snr(p, rung, snr, clean, n=12):
+    for _ in range(n):
+        p.ingest(rssi=None, snr=snr, operating_mcs=rung,
+                 operating_clean=clean, settled=True)
+
+
+def test_snr_ceiling_learns_independently_of_rssi(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle_snr(p, 1, 10.0, True)
+    _settle_snr(p, 4, 30.0, True)
+    assert p.snr_ceiling(35.0) == 4
+    assert p.snr_ceiling(12.0) == 1
+    assert p.snr_ceiling(5.0) is None
+    assert p.ceiling(-50.0) is None          # rssi model untouched (no rssi ingested)
+
+
+def test_snr_ceiling_none_when_cold_or_none(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    assert p.snr_ceiling(30.0) is None       # cold
+    _settle_snr(p, 4, 30.0, True)
+    assert p.snr_ceiling(None) is None        # None input
+
+
+def test_combined_persistence_round_trip(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle(p, 4, -60.0, True)               # rssi knee (existing helper)
+    _settle_snr(p, 4, 30.0, True)            # snr knee
+    p.flush()
+    p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path),
+                                                     min_samples=3))
+    assert p2.ceiling(-50.0) == 4
+    assert p2.snr_ceiling(35.0) == 4
+
+
+def test_v2_flat_file_loads_rssi_keeps_snr_cold(tmp_path):
+    import json
+    # a deployed v2 doc is the flat rssi-model dict (no "rssi"/"snr" wrapper)
+    p1 = _prior(tmp_path, min_samples=3)
+    _settle(p1, 4, -60.0, True)
+    flat = p1._model.to_dict(); flat["key"] = "m8812eu2"
+    (tmp_path / "m8812eu2.json").write_text(json.dumps(flat))
+    p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path),
+                                                     min_samples=3))
+    assert p2.ceiling(-50.0) == 4            # rssi knee survived the upgrade
+    assert p2.snr_ceiling(35.0) is None       # snr starts cold

@@ -127,17 +127,25 @@ class LearnedPrior:
         self.key = key
         self.cfg = cfg
         self._model = KneeModel(cfg)
+        self._snr_model = KneeModel(cfg)
         self._since_flush = 0
         self._load()
 
-    def ingest(self, *, rssi, operating_mcs, operating_clean, settled) -> None:
-        if rssi is None or operating_mcs is None or not settled:
+    def ingest(self, *, rssi, snr=None, operating_mcs, operating_clean, settled) -> None:
+        if operating_mcs is None or not settled:
             return
-        self._model.observe(int(operating_mcs), float(rssi), bool(operating_clean))
-        self._since_flush += 1
-        if self._since_flush >= self.cfg.flush_interval_observations:
-            self.flush()
-            self._since_flush = 0
+        m = int(operating_mcs)
+        clean = bool(operating_clean)
+        learned = False
+        if rssi is not None:
+            self._model.observe(m, float(rssi), clean); learned = True
+        if snr is not None:
+            self._snr_model.observe(m, float(snr), clean); learned = True
+        if learned:
+            self._since_flush += 1
+            if self._since_flush >= self.cfg.flush_interval_observations:
+                self.flush()
+                self._since_flush = 0
 
     def ceiling(self, rssi) -> int | None:
         return None if rssi is None else self._model.ceiling(float(rssi))
@@ -153,6 +161,12 @@ class LearnedPrior:
 
     def knees_snapshot(self) -> list:
         return self._model.knees_snapshot()
+
+    def snr_ceiling(self, snr) -> int | None:
+        return None if snr is None else self._snr_model.ceiling(float(snr))
+
+    def snr_knees_snapshot(self) -> list:
+        return self._snr_model.knees_snapshot()
 
     def to_status(self) -> dict:
         return {"key": self.key, "knees": self._model.knees_snapshot()}
@@ -170,12 +184,19 @@ class LearnedPrior:
         except (ValueError, OSError) as e:
             log.warning("learned_prior: ignoring unreadable %s: %s", self._path(), e)
             return
-        if not self._model.load_dict(doc):
-            log.info("learned_prior: %s ignored (schema/shape) — retraining", self._path())
+        # Back-compat: a v2 deploy persisted the flat rssi-model dict (no
+        # "rssi"/"snr" wrapper). doc.get("rssi", doc) loads that as the rssi
+        # model and leaves snr cold; a v3 combined doc loads both.
+        if not self._model.load_dict(doc.get("rssi", doc)):
+            log.info("learned_prior: %s rssi ignored (schema/shape) — retraining", self._path())
+        snr_doc = doc.get("snr")
+        if snr_doc is not None and not self._snr_model.load_dict(snr_doc):
+            log.info("learned_prior: %s snr ignored (schema/shape) — retraining", self._path())
 
     def flush(self) -> None:
-        doc = self._model.to_dict()
-        doc["key"] = self.key
+        doc = {"key": self.key,
+               "rssi": self._model.to_dict(),
+               "snr": self._snr_model.to_dict()}
         try:
             os.makedirs(self.cfg.persist_dir, exist_ok=True)
             tmp = self._path() + ".tmp"
