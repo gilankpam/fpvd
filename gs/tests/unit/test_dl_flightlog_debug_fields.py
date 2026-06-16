@@ -230,3 +230,38 @@ def test_proactive_snr_demote_before_loss(tmp_path):
     assert decs[-1].mcs == 3                   # demoted 4->3 with zero loss
     assert any("snr_demote mcs4->3" in d.reason for d in decs)
     p.close()
+
+
+def _clean_probe():
+    # every rung reads dead-clean + fresh (probe wants to climb)
+    return {"running": True, "streams": 1,
+            "mcs": {str(m): {"per": 0.0, "ageMs": 0.0} for m in range(8)}}
+
+
+def test_promote_explores_cold_frontier_rung(tmp_path):
+    # DEADLOCK regression (the live "maxMcs=5 never reaches 5"): the SNR prior is
+    # confident for rung4 ONLY (the link only ever settled there). Healthy SNR +
+    # clean probe rung5. rung5 is UNKNOWN (cold), not unviable, so the probe must
+    # be allowed to promote to it AND the proactive SNR demote must NOT yank it
+    # back before its knee can warm. Fails on the old code 3 ways: promote vetoed
+    # (snr_ceiling=4), or promoted-then-demoted (ceiling 4 < 5), or never settles.
+    from fpvdgs.dynlink.signals import Signals
+    cfg = _cfg(tmp_path, min_samples=3)
+    cfg.selector.max_mcs = 5
+    cfg.selector.promote_debounce_windows = 1
+    cfg.selector.hold_modes_down_ms = 0
+    cfg.selector.min_between_changes_ms = 0
+    cfg.selector.snr_demote_debounce = 2
+    p = Policy(cfg, _profile(), probe_status=_clean_probe)
+    for _ in range(12):                        # rung4 confident, viable at snr >= ~27
+        p.learned_prior.ingest(rssi=None, snr=27.0, operating_mcs=4,
+                               operating_clean=True, settled=True)
+    p.leading.state.current_mcs = 4
+
+    def sig(ts):                               # healthy snr (clears rung4), no loss
+        return Signals(rssi=None, residual_loss_w=0.0, fec_work=0.0,
+                       link_starved_w=False, timestamp=ts, snr=39.0)
+
+    decs = [p.tick(sig(1.0 + 0.1 * k)) for k in range(10)]
+    p.close()
+    assert [d.mcs for d in decs[-4:]] == [5, 5, 5, 5]   # reached 5 AND holds (no yo-yo)

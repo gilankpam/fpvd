@@ -139,7 +139,7 @@ class LeadingSelector:
         loss_rate: float,
         loss_demote: bool = False,
         loss_demote_target: int | None = None,
-        promote_ceiling: int | None = None,
+        promote_blocked: bool = False,
         fec_pressure: float,
         link_starved: bool,
         ts_ms: float,
@@ -218,12 +218,16 @@ class LeadingSelector:
         )
         if clean:
             self._promote_clean += 1
-            # SNR ceiling caps the probe's optimism: never promote to a rung the
-            # live SNR doesn't support (the 4<->3 oscillation driver — the probe
+            # SNR caps the probe's optimism: never promote to a rung the live SNR
+            # CONFIDENTLY says is unviable (the 4<->3 oscillation driver — the probe
             # measures rung+1 at the current rung's TX power and reads it clean).
-            capped = promote_ceiling is not None and target > promote_ceiling
+            # promote_blocked is precomputed in policy.tick (it needs the learned
+            # prior). A rung the SNR prior hasn't learned is NOT blocked — unknown
+            # != bad, so the probe may explore the frontier; otherwise the top
+            # rung, whose knee can only be learned BY operating there, is forever
+            # unreachable (the maxMcs-never-reached deadlock).
             if (self._promote_clean >= self.cfg.promote_debounce_windows
-                    and not within_hold and not within_rate and not capped):
+                    and not within_hold and not within_rate and not promote_blocked):
                 commit(target, f"probe_promote mcs{target} per={rung['per']:.4f}")
         else:
             self._promote_clean = 0
@@ -368,13 +372,17 @@ class Policy:
         # depth / tx_power locally, so we emit {mcs} only.
         loss_demote_target = self.learned_prior.snr_ceiling(signals.snr)
 
-        # Proactive SNR demote (down-only, debounced): SNR is the operating
-        # ceiling. If it is confidently below the current rung, jump straight to
-        # it ahead of the loss — catching the interference the RSSI slope-gate
-        # can't see. The promote_ceiling below stops the probe climbing back.
+        # Proactive SNR demote (down-only, debounced): if the SNR prior
+        # CONFIDENTLY says the CURRENT rung is unviable at the live SNR, jump
+        # straight down to the highest rung it still supports, ahead of the loss
+        # — catching the interference the RSSI slope-gate can't see. Gated on the
+        # current rung being confidently unviable (NOT merely "below the highest
+        # confident-viable rung"), so a not-yet-learned rung the probe just
+        # climbed onto is not yanked back before its knee can warm.
         snr_demote_reason = ""
         cur_snr = self.leading.state.current_mcs
-        if loss_demote_target is not None and loss_demote_target < cur_snr:
+        if (loss_demote_target is not None
+                and self.learned_prior.snr_rung_unviable(cur_snr, signals.snr)):
             self._snr_demote_count += 1
             if self._snr_demote_count >= self.cfg.selector.snr_demote_debounce:
                 self.leading.state.current_mcs = loss_demote_target
@@ -383,13 +391,19 @@ class Policy:
         else:
             self._snr_demote_count = 0
 
+        # Promote veto: block the probe's next-rung climb only if the SNR prior
+        # CONFIDENTLY says that target rung is unviable at the live SNR. A cold
+        # (unlearned) target is explorable — see select()'s frontier note.
+        promote_target = self.leading.state.current_mcs + 1
+        promote_blocked = self.learned_prior.snr_rung_unviable(promote_target, signals.snr)
+
         probe_snap = self._probe_status() if self._probe_status else None
         new_mcs, _changed = self.leading.select(
             probe=probe_snap,
             loss_rate=signals.residual_loss_w,
             loss_demote=sustained_loss,
             loss_demote_target=loss_demote_target,
-            promote_ceiling=loss_demote_target,
+            promote_blocked=promote_blocked,
             fec_pressure=signals.fec_work,
             link_starved=sustained_starved,
             ts_ms=ts_ms,
@@ -439,6 +453,7 @@ class Policy:
             "snr": signals.snr_w,
             "snr_norm": signals.snr,
             "snr_ceiling": loss_demote_target,
+            "promote_blocked": promote_blocked,
             "snr_knees": self.learned_prior.snr_knees_snapshot(),
             "evm": signals.evm_w,
             "evm_lo": signals.evm_lo_w,

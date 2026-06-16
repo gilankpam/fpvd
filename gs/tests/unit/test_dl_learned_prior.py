@@ -176,3 +176,29 @@ def test_load_tolerates_null_model_subkeys(tmp_path):
         json.dumps({"rssi": None, "snr": None, "key": "m8812eu2"}))
     p = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path)))
     assert p.ceiling(-50.0) is None and p.snr_ceiling(30.0) is None
+
+
+# ── snr_rung_unviable: per-rung known-bad, NOT highest-confident-viable ───────
+# Distinguishes "this rung is confidently unviable" (block) from "this rung is
+# unknown" (explore). The frontier-cap fix for the never-promotes-to-top deadlock.
+
+def test_snr_rung_unviable_cold_rung_is_explorable(tmp_path):
+    # Only rung4 has been learned; rung5 (the frontier) is UNKNOWN, not unviable.
+    p = _prior(tmp_path, min_samples=3)
+    _settle_snr(p, 4, 27.0, True)
+    assert p.snr_rung_unviable(5, 39.0) is False    # cold -> explorable (deadlock fix)
+    assert p.snr_rung_unviable(6, 39.0) is False
+
+
+def test_snr_rung_unviable_confident_rung(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle_snr(p, 4, 27.0, True)                   # rung4 viable at snr >= ~27
+    assert p.snr_rung_unviable(4, 24.0) is True     # below the knee -> known-bad
+    assert p.snr_rung_unviable(4, 30.0) is False    # clears the knee -> viable
+
+
+def test_snr_rung_unviable_none_inputs(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle_snr(p, 4, 27.0, True)
+    assert p.snr_rung_unviable(4, None) is False    # no live snr -> can't judge
+    assert p.snr_rung_unviable(None, 39.0) is False

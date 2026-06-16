@@ -274,16 +274,18 @@ def test_loss_windows_defaults_to_one():
     assert SelectorConfig().loss_windows == 1
 
 
-def test_promote_capped_by_snr_ceiling():
+def test_promote_blocked_by_flag():
+    # The per-rung "is this target confidently unviable?" decision is made in
+    # policy.tick (it needs the learned prior); the selector just honours the bool.
     s = _selector(max_mcs=5, promote_debounce_windows=1)
     _drive_to_mcs_probe(s, 3)                 # reach MCS3
     ts = 500000.0
-    for _ in range(4):                        # clean rung4 probe, but SNR caps at 3
+    for _ in range(4):                        # clean rung4 probe, but blocked
         ts += 1000.0
         mcs, _ = s.select(probe=_probe(7), loss_rate=0.0, fec_pressure=0.0,
-                          link_starved=False, ts_ms=ts, promote_ceiling=3)
-    assert mcs == 3                           # promote to 4 blocked by snr ceiling
+                          link_starved=False, ts_ms=ts, promote_blocked=True)
+    assert mcs == 3                           # promote to 4 vetoed
     ts += 1000.0
     mcs, _ = s.select(probe=_probe(7), loss_rate=0.0, fec_pressure=0.0,
-                      link_starved=False, ts_ms=ts, promote_ceiling=4)
-    assert mcs == 4                           # ceiling lifts -> promotes
+                      link_starved=False, ts_ms=ts, promote_blocked=False)
+    assert mcs == 4                           # veto lifts -> promotes

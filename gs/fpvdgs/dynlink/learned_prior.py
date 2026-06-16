@@ -99,6 +99,17 @@ class KneeModel:
                 best = K
         return best
 
+    def rung_unviable(self, rung: int, value: float) -> bool:
+        """True iff rung K is CONFIDENTLY unviable at `value` — its own knee is
+        confident and `value` falls below it. A cold/unlearned rung returns
+        False: unknown is not unviable, so the caller may still explore it.
+        Distinct from `ceiling`, which answers "highest confidently-VIABLE rung";
+        a rung above that ceiling may simply be unmeasured, not known-bad."""
+        if rung < 0 or rung > MAX_MCS:
+            return False
+        k = self._eff_knees()[rung]
+        return k is not None and value < k
+
     def knees_snapshot(self) -> list:
         return [None if k is None else round(k, 1) for k in self._knee]
 
@@ -167,6 +178,14 @@ class LearnedPrior:
 
     def snr_ceiling(self, snr) -> int | None:
         return None if snr is None else self._snr_model.ceiling(float(snr))
+
+    def snr_rung_unviable(self, target, snr) -> bool:
+        """True iff the SNR prior CONFIDENTLY says rung `target` is unviable at
+        `snr`. None/cold -> False (explorable). Gates the promote veto (on the
+        target rung) and the proactive demote (on the current rung)."""
+        if target is None or snr is None:
+            return False
+        return self._snr_model.rung_unviable(int(target), float(snr))
 
     def snr_knees_snapshot(self) -> list:
         return self._snr_model.knees_snapshot()
