@@ -16,7 +16,7 @@ signal, and cannot be observed or reused by any other subsystem.
 
 We want a **global, subscribable connection event** on the GS: a single authoritative
 source of "the drone is connected / disconnected" that any subsystem can react to.
-The flight-log roll/close is the first consumer; this design also lifts two
+The flight-log roll/sync is the first consumer; this design also lifts two
 correctness/durability behaviors onto the same signal.
 
 ## 2. Decisions
@@ -27,7 +27,7 @@ correctness/durability behaviors onto the same signal.
 | **Connected gate** | Tunnel-gated **+ HTTP-confirmed** | Tunnel rx traffic *arms* the monitor; `connected` only fires once `GET /status` (via `DroneClient`) succeeds, and the event payload carries drone identity/version. Disconnect fires on tunnel loss **or** sustained HTTP failure. |
 | **Placement** | A new **always-on top-level `App` subsystem**, not under dynlink | Makes the event truly global — it runs regardless of `dynamicLink.enabled`. |
 | **Delivery** | A generic thread-safe **`EventBus`** with synchronous, exception-isolated dispatch; subscribers marshal onto their own thread | Fits the established thread-per-subsystem stdlib supervisor; no single-asyncio rearchitecture. |
-| **Subscribers wired now** | flight-log roll/close, **selector reset on reconnect**, **learned-prior flush on disconnect** | The latter two close a real correctness gap and a durability gap, and live in the same dynlink subscriber as the flight log. |
+| **Subscribers wired now** | flight-log roll/sync, **selector reset on reconnect**, **learned-prior flush on disconnect** | The latter two close a real correctness gap and a durability gap, and live in the same dynlink subscriber as the flight log. |
 
 Rejected alternatives: extending the dynlink controller to emit the events (couples the
 "global" event to `dynamicLink.enabled`); unifying the whole supervisor onto one asyncio
@@ -49,10 +49,10 @@ loop with an async-native bus (large rearchitecture, YAGNI).
 - `gs/fpvdgs/supervisor.py` — build/own/start/stop the bus + monitor; add a `connection`
   block to `status_fn`.
 - `gs/fpvdgs/dynlink/controller.py` — take the bus; subscribe on loop-up, unsubscribe on
-  stop; drive flight-log roll/close, selector reset, prior flush (all marshaled onto its
+  stop; drive flight-log roll/sync, selector reset, prior flush (all marshaled onto its
   own loop).
 - `gs/fpvdgs/dynlink/policy.py` — retire the inline gap-roll; add `reset_for_new_session()`.
-- `gs/fpvdgs/dynlink/flightlog.py` — drop the now-unused `flight_gap_s` field.
+- `gs/fpvdgs/dynlink/flightlog.py` — add `begin_flight()` + `sync()`; drop the now-unused `flight_gap_s` field.
 - `gs/fpvdgs/config_defaults.py`, `gs/fpvdgs/schema.py` — new `connectionMonitor` block.
 
 **No `deploy/gs/deploy.sh` change:** line 34 already ships all top-level `fpvdgs/*.py`
@@ -76,7 +76,7 @@ wfb :8103 ──(tunnel rx records)──► ConnectionMonitor
                        dynlink controller   (future: BF re-arm, probe idle, …)
                        (call_soon_threadsafe onto its own loop)
                               │
-                       FlightLog.roll()/close()  +  Policy.reset_for_new_session()  +  learned_prior.flush()
+                       FlightLog.begin_flight()/sync()  +  Policy.reset_for_new_session()  +  learned_prior.flush()
 ```
 
 ### Ownership / wiring
@@ -164,11 +164,13 @@ the dynlink loop via `call_soon_threadsafe`, so the in-loop handlers touch
 `Policy`/`FlightLog`/`learned_prior` on the **same thread** as the per-tick writes — no
 new locks; single-threaded access is preserved.
 
-1. **Flight-log roll/close** (baseline).
-   - `on connected` → `flightlog.roll()` (new flight file), guarded by a "dirty" flag so the
-     first connect right after start does not roll an empty file.
-   - `on disconnected` → `flightlog.close()` (flush + fsync + prune) — ends the flight
-     **durably** the moment the link drops.
+1. **Flight-log roll/sync** (baseline).
+   - `on connected` → `flightlog.begin_flight()` — rolls to a new flight file if the current
+     one has records, keeps an already-open empty file, or (re)opens one. (Avoids an empty
+     file on the first connect right after start.)
+   - `on disconnected` → `flightlog.sync()` (flush + fsync) — makes the flight **durable**
+     the moment the link drops, without closing it (no write-after-close reopen; a tunnel-only
+     blip while video still flows keeps appending to the same flight).
    - **Retire** `_last_healthy_mono` and the `flight_gap_s` roll block in `policy.py`. The
      flight boundary is now the connection event (tunnel + HTTP), a better signal than
      video-starvation.
@@ -182,7 +184,7 @@ new locks; single-threaded access is preserved.
    has fallen back to `dynamicLink.safe`). Invoked on the `connected` edge.
 
 3. **Learned-prior flush on disconnect.** `learned_prior.flush()` on the `disconnected`
-   edge — same durability trigger as the flight-log `close()`. Hardens the per-card knee
+   edge — same durability trigger as the flight-log `sync()`. Hardens the per-card knee
    model against the GS reboot-on-video-loss, instead of only flushing on controller
    teardown.
 
@@ -243,8 +245,8 @@ the established daemon-wide pattern; read inline in `build_app` like `idrForward
   false disconnect when `httpPollS < tunnelStaleS`); flap suppression; `enabled: false` →
   no thread. No real sockets — mirrors the dynlink `StatsClient`/`ReplayClient` injection
   pattern.
-- Extend the dynlink controller tests — connect edge ⇒ roll + `reset_for_new_session`;
-  disconnect edge ⇒ close + `learned_prior.flush`; assert the inline `flight_gap_s` path is
+- Extend the dynlink controller tests — connect edge ⇒ begin_flight + `reset_for_new_session`;
+  disconnect edge ⇒ sync + `learned_prior.flush`; assert the inline `flight_gap_s` path is
   gone. Driven through a real bus + synthetic publishes.
 - The **full GS suite stays green** (config_build / schema round-trip for the new block —
   partial refactors go red on the import/config coupling).
