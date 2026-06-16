@@ -123,7 +123,7 @@ def test_armed_without_http_never_announces_connected():
     try:
         time.sleep(0.5)
         assert got == []                             # tunnel up but HTTP never confirms
-        assert m.status()["state"] != "connected"
+        assert m.status()["state"] == "armed"        # ARMED is observable in status()
     finally:
         m.stop()
 

@@ -32,7 +32,7 @@ class ConnectionMonitorConfig:
     enabled: bool = True
     tunnel_stale_s: float = 4.0
     http_poll_s: float = 1.5
-    http_timeout_s: float = 1.5
+    http_timeout_s: float = 1.5   # consumed by build_app: the monitor's DroneClient timeout
     http_fail_count: int = 2
     eval_interval_s: float = 0.5
 
@@ -155,44 +155,52 @@ class ConnectionMonitor:
             except asyncio.TimeoutError:
                 pass
 
-    async def _evaluate(self):
-        now = self._time()
+    def _tunnel_fresh(self):
+        """True if a tunnel rx record arrived within tunnel_stale_s. Re-read at
+        each decision point so freshness reflects any time spent in an await."""
         with self._lock:
             last_rx = self._last_tunnel_rx
+        return (self._time() - last_rx) < self._cfg.tunnel_stale_s
+
+    async def _evaluate(self):
+        # _last_http / _fail are touched only here, on the event-loop thread.
+        with self._lock:
             state = self._state
-        fresh = (now - last_rx) < self._cfg.tunnel_stale_s
 
         if state == "disconnected":
-            if not fresh:
+            if not self._tunnel_fresh():
                 return
-            state = "armed"
+            with self._lock:                    # persist so status() can show ARMED
+                self._state = state = "armed"
 
         if state == "armed":
             snap = await self._call(self._drone.get_status)
             if snap is not None:
-                self._enter_connected(snap, now)
-            else:
+                self._enter_connected(snap, self._time())
+            elif not self._tunnel_fresh():
                 with self._lock:
-                    self._state = "armed" if fresh else "disconnected"
-            return
+                    self._state = "disconnected"
+            return                              # else: stay armed, retry next tick
 
         # state == "connected"
-        if (now - self._last_http) >= self._cfg.http_poll_s:
-            self._last_http = now
+        if (self._time() - self._last_http) >= self._cfg.http_poll_s:
+            self._last_http = self._time()
             ok = await self._call_bool(self._drone.healthz)
             self._fail = 0 if ok else self._fail + 1
+        fresh = self._tunnel_fresh()            # re-read: the heartbeat await took time
         if not fresh or self._fail >= self._cfg.http_fail_count:
-            self._enter_disconnected("tunnel_lost" if not fresh else "http_failed", now)
+            self._enter_disconnected("tunnel_lost" if not fresh else "http_failed",
+                                     self._time())
 
     async def _call(self, fn):
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             return await loop.run_in_executor(None, fn)
         except Exception:
             return None
 
     async def _call_bool(self, fn):
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             return bool(await loop.run_in_executor(None, fn))
         except Exception:
