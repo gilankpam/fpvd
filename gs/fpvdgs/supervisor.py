@@ -110,7 +110,7 @@ def build_app(config_path, cfg_out, host, port,
     drone = DroneClient(f"http://{drone_host}:{int(drone_cfg.get('apiPort', 8080))}")
 
     bus = EventBus()
-    cm_cfg = effective.get("connectionMonitor", {})
+    cm_cfg = effective.get("connectionMonitor") or {}   # tolerate an explicit null
     dcm = ConnectionMonitorConfig()
     mon_cfg = ConnectionMonitorConfig(
         enabled=bool(cm_cfg.get("enabled", dcm.enabled)),

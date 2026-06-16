@@ -97,6 +97,21 @@ def test_app_starts_and_stops_connection_monitor():
     assert "stop" in mon.calls
 
 
+def test_connection_monitor_stops_before_runner():
+    # Load-bearing for Tasks 5-7: the monitor must stop before the runner so it
+    # can't publish a spurious drone.disconnected during normal teardown.
+    log = []
+    store = ConfigStore({"dynamicLink": {"enabled": False}})
+    runner = _Fake("runner", log)
+    mon = _Fake("mon", log)
+    app = App(store, runner, _Fake("http", log), api=None,
+              dynlink=_Fake("dynlink", log), connection_monitor=mon)
+    app.start()
+    app.shutdown()
+    stops = [name for name, event in log if event in ("stop", "shutdown")]
+    assert stops.index("mon") < stops.index("runner")
+
+
 def test_build_app_wires_connection_monitor_and_bus(tmp_path, monkeypatch):
     import fpvdgs.supervisor as sup
     monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
