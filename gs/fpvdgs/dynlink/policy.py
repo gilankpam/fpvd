@@ -355,11 +355,13 @@ class Policy:
         # Selector (Phase 2) is the only decision now: probe-promote +
         # reactive demote. The drone computes its own bitrate / FEC /
         # depth / tx_power locally, so we emit {mcs} only.
+        loss_demote_target = self.learned_prior.snr_ceiling(signals.snr)
         probe_snap = self._probe_status() if self._probe_status else None
         new_mcs, _changed = self.leading.select(
             probe=probe_snap,
             loss_rate=signals.residual_loss_w,
             loss_demote=sustained_loss,
+            loss_demote_target=loss_demote_target,
             fec_pressure=signals.fec_work,
             link_starved=sustained_starved,
             ts_ms=ts_ms,
@@ -374,9 +376,10 @@ class Policy:
             self._ticks_at_mcs += 1
         self._last_ingest_mcs = new_mcs
         prior_settled = self._ticks_at_mcs >= self.cfg.learned_prior.settle_ticks
-        prior_learn = signals.rssi is not None and prior_settled
+        prior_learn = (signals.rssi is not None or signals.snr is not None) and prior_settled
         self.learned_prior.ingest(
             rssi=signals.rssi,
+            snr=signals.snr,
             operating_mcs=new_mcs,
             operating_clean=signals.residual_loss_w < self.cfg.learned_prior.viable_loss,
             settled=prior_settled,
@@ -406,6 +409,9 @@ class Policy:
             "rssi": signals.rssi,
             "rssi_raw": signals.rssi_raw,
             "snr": signals.snr_w,
+            "snr_norm": signals.snr,
+            "snr_ceiling": loss_demote_target,
+            "snr_knees": self.learned_prior.snr_knees_snapshot(),
             "evm": signals.evm_w,
             "evm_lo": signals.evm_lo_w,
             "evm_min": signals.evm_min_w,

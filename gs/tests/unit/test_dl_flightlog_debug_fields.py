@@ -171,3 +171,41 @@ def test_record_snr_evm_none_when_absent(tmp_path):
     p.close()
     rec = _records(tmp_path)[-1]
     assert rec["snr"] is None and rec["evm"] is None
+
+
+def test_record_carries_snr_norm_ceiling_knees(tmp_path):
+    from fpvdgs.dynlink.signals import Signals
+    p = Policy(_cfg(tmp_path, min_samples=3), _profile())
+    # warm the SNR knee at MCS5 so snr_ceiling resolves
+    for _ in range(12):
+        p.learned_prior.ingest(rssi=None, snr=30.0, operating_mcs=5,
+                               operating_clean=True, settled=True)
+    sig = Signals(rssi=-50.0, residual_loss_w=0.0, fec_work=0.0,
+                  link_starved_w=False, timestamp=1.0, snr=35.0)
+    p.tick(sig)
+    p.close()
+    rec = _records(tmp_path)[-1]
+    assert rec["snr_norm"] == 35.0
+    assert rec["snr_ceiling"] == 5
+    assert isinstance(rec["snr_knees"], list) and len(rec["snr_knees"]) == 8
+
+
+def test_reactive_demote_jumps_to_snr_ceiling(tmp_path):
+    from fpvdgs.dynlink.signals import Signals
+    p = Policy(_cfg(tmp_path, min_samples=3), _profile())
+    # SNR knee: rung1 viable at snr>=10, rung4 at >=30; current snr 12 -> ceiling 1
+    for _ in range(12):
+        p.learned_prior.ingest(rssi=None, snr=10.0, operating_mcs=1,
+                               operating_clean=True, settled=True)
+        p.learned_prior.ingest(rssi=None, snr=30.0, operating_mcs=4,
+                               operating_clean=True, settled=True)
+    p.leading.state.current_mcs = 5
+
+    def sig(ts):
+        return Signals(rssi=-60.0, residual_loss_w=0.30, fec_work=0.0,
+                       link_starved_w=False, timestamp=ts, snr=12.0)
+
+    p.tick(sig(1.0))            # loss count 1 (default loss_windows=2): no demote
+    dec = p.tick(sig(1.1))      # loss count 2 -> sustained -> jump to snr_ceiling(12)=1
+    assert dec.mcs == 1         # 5 -> 1 in one move, not 5 -> 4
+    p.close()
