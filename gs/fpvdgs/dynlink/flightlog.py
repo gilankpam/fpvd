@@ -114,6 +114,22 @@ class FlightLog:
             self._fh = None
         self._prune()
 
+    def sync(self) -> None:
+        """Flush + fsync the open flight file now — durability on demand, e.g.
+        at a link-loss edge. No-op if no file is open."""
+        self._sync()
+
+    def begin_flight(self) -> None:
+        """Ensure a fresh file is open for a new flight: roll to a new file if
+        the current one already holds records, keep an already-open empty file,
+        or (re)open one if none is open. No-op if disabled. Driven by the
+        drone-connected event."""
+        if not self.cfg.enabled:
+            return
+        if self._fh is not None and self._bytes == 0:
+            return                      # already on a fresh, empty flight file
+        self.roll()
+
     def roll(self) -> None:
         """End the current flight file and begin a new one (a new flight).
         No-op if disabled. Re-attempts the open even if the previous one

@@ -147,3 +147,39 @@ def test_fsyncs_on_roll(tmp_path, monkeypatch):
     fl.roll()
     assert calls, "roll() must fsync before closing the flight file"
     fl.close()
+
+
+def test_begin_flight_keeps_fresh_empty_file(tmp_path):
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
+    path1 = fl._path
+    fl.begin_flight()                  # nothing written yet -> keep the same file
+    assert fl._path == path1
+    fl.close()
+    assert len(list(tmp_path.glob("*.jsonl"))) == 1
+
+
+def test_begin_flight_rolls_when_file_has_records(tmp_path):
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), max_files=8))
+    fl.write({"ts": 1.0})
+    fl.begin_flight()                  # has records -> start a new flight file
+    fl.write({"ts": 2.0})
+    fl.close()
+    assert len(list(tmp_path.glob("*.jsonl"))) == 2
+
+
+def test_begin_flight_noop_when_disabled(tmp_path):
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path), enabled=False))
+    fl.begin_flight()
+    fl.close()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_sync_fsyncs_open_file(tmp_path, monkeypatch):
+    import fpvdgs.dynlink.flightlog as mod
+    calls = []
+    monkeypatch.setattr(mod.os, "fsync", lambda fd: calls.append(fd))
+    fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
+    fl.write({"ts": 1.0})
+    fl.sync()
+    assert calls, "sync() must fsync the open file"
+    fl.close()
