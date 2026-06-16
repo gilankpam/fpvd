@@ -270,3 +270,29 @@ def test_learned_prior_value_ranges_validated():
         validate_effective(_dl(learnedPrior={"alphaTighten": 1.5}))   # (0,1]
     with pytest.raises(SchemaError):
         validate_effective(_dl(learnedPrior={"viableLoss": 2.0}))     # 0..1
+
+
+def test_connection_monitor_accepts_shipped_defaults():
+    from fpvdgs.config_defaults import default_config
+    validate_effective(default_config())          # includes connectionMonitor; must pass
+
+
+def test_connection_monitor_invariant_rejects_stale_le_poll():
+    from fpvdgs.config_defaults import default_config
+    cfg = default_config()
+    cfg["connectionMonitor"]["tunnelStaleS"] = 1.0
+    cfg["connectionMonitor"]["httpPollS"] = 1.5    # stale must be > poll
+    with pytest.raises(SchemaError):
+        validate_effective(cfg)
+
+
+def test_connection_monitor_rejects_bad_fail_count():
+    from fpvdgs.config_defaults import default_config
+    cfg = default_config()
+    cfg["connectionMonitor"]["httpFailCount"] = 0  # must be a positive int
+    with pytest.raises(SchemaError):
+        validate_effective(cfg)
+
+
+def test_config_patch_accepts_connection_monitor():
+    validate_config_patch({"connectionMonitor": {"enabled": False}})   # no raise

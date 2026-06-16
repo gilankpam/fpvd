@@ -3,7 +3,7 @@
 LINK_KEYS = {"channel", "width", "txPowerDbm", "region", "linkId",
              "beamforming", "wlans"}
 CONFIG_TOP_KEYS = {"link", "wfb", "drone", "dynamicLink", "pixelpilot",
-                   "idrForward"}
+                   "idrForward", "connectionMonitor"}
 DYNAMIC_LINK_KEYS = {"enabled", "maxMcs", "radioProfile", "dronePort",
                      "selector", "smoothing", "flightlog", "rssiNorm",
                      "learnedPrior"}
@@ -16,6 +16,8 @@ SMOOTHING_KEYS = {"ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst",
                   "starvationThresholdPps"}
 LEARNED_PRIOR_KEYS = {"settleTicks", "viableLoss", "alphaTighten",
                       "alphaRelax", "minSamples", "recencyDecay"}
+CONNECTION_MONITOR_KEYS = {"enabled", "tunnelStaleS", "httpPollS",
+                           "httpTimeoutS", "httpFailCount", "evalIntervalS"}
 VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
@@ -88,6 +90,9 @@ def validate_effective(cfg: dict) -> None:
     idr = cfg.get("idrForward")
     if idr is not None:
         _validate_idr_forward(idr)
+    cm = cfg.get("connectionMonitor")
+    if cm is not None:
+        _validate_connection_monitor(cm)
     dr = cfg.get("drone")
     if dr is not None:
         _validate_drone(dr)
@@ -201,6 +206,24 @@ def _validate_idr_forward(idr: dict) -> None:
     port = idr.get("port", 11223)
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("idrForward.port must be an int in 1..65535")
+
+
+def _validate_connection_monitor(cm: dict) -> None:
+    if not isinstance(cm, dict):
+        raise SchemaError("connectionMonitor must be an object")
+    if not isinstance(cm.get("enabled", True), bool):
+        raise SchemaError("connectionMonitor.enabled must be a bool")
+    for k in ("tunnelStaleS", "httpPollS", "httpTimeoutS", "evalIntervalS"):
+        v = cm.get(k)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0):
+            raise SchemaError(f"connectionMonitor.{k} must be a positive number")
+    _validate_pos_int("connectionMonitor.httpFailCount", cm.get("httpFailCount"))
+    # Invariant: the heartbeat's own HTTP return traffic keeps the tunnel 'fresh',
+    # so tunnelStaleS must exceed httpPollS or a quiet healthy link false-disconnects.
+    stale = cm.get("tunnelStaleS", 4.0)
+    poll = cm.get("httpPollS", 1.5)
+    if isinstance(stale, (int, float)) and isinstance(poll, (int, float)) and not stale > poll:
+        raise SchemaError("connectionMonitor.tunnelStaleS must be > httpPollS")
 
 
 def _validate_pixelpilot(pp: dict) -> None:

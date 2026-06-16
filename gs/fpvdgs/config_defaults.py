@@ -4,6 +4,7 @@ Mirrors the drone: code holds every default; config.json is the full effective
 config, merged onto these defaults. `--dump-config` materializes this tree."""
 from __future__ import annotations
 
+from .connection_monitor import ConnectionMonitorConfig
 from .dynlink.learned_prior import LearnedPriorConfig
 from .dynlink.policy import SelectorConfig
 from .dynlink.signals import SignalAggregator
@@ -49,6 +50,18 @@ def _dynamic_link_defaults() -> dict:
     }
 
 
+def _connection_monitor_defaults() -> dict:
+    cm = ConnectionMonitorConfig()
+    return {
+        "enabled": cm.enabled,
+        "tunnelStaleS": cm.tunnel_stale_s,
+        "httpPollS": cm.http_poll_s,
+        "httpTimeoutS": cm.http_timeout_s,
+        "httpFailCount": cm.http_fail_count,
+        "evalIntervalS": cm.eval_interval_s,
+    }
+
+
 def default_config() -> dict:
     return {
         "link": {
@@ -63,6 +76,7 @@ def default_config() -> dict:
         "drone": {"host": "10.5.0.10", "apiPort": 8080},
         "dynamicLink": _dynamic_link_defaults(),
         "idrForward": {"enabled": True, "port": 11223},
+        "connectionMonitor": _connection_monitor_defaults(),
         "pixelpilot": {
             "enabled": True, "bin": "/usr/bin/pixelpilot", "env": {},
             "configPath": "/etc/pixelpilot.yaml",
