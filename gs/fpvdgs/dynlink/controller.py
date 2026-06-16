@@ -13,6 +13,7 @@ import logging
 import threading
 import time
 
+from ..events import DRONE_CONNECTED, DRONE_DISCONNECTED
 from .config_build import build_aggregator, build_policy_config
 from .policy import Policy
 from .return_link import ReturnLink
@@ -24,11 +25,13 @@ log = logging.getLogger("fpvdgs.dynlink")
 
 class DynamicLinkController:
     def __init__(self, snapshot, *, stats_endpoint="tcp://127.0.0.1:8103",
-                 stats_client_factory=StatsClient, probe_status=None):
+                 stats_client_factory=StatsClient, probe_status=None, bus=None):
         self._snapshot = dict(snapshot)
         self._stats_endpoint = stats_endpoint
         self._make_stats = stats_client_factory
         self._probe_status = probe_status
+        self._bus = bus
+        self._policy = None
         self._lock = threading.RLock()
         self._lifecycle = threading.RLock()
         self._thread = None
@@ -38,6 +41,9 @@ class DynamicLinkController:
         self._status = {"running": False, "statsConnected": False,
                         "decision": None, "lastEmitMs": None, "emitSeq": 0,
                         "reason": ""}
+        if bus is not None:
+            bus.subscribe(DRONE_CONNECTED, self._on_drone_connected)
+            bus.subscribe(DRONE_DISCONNECTED, self._on_drone_disconnected)
 
     # ---- thread-safe public API -----------------------------------------
     def start(self):
@@ -112,6 +118,8 @@ class DynamicLinkController:
         profile_name = str(snap.get("radioProfile") or "m8812eu2")
         policy = Policy(build_policy_config(snap), profile_name,
                         probe_status=self._probe_status)
+        with self._lock:
+            self._policy = policy
         aggregator = build_aggregator(snap)
         return_link = ReturnLink(snap["droneAddr"], int(snap["dronePort"]))
         encoder = WireEncoder(seq=1)
@@ -153,7 +161,40 @@ class DynamicLinkController:
         finally:
             policy.close()
             return_link.close()
+            with self._lock:
+                self._policy = None
             self._set(running=False, statsConnected=False)
+
+    # ---- connection-event subscribers (called on the monitor's thread) ----
+    def _marshal(self, fn):
+        with self._lock:
+            loop = self._loop
+        if loop is None:
+            return                       # loop down (dynlink disabled/stopped)
+        try:
+            loop.call_soon_threadsafe(fn)
+        except RuntimeError:
+            pass                         # loop tearing down
+
+    def _on_drone_connected(self, payload):
+        self._marshal(self._connected_inloop)
+
+    def _on_drone_disconnected(self, payload):
+        self._marshal(self._disconnected_inloop)
+
+    def _connected_inloop(self):
+        p = self._policy
+        if p is None:
+            return
+        p.reset_for_new_session()        # new session: re-warm-start, re-climb
+        p.flightlog.begin_flight()       # start a fresh flight file
+
+    def _disconnected_inloop(self):
+        p = self._policy
+        if p is None:
+            return
+        p.flightlog.sync()               # make the flight durable at the loss edge
+        p.learned_prior.flush()          # persist the session's learning
 
     async def _stats_loop(self, on_event):
         """Run the stats client, reconnecting across runner bounces until

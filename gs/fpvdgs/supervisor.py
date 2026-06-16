@@ -131,7 +131,7 @@ def build_app(config_path, cfg_out, host, port,
     probe_ctrl = ProbeController(make_probe_snapshot(effective), spawn=probe_spawn)
 
     dynlink = DynamicLinkController(make_dl_snapshot(effective),
-                                    probe_status=probe_ctrl.status)
+                                    probe_status=probe_ctrl.status, bus=bus)
 
     pixelpilot = ProcessSupervisor(
         argv=render_pixelpilot_argv(effective),
