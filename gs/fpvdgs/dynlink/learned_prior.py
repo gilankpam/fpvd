@@ -1,16 +1,15 @@
-"""GS-local learned link-RSSI -> viable-ceiling-MCS prior (Phase 4, spec §3-§7).
+"""GS-local learned link-RSSI → viable-ceiling-MCS prior (Phase 4, spec §3-§7).
 
-Binned viability table per (RSSI bin, MCS rung): an EWMA clean-rate + a
-decaying sample count. A derived isotonic floor ladder extrapolates into
-unflown RSSI. The prior is an accelerant, never the authority — the live
-probe still gates promotes; this only warm-starts the cold MCS and
-predictively demotes ahead of a fade. Keyed (and persisted) per radioProfile.
+Per-rung RSSI knee: knee[K] = RSSI below which rung K is unviable in steady
+state; recency-weighted; learns only from settled operating-rung samples.
+The prior is an accelerant, never the authority — the live probe still gates
+promotes; this only warm-starts the cold MCS and predictively demotes ahead
+of a fade. Keyed (and persisted) per radioProfile.
 """
 from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 import re
 from dataclasses import dataclass
@@ -116,3 +115,71 @@ class KneeModel:
             self._count = [float(c) for c in counts]
             return True
         return False
+
+
+class LearnedPrior:
+    """Facade over KneeModel, keyed + persisted per radioProfile. Keeps the
+    interface policy.py depends on; the live probe stays authoritative for
+    promotes — this only warm-starts and feeds the down-only predictive demote."""
+
+    def __init__(self, key: str, cfg: LearnedPriorConfig) -> None:
+        self.key = key
+        self.cfg = cfg
+        self._model = KneeModel(cfg)
+        self._since_flush = 0
+        self._load()
+
+    def ingest(self, *, rssi, operating_mcs, operating_clean, settled) -> None:
+        if rssi is None or operating_mcs is None or not settled:
+            return
+        self._model.observe(int(operating_mcs), float(rssi), bool(operating_clean))
+        self._since_flush += 1
+        if self._since_flush >= self.cfg.flush_interval_observations:
+            self.flush()
+            self._since_flush = 0
+
+    def ceiling(self, rssi) -> int | None:
+        return None if rssi is None else self._model.ceiling(float(rssi))
+
+    def predictive_ceiling(self, rssi, slope_dbm_per_tick) -> int | None:
+        if rssi is None:
+            return None
+        projected = rssi + slope_dbm_per_tick * self.cfg.predictive_horizon_ticks
+        return self._model.ceiling(projected)
+
+    def warmstart_seed(self, rssi) -> int | None:
+        return self.ceiling(rssi)
+
+    def knees_snapshot(self) -> list:
+        return self._model.knees_snapshot()
+
+    def to_status(self) -> dict:
+        return {"key": self.key, "knees": self._model.knees_snapshot()}
+
+    def _path(self) -> str:
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", self.key)
+        return os.path.join(self.cfg.persist_dir, f"{safe}.json")
+
+    def _load(self) -> None:
+        try:
+            with open(self._path()) as f:
+                doc = json.load(f)
+        except FileNotFoundError:
+            return
+        except (ValueError, OSError) as e:
+            log.warning("learned_prior: ignoring unreadable %s: %s", self._path(), e)
+            return
+        if not self._model.load_dict(doc):
+            log.info("learned_prior: %s ignored (schema/shape) — retraining", self._path())
+
+    def flush(self) -> None:
+        doc = self._model.to_dict()
+        doc["key"] = self.key
+        try:
+            os.makedirs(self.cfg.persist_dir, exist_ok=True)
+            tmp = self._path() + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(doc, f)
+            os.replace(tmp, self._path())
+        except OSError as e:
+            log.warning("learned_prior: flush to %s failed: %s", self._path(), e)
