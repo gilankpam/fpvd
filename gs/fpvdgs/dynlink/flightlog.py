@@ -17,8 +17,7 @@ log = logging.getLogger("fpvdgs.dynlink")
 class FlightLogConfig:
     enabled: bool = True
     dir: str = "/media/dvr/log/dynamic-link/"
-    max_files: int = 8
-    max_mb: float = 4.0
+    max_mb: float = 8.0
     # Records between fsyncs (10 Hz → 50 = 5 s). The GS hard-reboots on video
     # loss; without fsync the unsynced tail (and on a vfat card, sometimes the
     # whole file) is lost on reboot. flush()+fsync() forces it to the card.
@@ -111,7 +110,6 @@ class FlightLog:
             except OSError:
                 pass
             self._fh = None
-        self._prune()
 
     def sync(self) -> None:
         """Flush + fsync the open flight file now — durability on demand, e.g.
@@ -143,20 +141,4 @@ class FlightLog:
             except OSError:
                 pass
             self._fh = None
-        self._prune()
         self._open()
-
-    def _prune(self) -> None:
-        try:
-            files = sorted(
-                (os.path.join(self.cfg.dir, f) for f in os.listdir(self.cfg.dir)
-                 if f.endswith(".jsonl")),
-                key=lambda p: (os.path.getmtime(p), os.path.basename(p)),
-            )
-        except OSError:
-            return
-        for stale in files[:-self.cfg.max_files] if self.cfg.max_files > 0 else []:
-            try:
-                os.remove(stale)
-            except OSError:
-                pass
