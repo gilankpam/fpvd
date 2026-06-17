@@ -36,12 +36,13 @@ def build_status(version: str, runner_state: dict, wlans: dict,
                  dynamic_link: dict | None = None,
                  pixelpilot: dict | None = None,
                  probe: dict | None = None,
-                 beamforming: dict | None = None) -> dict:
+                 beamforming: dict | None = None,
+                 connection: dict | None = None) -> dict:
     radio = []
     for wlan, info in wlans.items():
         radio.append({"wlan": wlan, **info})
-    # GS-local link view only. Drone reachability / cross-device sync are NOT
-    # reported here — clients read /air/status for drone state.
+    # GS-local link view only. Drone config/adapter state is NOT here (clients
+    # read /air/status); GS-observed drone reachability is under `connection`.
     link = {"linkId": link_info.get("linkId")}
     if link_stats:
         link["stats"] = link_stats
@@ -62,4 +63,6 @@ def build_status(version: str, runner_state: dict, wlans: dict,
         out["probe"] = probe
     if beamforming is not None:
         out["beamforming"] = beamforming
+    if connection is not None:
+        out["connection"] = connection
     return out

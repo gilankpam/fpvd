@@ -4,9 +4,10 @@ the controller consumes, and build the controller snapshot.
 
 The block is explicit (no opaque `tuning` passthrough): `selector` and
 `smoothing` carry the tunable knobs; `flightlog`/`rssiNorm` expose only an
-`enabled` toggle (their internals are frozen code constants); learned-prior
-internals are frozen entirely. camelCase JSON maps to the dataclasses'
-snake_case fields."""
+`enabled` toggle (their internals are frozen code constants);
+learned-prior exposes its learning knobs (settleTicks/alphaTighten/alphaRelax/minSamples/recencyDecay);
+predictive + persistence internals stay frozen. camelCase JSON maps to the
+dataclasses' snake_case fields."""
 from __future__ import annotations
 
 from .flightlog import FlightLogConfig
@@ -33,9 +34,21 @@ def build_policy_config(block: dict) -> PolicyConfig:
     fl = block.get("flightlog", {}) or {}
     # flightlog internals are frozen — read only `enabled`.
     flightlog = FlightLogConfig(enabled=bool(fl.get("enabled", True)))
+    # learned-prior (knee model): expose the learning knobs for in-flight
+    # tuning; the predictive-machinery + persist internals stay at defaults.
+    lp = block.get("learnedPrior", {}) or {}
+    dlp = LearnedPriorConfig()
+    learned_prior = LearnedPriorConfig(
+        settle_ticks=int(lp.get("settleTicks", dlp.settle_ticks)),
+        viable_loss=float(lp.get("viableLoss", dlp.viable_loss)),
+        alpha_tighten=float(lp.get("alphaTighten", dlp.alpha_tighten)),
+        alpha_relax=float(lp.get("alphaRelax", dlp.alpha_relax)),
+        min_samples=float(lp.get("minSamples", dlp.min_samples)),
+        recency_decay=float(lp.get("recencyDecay", dlp.recency_decay)),
+    )
     return PolicyConfig(
         selector=selector,
-        learned_prior=LearnedPriorConfig(),   # frozen: always-on, internal defaults
+        learned_prior=learned_prior,
         flightlog=flightlog,
     )
 

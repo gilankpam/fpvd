@@ -48,12 +48,24 @@ def test_smoothing_block_overrides_defaults():
     assert agg.ewma_alpha_fec == 0.2   # default
 
 
-def test_learned_prior_is_frozen_defaults_regardless_of_config():
-    # An attempt to tune learned-prior internals via config is ignored.
-    cfg = build_policy_config(_block(learnedPrior={"binWidthDb": 3.0,
-                                                   "minSamplesWarmstart": 7}))
-    assert cfg.learned_prior.bin_width_db == 2.0
-    assert cfg.learned_prior.min_samples_warmstart == 20
+def test_learned_prior_knobs_tunable():
+    cfg = build_policy_config(_block(learnedPrior={
+        "settleTicks": 8, "alphaTighten": 0.4, "alphaRelax": 0.02,
+        "minSamples": 12, "recencyDecay": 0.999,
+    }))
+    lp = cfg.learned_prior
+    assert lp.settle_ticks == 8
+    assert lp.alpha_tighten == 0.4
+    assert lp.alpha_relax == 0.02
+    assert lp.min_samples == 12
+    assert lp.recency_decay == 0.999
+
+
+def test_learned_prior_defaults_when_absent():
+    lp = build_policy_config(_block()).learned_prior
+    assert lp.settle_ticks == 5
+    assert lp.alpha_tighten == 0.25
+    assert lp.alpha_relax == 0.05
 
 
 def test_flightlog_reads_only_enabled():
@@ -99,4 +111,16 @@ def test_loss_windows_reads_and_defaults():
     from fpvdgs.dynlink.config_build import build_policy_config
     over = build_policy_config(_block(selector={"lossWindows": 4}))
     assert over.selector.loss_windows == 4
-    assert build_policy_config(_block()).selector.loss_windows == 2  # default
+    assert build_policy_config(_block()).selector.loss_windows == 1  # default (SNR-jump = react fast)
+
+
+def test_learned_prior_knob_survives_loader_and_reaches_policy(tmp_path):
+    import json
+    from fpvdgs.config import ConfigStore
+    from fpvdgs.dynlink.config_build import build_policy_config
+    cfgfile = tmp_path / "config.json"
+    cfgfile.write_text(json.dumps({"dynamicLink": {"learnedPrior": {"settleTicks": 9}}}))
+    store = ConfigStore.load(str(cfgfile))
+    dl = store.effective()["dynamicLink"]
+    assert dl["learnedPrior"]["settleTicks"] == 9          # survived the strip
+    assert build_policy_config(dl).learned_prior.settle_ticks == 9  # reached policy

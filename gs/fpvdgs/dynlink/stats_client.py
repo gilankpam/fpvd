@@ -51,6 +51,13 @@ class RxAnt:
     snr_min: int
     snr_avg: int
     snr_max: int
+    # EVM% (radiotap lock_quality, 0..100, higher = better). Per spatial
+    # STREAM, not per antenna: -1 = absent/unmeasured (e.g. the 2nd-stream
+    # sentinel slot on a single-stream link). Default -1 for older wfb_rx
+    # feeds that don't append the EVM fields.
+    evm_min: int = -1
+    evm_avg: int = -1
+    evm_max: int = -1
 
 
 @dataclass
@@ -136,6 +143,9 @@ def _parse_rx_ant(d: dict) -> RxAnt:
         snr_min=int(d["snr_min"]),
         snr_avg=int(d["snr_avg"]),
         snr_max=int(d["snr_max"]),
+        evm_min=int(d.get("evm_min", -1)),
+        evm_avg=int(d.get("evm_avg", -1)),
+        evm_max=int(d.get("evm_max", -1)),
     )
 
 

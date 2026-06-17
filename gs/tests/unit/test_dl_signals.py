@@ -159,10 +159,10 @@ def test_link_starved_false_when_packet_rate_high():
     assert s.link_starved_w is False
 
 
-def test_signals_has_no_snr_fields():
+def test_signals_has_no_unimplemented_snr_fields():
     from fpvdgs.dynlink.signals import Signals
     s = Signals()
-    assert not hasattr(s, "snr") and not hasattr(s, "snr_slope")
+    assert not hasattr(s, "snr_slope")
     assert not hasattr(s, "snr_max_w")
 
 
@@ -220,3 +220,70 @@ def test_rssi_norm_uses_best_antenna_mcs():
     assert s.rssi_max_w == -55.0   # best antenna's rssi_avg
     assert s.mcs_w == 5            # best antenna's MCS, not the worst's 0
     assert s.rssi == -45.0         # -55 + (29 - curve[5]=19), best-antenna MCS5
+
+
+# ── SNR + EVM aggregation (instrumentation for the flight log) ───────────────
+from fpvdgs.dynlink.stats_client import RxAnt as _RxAnt, RxEvent as _RxEvent
+from fpvdgs.dynlink.signals import SignalAggregator as _Agg
+
+
+def _evm_rxev(ants):
+    return _RxEvent(timestamp=1.0, id="rx1",
+                    packets_window={"out": 100, "lost": 0},
+                    rx_ant_stats=ants, session=None)
+
+
+def _evm_ant(ant, rssi, snr, evm_min, evm_avg):
+    return _RxAnt(ant=ant, freq=5660, mcs=4, bw=20, pkt_recv=100,
+                  rssi_min=rssi, rssi_avg=rssi, rssi_max=rssi,
+                  snr_min=snr, snr_avg=snr, snr_max=snr,
+                  evm_min=evm_min, evm_avg=evm_avg, evm_max=evm_avg)
+
+
+def test_evm_best_and_worst_dongle_stbc():
+    # STBC MCS4: both paths of each dongle carry the real stream EVM.
+    s = _Agg().consume(_evm_rxev([
+        _evm_ant(0,   -60, 25, 81, 89), _evm_ant(1,   -60, 25, 81, 89),  # dongle 0
+        _evm_ant(256, -58, 26, 75, 80), _evm_ant(257, -58, 26, 75, 80),  # dongle 1
+    ]))
+    assert s.evm_w == 89.0       # best dongle
+    assert s.evm_lo_w == 80.0    # worst dongle
+    assert s.evm_min_w == 75.0   # worst sample across dongles
+
+
+def test_evm_ignores_sentinel_slots_nss1():
+    # Nss=1 MCS0: path-B (odd ant) = -1 sentinels; only path-A is real.
+    s = _Agg().consume(_evm_rxev([
+        _evm_ant(0,   -60, 25, 87, 89), _evm_ant(1,   -60, 25, -1, -1),  # dongle 0
+        _evm_ant(256, -58, 26, 81, 82), _evm_ant(257, -58, 26, -1, -1),  # dongle 1
+    ]))
+    assert s.evm_w == 89.0
+    assert s.evm_lo_w == 82.0
+    assert s.evm_min_w == 81.0
+
+
+def test_evm_none_when_all_unmeasured():
+    s = _Agg().consume(_evm_rxev([_evm_ant(0, -60, 25, -1, -1),
+                                  _evm_ant(1, -60, 25, -1, -1)]))
+    assert s.evm_w is None and s.evm_lo_w is None and s.evm_min_w is None
+
+
+def test_snr_w_is_operating_antenna_snr():
+    # best-RSSI antenna (ant 256, -55) is the operating point; log its SNR.
+    s = _Agg().consume(_evm_rxev([_evm_ant(0, -60, 25, -1, -1),
+                                  _evm_ant(256, -55, 30, -1, -1)]))
+    assert s.snr_w == 30.0
+
+
+def test_snr_is_eirp_normalized_and_smoothed():
+    # raw SNR 20 at MCS4 (curve 19, P_ref 29) -> +10 offset -> snr_norm 30.
+    # First window: EWMA seeds to the value, so s.snr == 30.
+    s = _Agg().consume(_evm_rxev([_evm_ant(0, -60, 20, -1, -1)]))  # snr_avg=20, mcs=4
+    assert s.snr == 30.0
+
+
+def test_snr_none_before_any_antenna_data():
+    from fpvdgs.dynlink.stats_client import RxEvent
+    s = _Agg().consume(RxEvent(timestamp=1.0, id="rx", packets_window={},
+                               rx_ant_stats=[], session=None))
+    assert s.snr is None

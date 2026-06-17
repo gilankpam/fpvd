@@ -238,3 +238,54 @@ def test_strong_rssi_does_not_raise_mcs_without_probe_or_prior(tmp_path):
         f"strong RSSI must not raise MCS without probe/prior data, "
         f"got {decision.mcs}"
     )
+
+
+def test_loss_demote_jumps_to_target_in_one_move():
+    s = _selector(max_mcs=5, promote_debounce_windows=1)
+    _drive_to_mcs_probe(s, 5)
+    mcs, changed = s.select(probe=_probe(7), loss_rate=0.3, loss_demote=True,
+                            loss_demote_target=2, fec_pressure=0.0,
+                            link_starved=False, ts_ms=99999.0)
+    assert changed and mcs == 2          # 5 -> 2 in one commit, not 5 -> 4
+
+
+def test_loss_demote_target_at_or_above_current_does_not_demote():
+    s = _selector(max_mcs=5, promote_debounce_windows=1)
+    _drive_to_mcs_probe(s, 5)
+    mcs, changed = s.select(probe=_probe(7), loss_rate=0.3, loss_demote=True,
+                            loss_demote_target=5, fec_pressure=0.0,
+                            link_starved=False, ts_ms=99999.0)
+    assert not changed and mcs == 5      # SNR says 5 is fine -> fluke loss, no demote
+
+
+def test_loss_demote_cold_target_falls_back_to_one_step():
+    s = _selector(max_mcs=5, promote_debounce_windows=1)
+    _drive_to_mcs_probe(s, 5)
+    mcs, changed = s.select(probe=_probe(7), loss_rate=0.3, loss_demote=True,
+                            loss_demote_target=None, fec_pressure=0.0,
+                            link_starved=False, ts_ms=99999.0)
+    assert changed and mcs == 4          # cold SNR knee -> today's one-step demote
+
+
+# ── SNR ceiling as operating ceiling: promote cap + lossWindows default ──────
+
+def test_loss_windows_defaults_to_one():
+    # SNR-jump lands on the right rung in one move (no cascade), so react fast.
+    assert SelectorConfig().loss_windows == 1
+
+
+def test_promote_blocked_by_flag():
+    # The per-rung "is this target confidently unviable?" decision is made in
+    # policy.tick (it needs the learned prior); the selector just honours the bool.
+    s = _selector(max_mcs=5, promote_debounce_windows=1)
+    _drive_to_mcs_probe(s, 3)                 # reach MCS3
+    ts = 500000.0
+    for _ in range(4):                        # clean rung4 probe, but blocked
+        ts += 1000.0
+        mcs, _ = s.select(probe=_probe(7), loss_rate=0.0, fec_pressure=0.0,
+                          link_starved=False, ts_ms=ts, promote_blocked=True)
+    assert mcs == 3                           # promote to 4 vetoed
+    ts += 1000.0
+    mcs, _ = s.select(probe=_probe(7), loss_rate=0.0, fec_pressure=0.0,
+                      link_starved=False, ts_ms=ts, promote_blocked=False)
+    assert mcs == 4                           # veto lifts -> promotes

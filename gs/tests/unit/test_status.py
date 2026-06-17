@@ -108,3 +108,16 @@ def test_status_includes_beamforming_block():
                        beamforming=bf)
     assert out["beamforming"]["state"] == "active"
     assert out["beamforming"]["peerMac"] == "00:c0:ca:dd:ee:ff"
+
+
+def test_build_status_includes_connection_when_passed():
+    from fpvdgs.status import build_status
+    out = build_status("v", {}, {}, {"linkId": 1},
+                       connection={"state": "connected", "drone": {"version": "d1"}})
+    assert out["connection"]["state"] == "connected"
+
+
+def test_build_status_omits_connection_when_absent():
+    from fpvdgs.status import build_status
+    out = build_status("v", {}, {}, {"linkId": 1})
+    assert "connection" not in out

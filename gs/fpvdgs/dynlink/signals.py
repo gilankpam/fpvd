@@ -51,6 +51,12 @@ class Signals:
     rssi_avg_w: float | None = None       # diversity-combined estimate
     rssi_max_w: float | None = None       # max(rssi_avg) — best-antenna operating point
     mcs_w: int | None = None              # received MCS of the best antenna this window
+    snr_w: float | None = None            # operating (best-RSSI) antenna SNR (per-antenna diversity)
+    # EVM% (lock_quality, higher=better) is per spatial STREAM, not per antenna:
+    # combined per dongle then across dongles. None when no real EVM this window.
+    evm_w: float | None = None            # best dongle (operating modulation quality)
+    evm_lo_w: float | None = None         # worst dongle (diversity floor)
+    evm_min_w: float | None = None        # worst per-window sample across dongles
     residual_loss_w: float = 0.0          # used raw — no smoothing (§3)
     fec_work_rate_w: float = 0.0
     packet_rate_w: float = 0.0            # fragments / sec
@@ -65,6 +71,7 @@ class Signals:
     # EWMA-smoothed controller inputs
     rssi: float | None = None
     rssi_raw: float | None = None         # EWMA of the un-normalized RSSI (observability)
+    snr: float | None = None              # EWMA of EIRP-normalized SNR (cross-rung control axis)
     fec_work: float = 0.0
     burst_rate: float = 0.0
     holdoff_rate: float = 0.0
@@ -147,6 +154,26 @@ class SignalAggregator:
             s.rssi_max_w = float(best_ant.rssi_avg)
             s.mcs_w = int(best_ant.mcs)
             s.ant_count = len(ev.rx_ant_stats)
+            # SNR is genuine per-antenna diversity: log the operating
+            # (best-RSSI) antenna's SNR, coherent with rssi_max_w / mcs_w.
+            s.snr_w = float(best_ant.snr_avg)
+            # EVM is per-STREAM, not per-antenna. Group by dongle (ant>>8);
+            # a real slot has evm_avg > 0 (absent/2nd-stream slots report -1).
+            # Per dongle: stream EVM = max(evm_avg over real slots), worst
+            # sample = min(evm_min). Across dongles: best = max, floor = min;
+            # worst sample = min over all real slots. (Averaging raw per-"ant"
+            # EVM would corrupt it — sentinels and STBC duplicates skew it.)
+            d_avg: dict[int, float] = {}
+            d_min: dict[int, float] = {}
+            for a in ev.rx_ant_stats:
+                if a.evm_avg > 0:
+                    d = a.ant >> 8
+                    d_avg[d] = max(d_avg.get(d, float(a.evm_avg)), float(a.evm_avg))
+                    d_min[d] = min(d_min.get(d, float(a.evm_min)), float(a.evm_min))
+            if d_avg:
+                s.evm_w = max(d_avg.values())
+                s.evm_lo_w = min(d_avg.values())
+                s.evm_min_w = min(d_min.values())
         # If no antenna lines this window, keep prior values — don't
         # reset; the RSSI operating point doesn't vanish just because
         # no fragments arrived.
@@ -172,6 +199,12 @@ class SignalAggregator:
             rssi_norm_w = normalize_rssi(s.rssi_max_w, s.mcs_w, self.rssi_norm)
             s.rssi = _ewma(s.rssi, rssi_norm_w, self.ewma_alpha_rssi)
             s.rssi_raw = _ewma(s.rssi_raw, s.rssi_max_w, self.ewma_alpha_rssi)
+            # SNR shares RSSI's per-MCS TX-power offset (SNR scales 1:1 with
+            # TX power, noise unchanged), so reuse normalize_rssi to make SNR
+            # cross-rung comparable, then smooth it like rssi.
+            if s.snr_w is not None:
+                snr_norm_w = normalize_rssi(s.snr_w, s.mcs_w, self.rssi_norm)
+                s.snr = _ewma(s.snr, snr_norm_w, self.ewma_alpha_rssi)
 
         s.fec_work = _ewma(s.fec_work, s.fec_work_rate_w, self.ewma_alpha_fec)
         s.burst_rate = _ewma(s.burst_rate, s.burst_rate_w, self.ewma_alpha_burst)

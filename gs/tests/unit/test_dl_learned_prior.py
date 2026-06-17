@@ -1,3 +1,4 @@
+import json
 from fpvdgs.dynlink.learned_prior import LearnedPrior, LearnedPriorConfig
 
 
@@ -6,198 +7,86 @@ def _prior(tmp_path, **kw):
     return LearnedPrior("m8812eu2", cfg)
 
 
-def test_rssi_bin_maps_and_rejects_out_of_range(tmp_path):
-    p = _prior(tmp_path, bin_width_db=2.0, rssi_min=-90.0, rssi_max=-30.0)
-    # -90 is the first bin; -30 is the last edge.
-    assert p.rssi_bin(-90.0) == 0
-    assert p.rssi_bin(-89.0) == 0
-    assert p.rssi_bin(-88.0) == 1
-    assert p.rssi_bin(-50.0) == 20
-    # out of range / missing → None (not ingested, query unknown)
-    assert p.rssi_bin(-91.0) is None
-    assert p.rssi_bin(-29.0) is None
-    assert p.rssi_bin(None) is None
+def _settle(p, rung, rssi, clean, n=12):
+    for _ in range(n):
+        p.ingest(rssi=rssi, operating_mcs=rung, operating_clean=clean, settled=True)
 
 
 def test_empty_store_returns_unknown(tmp_path):
     p = _prior(tmp_path)
     assert p.ceiling(-50.0) is None
     assert p.warmstart_seed(-50.0) is None
+    assert p.predictive_ceiling(-50.0, -1.0) is None
 
 
-def test_ingest_raises_clean_and_counts(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=0.5, rssi_min=-90.0, rssi_max=-30.0)
-    b = p.rssi_bin(-50.0)
-    # 3 clean observations of rung 5 at this bin.
-    for _ in range(3):
-        p.ingest(rssi=-50.0, probed_rung=5, probe_clean=True,
-                 operating_mcs=4, operating_clean=True)
-    cell5 = p._cells[b][5]
-    assert cell5[1] == 3                 # n
-    assert cell5[0] is not None and cell5[0] > 0.8   # clean_ewma rose toward 1
-    # operating rung 4 also got clean labels.
-    assert p._cells[b][4][1] == 3
-    assert p._cells[b][4][0] > 0.8
+def test_ingest_only_learns_when_settled(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    for _ in range(10):
+        p.ingest(rssi=-60.0, operating_mcs=4, operating_clean=True, settled=False)
+    assert p.ceiling(-50.0) is None          # nothing learned while unsettled
+    _settle(p, 4, -60.0, True, n=5)
+    assert p.ceiling(-50.0) == 4
 
 
-def test_ingest_cliff_lowers_clean(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=0.5)
-    b = p.rssi_bin(-50.0)
-    for _ in range(5):
-        p.ingest(rssi=-50.0, probed_rung=6, probe_clean=True,
-                 operating_mcs=5, operating_clean=True)
-    high = p._cells[b][6][0]
-    # now rung 6 cliffs repeatedly
-    for _ in range(5):
-        p.ingest(rssi=-50.0, probed_rung=6, probe_clean=False,
-                 operating_mcs=5, operating_clean=True)
-    assert p._cells[b][6][0] < high      # clean_ewma fell
-
-
-def test_ingest_skips_out_of_range_rssi(tmp_path):
-    p = _prior(tmp_path)
-    p.ingest(rssi=-200.0, probed_rung=3, probe_clean=True,
-             operating_mcs=2, operating_clean=True)
-    # nothing recorded
-    assert all(cell[1] == 0 for row in p._cells for cell in row)
-
-
-def test_bin_ceiling_picks_highest_confident_clean_rung(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=1.0, viable_threshold=0.99,
-               min_samples_warmstart=3)
-    b = p.rssi_bin(-50.0)
-    # rungs 0..4 clean, rung 5 cliffed — all with enough samples.
-    for _ in range(3):
-        for rung in (0, 1, 2, 3, 4):
-            p.ingest(rssi=-50.0, probed_rung=rung, probe_clean=True,
-                     operating_mcs=rung, operating_clean=True)
-        p.ingest(rssi=-50.0, probed_rung=5, probe_clean=False,
-                 operating_mcs=4, operating_clean=True)
-    assert p.bin_ceiling(b) == 4
-
-
-def test_bin_ceiling_unknown_until_min_samples(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=1.0, viable_threshold=0.99,
-               min_samples_warmstart=5)
-    b = p.rssi_bin(-50.0)
-    for _ in range(2):  # only 2 < 5 samples
-        p.ingest(rssi=-50.0, probed_rung=3, probe_clean=True,
-                 operating_mcs=3, operating_clean=True)
-    assert p.bin_ceiling(b) is None
-
-
-def _fill_bin(p, rssi, ceiling, samples=5):
-    """Make bin(rssi) report `ceiling`: rungs 0..ceiling clean, ceiling+1 cliff."""
-    for _ in range(samples):
-        for rung in range(ceiling + 1):
-            p.ingest(rssi=rssi, probed_rung=rung, probe_clean=True,
-                     operating_mcs=rung, operating_clean=True)
-        if ceiling + 1 <= 7:
-            p.ingest(rssi=rssi, probed_rung=ceiling + 1, probe_clean=False,
-                     operating_mcs=ceiling, operating_clean=True)
-
-
-def test_ceiling_uses_confident_bin_directly(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3)
-    _fill_bin(p, -50.0, ceiling=5)
-    assert p.ceiling(-50.0) == 5
-
-
-def test_ceiling_ladder_extrapolates_unflown_bin_monotonically(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3)
-    _fill_bin(p, -70.0, ceiling=2)   # weak RSSI bin
-    _fill_bin(p, -50.0, ceiling=5)   # strong RSSI bin
-    # -60 was never flown; the isotonic ladder must give a value between
-    # the two anchors and never below the weaker / above the stronger.
-    mid = p.ceiling(-60.0)
-    assert mid is not None and 2 <= mid <= 5
-
-
-def test_ceiling_isotonic_denoises_inversion(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3)
-    _fill_bin(p, -70.0, ceiling=5)   # noisy: weak RSSI shows a high ceiling
-    _fill_bin(p, -50.0, ceiling=3)   # strong RSSI shows a lower one
-    # Monotonicity (more RSSI ⇒ >= ceiling) must hold after the isotonic fit.
-    assert p.ceiling(-50.0) >= p.ceiling(-70.0)
-
-
-def test_ceiling_unknown_with_no_confident_bins(tmp_path):
-    p = _prior(tmp_path, min_samples_warmstart=100)
-    _fill_bin(p, -50.0, ceiling=5, samples=3)   # below threshold
+def test_ingest_skips_none_rssi(tmp_path):
+    p = _prior(tmp_path, min_samples=1)
+    p.ingest(rssi=None, operating_mcs=4, operating_clean=True, settled=True)
     assert p.ceiling(-50.0) is None
 
 
-def test_warmstart_seed_applies_margin_and_clamp(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3,
-               warmstart_margin=1)
-    _fill_bin(p, -50.0, ceiling=5)
-    assert p.warmstart_seed(-50.0) == 4          # 5 - margin(1)
-    assert p.warmstart_seed(-91.0) is None        # out of range
+def test_ceiling_and_warmstart_seed_from_knees(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle(p, 1, -80.0, True)
+    _settle(p, 4, -60.0, True)
+    assert p.ceiling(-55.0) == 4
+    assert p.warmstart_seed(-70.0) == 1
 
 
-def test_warmstart_seed_none_when_unconfident(tmp_path):
-    p = _prior(tmp_path, min_samples_warmstart=100)
-    _fill_bin(p, -50.0, ceiling=5, samples=3)
-    assert p.warmstart_seed(-50.0) is None
+def test_predictive_ceiling_projects_with_slope(tmp_path):
+    p = _prior(tmp_path, min_samples=3, predictive_horizon_ticks=3)
+    _settle(p, 4, -60.0, True)               # rung4 knee ~ -60
+    _settle(p, 1, -80.0, True)               # rung1 knee ~ -80
+    # at -58 now, fading -2/tick -> projected -58 + (-2*3) = -64 -> below rung4 knee
+    assert p.predictive_ceiling(-58.0, -2.0) == 1
 
 
-def test_predictive_ceiling_projects_and_gates_on_strict_confidence(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3,
-               min_samples_predictive=3, predictive_horizon_ticks=2,
-               bin_width_db=2.0)
-    _fill_bin(p, -50.0, ceiling=5)   # where we are now
-    _fill_bin(p, -56.0, ceiling=2)   # where a -3 dB/tick fade lands in 2 ticks
-    # slope -3 dB/tick, horizon 2 -> projected ≈ -50 + (-3*2) = -56 -> ceiling 2
-    assert p.predictive_ceiling(-50.0, -3.0) == 2
+def test_predictive_ceiling_none_rssi(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle(p, 4, -60.0, True)
+    assert p.predictive_ceiling(None, -2.0) is None
 
 
-def test_predictive_ceiling_needs_strict_min_samples(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3,
-               min_samples_predictive=100, predictive_horizon_ticks=2)
-    _fill_bin(p, -56.0, ceiling=2, samples=5)   # confident for warmstart, not predictive
-    assert p.predictive_ceiling(-50.0, -3.0) is None
-
-
-def test_persistence_round_trip(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3)
-    _fill_bin(p, -50.0, ceiling=5)
+def test_persistence_round_trip_v2(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle(p, 4, -60.0, True)
     p.flush()
-    # a fresh prior with the same key loads the persisted curve
-    p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(
-        persist_dir=str(tmp_path), ewma_alpha=1.0, min_samples_warmstart=3))
-    assert p2.ceiling(-50.0) == 5
+    p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path),
+                                                     min_samples=3))
+    assert p2.ceiling(-50.0) == 4
 
 
-def test_persistence_bin_config_mismatch_discarded(tmp_path):
-    p = _prior(tmp_path, bin_width_db=2.0, min_samples_warmstart=3,
-               ewma_alpha=1.0)
-    _fill_bin(p, -50.0, ceiling=5)
-    p.flush()
-    # different bin width → stale file ignored, starts empty
-    p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(
-        persist_dir=str(tmp_path), bin_width_db=4.0, min_samples_warmstart=3))
-    assert p2.ceiling(-50.0) is None
+def test_v1_file_ignored_and_retrains(tmp_path):
+    (tmp_path / "m8812eu2.json").write_text(json.dumps(
+        {"schema": 1, "bins": [2.0, -90, -30], "cells": []}))
+    p = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path),
+                                                    min_samples=3))
+    assert p.ceiling(-50.0) is None          # v1 ignored
+    _settle(p, 4, -60.0, True)
+    assert p.ceiling(-50.0) == 4             # retrains on v2
 
 
 def test_corrupt_file_is_ignored(tmp_path):
     (tmp_path / "m8812eu2.json").write_text("{not json")
     p = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path)))
-    assert p.ceiling(-50.0) is None      # no crash, empty
+    assert p.ceiling(-50.0) is None
 
 
-def test_key_sanitized_in_filename(tmp_path):
-    p = LearnedPrior("bl-m8812eu2/weird", LearnedPriorConfig(persist_dir=str(tmp_path)))
-    p.flush()
-    files = list(tmp_path.iterdir())
-    assert len(files) == 1 and "/" not in files[0].name
-
-
-def test_to_status_shape(tmp_path):
-    p = _prior(tmp_path, ewma_alpha=1.0, min_samples_warmstart=3)
-    _fill_bin(p, -50.0, ceiling=5)
+def test_to_status_reports_knees(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle(p, 4, -60.0, True)
     st = p.to_status()
     assert st["key"] == "m8812eu2"
-    assert any(entry["ceiling"] == 5 for entry in st["bins"])
+    assert isinstance(st["knees"], list) and len(st["knees"]) == 8
 
 
 def test_lsq_slope_flat_is_zero():
@@ -224,3 +113,92 @@ def test_lsq_slope_under_two_samples_is_zero():
     from fpvdgs.dynlink.learned_prior import lsq_slope
     assert lsq_slope([]) == 0.0
     assert lsq_slope([-50.0]) == 0.0
+
+
+def test_key_sanitized_in_filename(tmp_path):
+    p = LearnedPrior("bl-m8812eu2/weird", LearnedPriorConfig(persist_dir=str(tmp_path)))
+    p.flush()
+    files = list(tmp_path.iterdir())
+    assert len(files) == 1 and "/" not in files[0].name
+
+
+def _settle_snr(p, rung, snr, clean, n=12):
+    for _ in range(n):
+        p.ingest(rssi=None, snr=snr, operating_mcs=rung,
+                 operating_clean=clean, settled=True)
+
+
+def test_snr_ceiling_learns_independently_of_rssi(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle_snr(p, 1, 10.0, True)
+    _settle_snr(p, 4, 30.0, True)
+    assert p.snr_ceiling(35.0) == 4
+    assert p.snr_ceiling(12.0) == 1
+    assert p.snr_ceiling(5.0) is None
+    assert p.ceiling(-50.0) is None          # rssi model untouched (no rssi ingested)
+
+
+def test_snr_ceiling_none_when_cold_or_none(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    assert p.snr_ceiling(30.0) is None       # cold
+    _settle_snr(p, 4, 30.0, True)
+    assert p.snr_ceiling(None) is None        # None input
+
+
+def test_combined_persistence_round_trip(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle(p, 4, -60.0, True)               # rssi knee (existing helper)
+    _settle_snr(p, 4, 30.0, True)            # snr knee
+    p.flush()
+    p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path),
+                                                     min_samples=3))
+    assert p2.ceiling(-50.0) == 4
+    assert p2.snr_ceiling(35.0) == 4
+
+
+def test_v2_flat_file_loads_rssi_keeps_snr_cold(tmp_path):
+    import json
+    # a deployed v2 doc is the flat rssi-model dict (no "rssi"/"snr" wrapper)
+    p1 = _prior(tmp_path, min_samples=3)
+    _settle(p1, 4, -60.0, True)
+    flat = p1._model.to_dict(); flat["key"] = "m8812eu2"
+    (tmp_path / "m8812eu2.json").write_text(json.dumps(flat))
+    p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path),
+                                                     min_samples=3))
+    assert p2.ceiling(-50.0) == 4            # rssi knee survived the upgrade
+    assert p2.snr_ceiling(35.0) is None       # snr starts cold
+
+
+def test_load_tolerates_null_model_subkeys(tmp_path):
+    import json
+    # a file with rssi/snr present but null must NOT boot-brick (AttributeError)
+    (tmp_path / "m8812eu2.json").write_text(
+        json.dumps({"rssi": None, "snr": None, "key": "m8812eu2"}))
+    p = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path)))
+    assert p.ceiling(-50.0) is None and p.snr_ceiling(30.0) is None
+
+
+# ── snr_rung_unviable: per-rung known-bad, NOT highest-confident-viable ───────
+# Distinguishes "this rung is confidently unviable" (block) from "this rung is
+# unknown" (explore). The frontier-cap fix for the never-promotes-to-top deadlock.
+
+def test_snr_rung_unviable_cold_rung_is_explorable(tmp_path):
+    # Only rung4 has been learned; rung5 (the frontier) is UNKNOWN, not unviable.
+    p = _prior(tmp_path, min_samples=3)
+    _settle_snr(p, 4, 27.0, True)
+    assert p.snr_rung_unviable(5, 39.0) is False    # cold -> explorable (deadlock fix)
+    assert p.snr_rung_unviable(6, 39.0) is False
+
+
+def test_snr_rung_unviable_confident_rung(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle_snr(p, 4, 27.0, True)                   # rung4 viable at snr >= ~27
+    assert p.snr_rung_unviable(4, 24.0) is True     # below the knee -> known-bad
+    assert p.snr_rung_unviable(4, 30.0) is False    # clears the knee -> viable
+
+
+def test_snr_rung_unviable_none_inputs(tmp_path):
+    p = _prior(tmp_path, min_samples=3)
+    _settle_snr(p, 4, 27.0, True)
+    assert p.snr_rung_unviable(4, None) is False    # no live snr -> can't judge
+    assert p.snr_rung_unviable(None, 39.0) is False

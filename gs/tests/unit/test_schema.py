@@ -246,3 +246,62 @@ def test_smoothing_alpha_above_one_rejected():
 def test_selector_non_dict_rejected():
     with pytest.raises(schema.SchemaError):
         schema.validate_effective(_dl(selector=0))
+
+
+def test_learned_prior_block_accepted_in_patch():
+    validate_config_patch({"dynamicLink": {"learnedPrior": {"settleTicks": 8,
+                                                            "alphaTighten": 0.4}}})  # no raise
+
+
+def test_learned_prior_unknown_key_rejected():
+    with pytest.raises(SchemaError, match="learnedPrior"):
+        validate_effective(_dl(learnedPrior={"bogus": 1}))
+
+
+def test_learned_prior_value_ranges_validated():
+    # all valid defaults — must not raise
+    validate_effective(_dl(learnedPrior={
+        "settleTicks": 5, "viableLoss": 0.05, "alphaTighten": 0.25,
+        "alphaRelax": 0.05, "minSamples": 8, "recencyDecay": 0.9995,
+    }))
+    with pytest.raises(SchemaError):
+        validate_effective(_dl(learnedPrior={"settleTicks": 0}))      # pos int required
+    with pytest.raises(SchemaError):
+        validate_effective(_dl(learnedPrior={"alphaTighten": 1.5}))   # (0,1]
+    with pytest.raises(SchemaError):
+        validate_effective(_dl(learnedPrior={"viableLoss": 2.0}))     # 0..1
+
+
+def test_connection_monitor_accepts_shipped_defaults():
+    from fpvdgs.config_defaults import default_config
+    validate_effective(default_config())          # includes connectionMonitor; must pass
+
+
+def test_connection_monitor_invariant_rejects_stale_le_poll():
+    from fpvdgs.config_defaults import default_config
+    cfg = default_config()
+    cfg["connectionMonitor"]["tunnelStaleS"] = 1.0
+    cfg["connectionMonitor"]["httpPollS"] = 1.5    # stale must be > poll
+    with pytest.raises(SchemaError):
+        validate_effective(cfg)
+
+
+def test_connection_monitor_rejects_bad_fail_count():
+    from fpvdgs.config_defaults import default_config
+    cfg = default_config()
+    cfg["connectionMonitor"]["httpFailCount"] = 0  # must be a positive int
+    with pytest.raises(SchemaError):
+        validate_effective(cfg)
+
+
+def test_config_patch_accepts_connection_monitor():
+    validate_config_patch({"connectionMonitor": {"enabled": False}})   # no raise
+
+
+def test_connection_monitor_tolerates_unknown_keys():
+    # Leniency is load-bearing: a stale/removed knob in an on-disk config must
+    # NOT brick boot (the loader doesn't deep-strip connectionMonitor subkeys).
+    validate_effective({
+        "link": {"channel": 132, "region": "US"},
+        "connectionMonitor": {"enabled": True, "futureKnob": 99},
+    })  # must not raise

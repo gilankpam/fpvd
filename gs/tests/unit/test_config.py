@@ -142,3 +142,20 @@ def test_stale_nested_selector_key_does_not_brick_boot(tmp_path):
     sel = s.effective()["dynamicLink"]["selector"]
     assert "emergencyLossRate" not in sel and sel["videoDemotePer"] == 0.05
     assert "bogusSmoothing" not in s.effective()["dynamicLink"]["smoothing"]
+
+
+def test_learned_prior_known_key_survives_loader_bogus_key_stripped(tmp_path, caplog):
+    """A valid learnedPrior knob in config.json must survive the tolerant loader;
+    an unknown learnedPrior key must be stripped (not crash the boot path).
+    Mirrors the selector/smoothing strip tests."""
+    from fpvdgs import schema
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"dynamicLink": {
+        "learnedPrior": {"settleTicks": 9, "bogusKnob": 99}}}))
+    with caplog.at_level(logging.WARNING):
+        s = ConfigStore.load(str(cfg))        # must not raise
+    schema.validate_effective(s.effective())  # must NOT raise (boot path)
+    lp = s.effective()["dynamicLink"]["learnedPrior"]
+    assert lp["settleTicks"] == 9            # known knob survives
+    assert "bogusKnob" not in lp             # unknown key stripped
+    assert any("bogusKnob" in r.message for r in caplog.records)
