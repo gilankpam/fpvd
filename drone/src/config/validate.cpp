@@ -129,19 +129,6 @@ std::vector<ValidationError> validate(const Config& c) {
     // dynamicLink
     {
         const auto& dl = c.dynamicLink;
-        if (dl.safe.mcs < 0 || dl.safe.mcs > 7)
-            errs.push_back({"dynamicLink.safe.mcs", "must be 0..7"});
-        if (dl.safe.k < 1 || dl.safe.k > 32 ||
-            dl.safe.n < 1 || dl.safe.n > 32 ||
-            dl.safe.k >= dl.safe.n)
-            errs.push_back({"dynamicLink.safe.fec", "require 1<=k<n<=32"});
-        if (dl.safe.bitrateKbps <= 0)
-            errs.push_back({"dynamicLink.safe.bitrateKbps", "must be > 0"});
-        if (dl.safe.overheadPct < 0 || dl.safe.overheadPct > 255)
-            errs.push_back({"dynamicLink.safe.overheadPct", "must be 0..255"});
-        if (dl.safe.deadlineMs < 1 || dl.safe.deadlineMs > 255)
-            errs.push_back({"dynamicLink.safe.deadlineMs", "must be 1..255 (uint8 on the control wire)"});
-
         if (dl.healthTimeoutMs < 1000)
             errs.push_back({"dynamicLink.healthTimeoutMs", "must be >= 1000"});
         if (dl.applyStaggerMs < 0 || dl.applyStaggerMs > 500)

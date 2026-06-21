@@ -55,8 +55,9 @@ TEST_CASE("lock: DL on + body writes link.channel → allowed (not locked)") {
     CHECK(r.ok);
 }
 
-TEST_CASE("lock: DL on + body writes dynamicLink.safe.mcs → allowed") {
-    auto body = nlohmann::json::parse(R"({"dynamicLink":{"safe":{"mcs":3}}})");
+TEST_CASE("lock: DL on + body writes dynamicLink.compute.baseRedundancyRatio → allowed") {
+    auto body = nlohmann::json::parse(
+        R"({"dynamicLink":{"compute":{"baseRedundancyRatio":0.6}}})");
     auto r = checkDynamicLinkLock(body, dlOn());
     CHECK(r.ok);
 }

@@ -23,15 +23,6 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface)
         static_cast<uint8_t> (dl.roiQp.step),
     };
 
-    s.safe = SafeDefaults{
-        static_cast<uint8_t> (dl.safe.mcs),
-        static_cast<uint8_t> (dl.safe.k),
-        static_cast<uint8_t> (dl.safe.n),
-        static_cast<uint16_t>(dl.safe.bitrateKbps),
-    };
-    s.safe.overheadPct = static_cast<uint8_t>(dl.safe.overheadPct);
-    s.safe.deadlineMs  = static_cast<uint8_t>(dl.safe.deadlineMs);
-
     s.swfec            = (c.link.fec.mode == "swfec");
     s.swfecOverheadPct = static_cast<uint8_t>(c.link.fec.overheadPct);
     s.swfecDeadlineMs  = static_cast<uint8_t>(c.link.fec.deadlineMs);

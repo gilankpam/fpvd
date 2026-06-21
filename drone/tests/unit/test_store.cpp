@@ -75,7 +75,6 @@ TEST_CASE("store: atomicWriteJson writes file and survives") {
 TEST_CASE("store: code defaults carry dynamicLink section") {
     auto c = fpvd::loadEffective("/no/such/path");
     CHECK(c.dynamicLink.enabled == false);
-    CHECK(c.dynamicLink.safe.mcs == 1);
     CHECK(c.dynamicLink.roiQp.thresholdKbps == 6000);
 }
 

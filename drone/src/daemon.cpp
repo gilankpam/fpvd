@@ -10,6 +10,7 @@
 #include "link_width.hpp"
 #include "probe/probe_specs.hpp"
 #include "probe/probe_constants.hpp"
+#include "dynlink/local_compute.hpp"
 #include <algorithm>
 #include <chrono>
 #include <ctime>
@@ -148,8 +149,7 @@ void Daemon::seedOrchestrator() {
     // controller retunes it live on each {mcs} (see DynamicLinkController).
     if (effective_.dynamicLink.enabled) {
         static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
-        const int probeMcs = std::min(effective_.dynamicLink.safe.mcs + 1,
-                                      kProbeMcsCeiling);
+        const int probeMcs = std::min(dynlink::kDlFailsafeMcs + 1, kProbeMcsCeiling);
         for (auto& s : buildProbeSpecs(effective_, iface, key, kProbeFeeder, probeMcs))
             orch_.add(std::move(s));
     }
@@ -251,8 +251,7 @@ void Daemon::startController() {
 void Daemon::addProbeStream() {
     const std::string iface = radio_.iface.empty() ? "wlan0" : radio_.iface;
     static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
-    const int probeMcs = std::min(effective_.dynamicLink.safe.mcs + 1,
-                                  kProbeMcsCeiling);
+    const int probeMcs = std::min(dynlink::kDlFailsafeMcs + 1, kProbeMcsCeiling);
     for (auto& s : buildProbeSpecs(effective_, iface, "/etc/drone.key",
                                    kProbeFeeder, probeMcs)) {
         const std::string name = s.name;

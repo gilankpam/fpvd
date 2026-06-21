@@ -9,12 +9,11 @@ TEST_CASE("buildDlSnapshot maps schema + derived inputs") {
     Config c{};                       // defaults
     c.link.mtu = 1400; c.video.fps = 90;
     c.link.stbc = false; c.link.ldpc = true;   // preserved through, not DL-decided
-    c.dynamicLink.safe.mcs = 3; c.dynamicLink.healthTimeoutMs = 8000;
+    c.dynamicLink.healthTimeoutMs = 8000;
     auto s = buildDlSnapshot(c, "wlan1");
     CHECK(s.iface == "wlan1");
     CHECK(s.stbc == false);
     CHECK(s.ldpc == true);
-    CHECK(s.safe.mcs == 3);
     CHECK(s.healthTimeoutMs == 8000);
     CHECK(s.roiQp.thresholdKbps == 6000);   // default carried through
 }
@@ -34,20 +33,6 @@ TEST_CASE("buildDlSnapshot maps all DynamicLink fields") {
     CHECK(s.debug               == false);
 }
 
-TEST_CASE("buildDlSnapshot maps safe defaults correctly") {
-    Config c{};
-    c.dynamicLink.safe.mcs         = 2;
-    c.dynamicLink.safe.k           = 6;
-    c.dynamicLink.safe.n           = 10;
-    c.dynamicLink.safe.bitrateKbps = 3000;
-
-    auto s = buildDlSnapshot(c, "wlan0");
-
-    CHECK(s.safe.mcs         == 2u);
-    CHECK(s.safe.k           == 6u);
-    CHECK(s.safe.n           == 10u);
-    CHECK(s.safe.bitrateKbps == 3000u);
-}
 
 TEST_CASE("buildDlSnapshot maps roiQp curve correctly") {
     Config c{};
@@ -85,11 +70,6 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
     CHECK(s.roiQp.floor         == -24);
     CHECK(s.roiQp.step          == 3u);
 
-    // Safe defaults
-    CHECK(s.safe.mcs         == 1u);
-    CHECK(s.safe.k           == 8u);
-    CHECK(s.safe.n           == 12u);
-    CHECK(s.safe.bitrateKbps == 2000u);
 }
 
 TEST_CASE("buildDlSnapshot maps the Phase-3a bitrate-engine knobs") {
@@ -129,19 +109,15 @@ TEST_CASE("buildDlSnapshot maps link.width to linkBandwidth (radiotap value)") {
     CHECK(s10.linkBandwidth == 20);
 }
 
-TEST_CASE("buildDlSnapshot: swfec fields from link.fec + safe") {
+TEST_CASE("buildDlSnapshot: swfec fields from link.fec") {
     fpvd::Config c{};
     c.link.fec.mode = "swfec";
     c.link.fec.overheadPct = 70;
     c.link.fec.deadlineMs = 40;
-    c.dynamicLink.safe.overheadPct = 120;
-    c.dynamicLink.safe.deadlineMs = 35;
     auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
     CHECK(s.swfec);
     CHECK(s.swfecOverheadPct == 70);
     CHECK(s.swfecDeadlineMs == 40);
-    CHECK(s.safe.overheadPct == 120);
-    CHECK(s.safe.deadlineMs == 35);
 }
 
 TEST_CASE("buildDlSnapshot: rs mode -> swfec false") {

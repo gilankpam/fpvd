@@ -316,7 +316,6 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{1, 8, 12, 2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
