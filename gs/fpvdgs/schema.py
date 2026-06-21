@@ -243,7 +243,7 @@ def _validate_pixelpilot(pp: dict) -> None:
         val = dvr.get(key)
         if val is not None and (not isinstance(val, str) or not val):
             raise SchemaError(f"pixelpilot.dvr.{key} must be a non-empty string")
-    for key in ("fmp4", "sequencedFiles", "osd"):
+    for key in ("fmp4", "sequencedFiles"):
         if key in dvr and not isinstance(dvr[key], bool):
             raise SchemaError(f"pixelpilot.dvr.{key} must be a bool")
     env = pp.get("env", {})

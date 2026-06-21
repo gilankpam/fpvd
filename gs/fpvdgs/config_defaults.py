@@ -86,7 +86,7 @@ def default_config() -> dict:
             "dvr": {
                 "dir": "/media/dvr",
                 "template": "record_%Y-%m-%d_%H-%M-%S.mp4",
-                "fmp4": True, "sequencedFiles": True, "osd": False,
+                "fmp4": True, "sequencedFiles": True,
             },
             "extraArgs": [],
         },

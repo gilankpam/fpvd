@@ -111,7 +111,7 @@ def test_validate_effective_rejects_bad_pixelpilot():
         {"rtpPort": 70000},
         {"codec": ""},
         {"dvr": {"dir": ""}},
-        {"dvr": {"osd": "yes"}},
+        {"dvr": {"fmp4": "yes"}},
         {"env": {"A": 1}},
         {"env": "x"},
     ):

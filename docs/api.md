@@ -1119,8 +1119,7 @@ fpvd-GS spawns and supervises the `pixelpilot` display binary (PixelPilot FPV De
     "dir": "/media/dvr",
     "template": "record_%Y-%m-%d_%H-%M-%S.mp4",
     "fmp4": true,
-    "sequencedFiles": true,
-    "osd": false
+    "sequencedFiles": true
   },
   "extraArgs": []
 }
@@ -1140,7 +1139,6 @@ fpvd-GS spawns and supervises the `pixelpilot` display binary (PixelPilot FPV De
 | `dvr.template` | `--dvr-template` | `record_%Y-%m-%d_%H-%M-%S.mp4` | DVR filename template (joined with `dvr.dir`). |
 | `dvr.fmp4` | `--dvr-fmp4` | `true` | Fragmented MP4 output. |
 | `dvr.sequencedFiles` | `--dvr-sequenced-files` | `true` | Sequenced output files. |
-| `dvr.osd` | `--dvr-osd` | `false` | Burn OSD into DVR. |
 | `extraArgs` | — | `[]` | Verbatim-appended flags (escape hatch for un-modeled options). |
 
 ```bash

@@ -184,8 +184,7 @@ restarting PixelPilot only — the radio link is untouched.
     "dir": "/media/dvr",
     "template": "record_%Y-%m-%d_%H-%M-%S.mp4",
     "fmp4": true,
-    "sequencedFiles": true,
-    "osd": false
+    "sequencedFiles": true
   },
   "extraArgs": []
 }
@@ -205,7 +204,6 @@ restarting PixelPilot only — the radio link is untouched.
 | `dvr.template` | string | `record_%Y-%m-%d_%H-%M-%S.mp4` | `--dvr-template` filename (joined with `dvr.dir`). |
 | `dvr.fmp4` | bool | `true` | `--dvr-fmp4` flag (fragmented MP4). |
 | `dvr.sequencedFiles` | bool | `true` | `--dvr-sequenced-files` flag. |
-| `dvr.osd` | bool | `false` | `--dvr-osd` flag (burn OSD into DVR). |
 | `extraArgs` | list[str] | `[]` | Verbatim-appended flags (escape hatch for un-modeled options). |
 
 `GET /gs/status.pixelpilot` shows `{enabled, running, pid, restarts, autoRestarts,

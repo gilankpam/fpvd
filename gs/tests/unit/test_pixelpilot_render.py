@@ -9,7 +9,7 @@ DEFAULTS = {"pixelpilot": {
     "rtpPort": 5600,
     "dvr": {"dir": "/media/dvr",
             "template": "record_%Y-%m-%d_%H-%M-%S.mp4",
-            "fmp4": True, "sequencedFiles": True, "osd": False},
+            "fmp4": True, "sequencedFiles": True},
     "extraArgs": [],
 }}
 
@@ -28,11 +28,9 @@ def test_defaults_render_full_argset():
     ]
 
 
-def test_dvr_osd_flag_toggles():
-    cfg = {"pixelpilot": {"dvr": {"osd": True}}}
-    assert "--dvr-osd" in render_pixelpilot_argv(cfg)
-    cfg2 = {"pixelpilot": {"dvr": {"osd": False}}}
-    assert "--dvr-osd" not in render_pixelpilot_argv(cfg2)
+def test_dvr_osd_knob_removed():
+    # dvr.osd is a dead knob now; --dvr-osd must never be emitted even if set.
+    assert "--dvr-osd" not in render_pixelpilot_argv({"pixelpilot": {"dvr": {"osd": True}}})
 
 
 def test_dead_flags_not_emitted():
@@ -40,7 +38,7 @@ def test_dead_flags_not_emitted():
     for dead in ("--video-scale", "--rtp-jitter-ms", "--dvr-framerate",
                  "--dvr-mode", "--dvr-max-size", "--dvr-reenc-codec",
                  "--dvr-reenc-bitrate", "--dvr-reenc-fps",
-                 "--dvr-reenc-resolution"):
+                 "--dvr-reenc-resolution", "--dvr-osd"):
         assert dead not in argv
 
 

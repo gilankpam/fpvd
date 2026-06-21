@@ -29,10 +29,6 @@ def render_pixelpilot_argv(effective: dict) -> list[str]:
         argv.append("--dvr-sequenced-files")
     argv += [
         "--dvr-template", os.path.join(dvr_dir, dvr_template),
-    ]
-    if dvr.get("osd", False):
-        argv.append("--dvr-osd")
-    argv += [
         "-p", str(pp.get("rtpPort", 5600)),
     ]
     argv += pp.get("extraArgs", [])
