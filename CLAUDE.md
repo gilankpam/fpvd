@@ -53,7 +53,7 @@ Deploy gotchas (both learned the hard way):
 
 The adaptive link spans both daemons; this is the part that requires reading multiple files to understand.
 
-**GS decides MCS; the drone derives everything else from it.** The wire (v3) is a `{mcs}`-only UDP decision packet, GS → drone `:9999` (`gs/fpvdgs/dynlink/wire.py` ↔ `drone/src/dynlink/wire.hpp`, golden-hex tested byte-identical on both sides). There is no HELLO/handshake (README's HELLO references are stale); the drone watchdog + dedup handle readiness, and on decision loss the drone falls back to `dynamicLink.safe`.
+**GS decides MCS; the drone derives everything else from it.** The wire (v3) is a `{mcs}`-only UDP decision packet, GS → drone `:9999` (`gs/fpvdgs/dynlink/wire.py` ↔ `drone/src/dynlink/wire.hpp`, golden-hex tested byte-identical on both sides). There is no HELLO/handshake (README's HELLO references are stale); the drone watchdog + dedup handle readiness, and on decision loss the drone falls back to a derived MCS-0 failsafe rung.
 
 GS side (`gs/fpvdgs/dynlink/`): the wfb stats feed (`:8103`, video stream records only) → `SignalAggregator` (`signals.py`, EWMAs; **EIRP-normalizes RSSI per-window by the received MCS** before smoothing) → `Policy.tick` (`policy.py`) → wire encode → return link. The selector (`LeadingSelector`) is **probe-driven promote + reactive demote**: promote only when the `current+1` probe rung reads clean+fresh for N consecutive ticks; demote immediately on emergency (loss / FEC pressure / sustained starvation) or video-PER breach. A learned per-card RSSI→ceiling prior (`learned_prior.py`, persisted at `/etc/fpvd/learned/<profile-name>.json` on the GS) adds a one-shot warm-start and a debounced predictive demote; the probe stays authoritative for promotes.
 
@@ -63,7 +63,7 @@ Drone side (`drone/src/dynlink/`): on each decision, `applyLocalCompute` (`local
 
 **Cross-cutting coupling:** the GS `RssiNormConfig.tx_power_dbm_by_mcs` (`gs/fpvdgs/dynlink/signals.py`) MUST mirror the drone curve in `drone/src/dynlink/txpower_curve.hpp` — both are static calibration constants for the same card.
 
-While `dynamicLink.enabled`, the drone API **locks** the fields the controller mutates (`link.mcs`, `link.txpower`, `link.fec`, `link.width`, `video.bitrate`, …) — `PATCH` returns `400 dynamic_link_locked` (`drone/src/config/lock.cpp`). All `dynamicLink.*` knobs hot-apply without bouncing wfb/waybeam.
+While `dynamicLink.enabled`, the drone API **locks** the fields the controller mutates (`link.mcs`, `link.txpower`, `link.fec.k`/`link.fec.n`, `link.width`, `video.bitrate`, …) — `PATCH` returns `400 dynamic_link_locked` (`drone/src/config/lock.cpp`). All `dynamicLink.*` knobs hot-apply without bouncing wfb/waybeam.
 
 Flight logs: one JSONL per flight at `/media/dvr/log/dynamic-link/` on the GS (rotated, size-capped, rolls on a >15 s link gap); per-tick records include MCS-change `reason`, probe per-rung PER, predictive-demote inputs. Analyze offline with `gs/tools/flightlog_analyze.py <file>.jsonl [--plot out.png]`.
 
