@@ -178,23 +178,13 @@ restarting PixelPilot only — the radio link is untouched.
   "configPath": "/etc/pixelpilot.yaml",
   "osdConfigPath": "/etc/pixelpilot/osd.json",
   "screenMode": "1920x1080@60",
-  "videoScale": 1.0,
   "codec": "h265",
   "rtpPort": 5600,
-  "rtpJitterMs": 1,
   "dvr": {
-    "framerate": 60,
     "dir": "/media/dvr",
     "template": "record_%Y-%m-%d_%H-%M-%S.mp4",
     "fmp4": true,
-    "sequencedFiles": true,
-    "osd": false,
-    "mode": "raw",
-    "maxSizeMb": 4000,
-    "reencCodec": "h264",
-    "reencBitrate": 8000,
-    "reencFps": 30,
-    "reencResolution": "1080p"
+    "sequencedFiles": true
   },
   "extraArgs": []
 }
@@ -208,22 +198,12 @@ restarting PixelPilot only — the radio link is untouched.
 | `configPath` | string | `/etc/pixelpilot.yaml` | `--config` (pixelpilot main config file). |
 | `osdConfigPath` | string | `/etc/pixelpilot/osd.json` | `--osd-config`. |
 | `screenMode` | string | `1920x1080@60` | `--screen-mode` (HDMI output mode). |
-| `videoScale` | number | `1.0` | `--video-scale`. |
 | `codec` | string | `h265` | `--codec` (video codec: `h264` or `h265`). |
 | `rtpPort` | int | `5600` | `-p` (RTP video input port). |
-| `rtpJitterMs` | int | `1` | `--rtp-jitter-ms`. |
-| `dvr.framerate` | int | `60` | `--dvr-framerate`. |
 | `dvr.dir` | string | `/media/dvr` | DVR output directory (joined with `dvr.template`). |
 | `dvr.template` | string | `record_%Y-%m-%d_%H-%M-%S.mp4` | `--dvr-template` filename (joined with `dvr.dir`). |
 | `dvr.fmp4` | bool | `true` | `--dvr-fmp4` flag (fragmented MP4). |
 | `dvr.sequencedFiles` | bool | `true` | `--dvr-sequenced-files` flag. |
-| `dvr.osd` | bool | `false` | `--dvr-osd` flag (burn OSD into DVR). |
-| `dvr.mode` | string | `raw` | `--dvr-mode` (`raw` or `reencode`). |
-| `dvr.maxSizeMb` | int | `4000` | `--dvr-max-size` (MB). |
-| `dvr.reencCodec` | string | `h264` | `--dvr-reenc-codec`. |
-| `dvr.reencBitrate` | int | `8000` | `--dvr-reenc-bitrate` (kbps). |
-| `dvr.reencFps` | int | `30` | `--dvr-reenc-fps`. |
-| `dvr.reencResolution` | string | `1080p` | `--dvr-reenc-resolution`. |
 | `extraArgs` | list[str] | `[]` | Verbatim-appended flags (escape hatch for un-modeled options). |
 
 `GET /gs/status.pixelpilot` shows `{enabled, running, pid, restarts, autoRestarts,
@@ -239,4 +219,4 @@ lastExit, fault}`; `{enabled:false, running:false}` when disabled. Changes to
 5. Shared link change (client-orchestrated; drone reachable): `curl -XPATCH :8080/air/config -d '{"link":{"channel":100}}'` and `curl -XPATCH :8080/gs/config -d '{"link":{"channel":100}}'`, then `curl -XPOST :8080/air/apply` **then** `curl -XPOST :8080/gs/apply` — drone moves first, the GS retunes onto the new channel and the link re-establishes.
 6. GS-only retune (tune the GS to a channel the drone is already on): `curl -XPATCH :8080/gs/config -d '{"link":{"channel":100}}'` then `curl -XPOST :8080/gs/apply` — the GS moves to the drone's channel and the link comes up (drone untouched).
 7. `/air`: `curl :8080/air/status` round-trips the drone fpvd's status.
-8. PixelPilot: `pidof pixelpilot` present; `curl -s :8080/gs/status` shows `pixelpilot.running:true`. `curl -XPATCH :8080/gs/config -d '{"pixelpilot":{"videoScale":1.5}}'` then `curl -XPOST :8080/gs/apply` — 200; only PixelPilot restarts (wfb_rx/wfb_tx PIDs unchanged).
+8. PixelPilot: `pidof pixelpilot` present; `curl -s :8080/gs/status` shows `pixelpilot.running:true`. `curl -XPATCH :8080/gs/config -d '{"pixelpilot":{"screenMode":"1280x720@60"}}'` then `curl -XPOST :8080/gs/apply` — 200; only PixelPilot restarts (wfb_rx/wfb_tx PIDs unchanged).

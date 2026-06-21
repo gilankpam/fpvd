@@ -1113,23 +1113,13 @@ fpvd-GS spawns and supervises the `pixelpilot` display binary (PixelPilot FPV De
   "configPath": "/etc/pixelpilot.yaml",
   "osdConfigPath": "/etc/pixelpilot/osd.json",
   "screenMode": "1920x1080@60",
-  "videoScale": 1.0,
   "codec": "h265",
   "rtpPort": 5600,
-  "rtpJitterMs": 1,
   "dvr": {
-    "framerate": 60,
     "dir": "/media/dvr",
     "template": "record_%Y-%m-%d_%H-%M-%S.mp4",
     "fmp4": true,
-    "sequencedFiles": true,
-    "osd": false,
-    "mode": "raw",
-    "maxSizeMb": 4000,
-    "reencCodec": "h264",
-    "reencBitrate": 8000,
-    "reencFps": 30,
-    "reencResolution": "1080p"
+    "sequencedFiles": true
   },
   "extraArgs": []
 }
@@ -1143,29 +1133,19 @@ fpvd-GS spawns and supervises the `pixelpilot` display binary (PixelPilot FPV De
 | `configPath` | `--config` | `/etc/pixelpilot.yaml` | Main pixelpilot config file. |
 | `osdConfigPath` | `--osd-config` | `/etc/pixelpilot/osd.json` | OSD layout config. |
 | `screenMode` | `--screen-mode` | `1920x1080@60` | HDMI output mode. |
-| `videoScale` | `--video-scale` | `1.0` | Display scale factor. |
 | `codec` | `--codec` | `h265` | Video codec (`h264` or `h265`). |
 | `rtpPort` | `-p` | `5600` | RTP video input port. |
-| `rtpJitterMs` | `--rtp-jitter-ms` | `1` | RTP jitter buffer (ms). |
-| `dvr.framerate` | `--dvr-framerate` | `60` | DVR frame rate. |
 | `dvr.dir` | — | `/media/dvr` | DVR output directory (joined with `dvr.template`). |
 | `dvr.template` | `--dvr-template` | `record_%Y-%m-%d_%H-%M-%S.mp4` | DVR filename template (joined with `dvr.dir`). |
 | `dvr.fmp4` | `--dvr-fmp4` | `true` | Fragmented MP4 output. |
 | `dvr.sequencedFiles` | `--dvr-sequenced-files` | `true` | Sequenced output files. |
-| `dvr.osd` | `--dvr-osd` | `false` | Burn OSD into DVR. |
-| `dvr.mode` | `--dvr-mode` | `raw` | DVR mode (`raw` or `reencode`). |
-| `dvr.maxSizeMb` | `--dvr-max-size` | `4000` | Max DVR clip size (MB). |
-| `dvr.reencCodec` | `--dvr-reenc-codec` | `h264` | Re-encode codec. |
-| `dvr.reencBitrate` | `--dvr-reenc-bitrate` | `8000` | Re-encode bitrate (kbps). |
-| `dvr.reencFps` | `--dvr-reenc-fps` | `30` | Re-encode frame rate. |
-| `dvr.reencResolution` | `--dvr-reenc-resolution` | `1080p` | Re-encode resolution. |
 | `extraArgs` | — | `[]` | Verbatim-appended flags (escape hatch for un-modeled options). |
 
 ```bash
-# Change display scale and apply (restarts PixelPilot only):
+# Change display mode and apply (restarts PixelPilot only):
 curl -X PATCH http://10.18.0.1:8080/gs/config \
   -H 'content-type: application/json' \
-  -d '{"pixelpilot":{"videoScale":1.5}}'
+  -d '{"pixelpilot":{"screenMode":"1280x720@60"}}'
 curl -X POST http://10.18.0.1:8080/gs/apply
 
 # Set LD_LIBRARY_PATH for a perf-build lib dir:

@@ -201,7 +201,6 @@ def _api_with_pp(tmp_path):
                 "wfb": {"profile": "gs", "raw": {}},
                 "drone": {"endpoint": "http://10.5.0.10:8080"},
                 "pixelpilot": {"enabled": True, "screenMode": "1920x1080@60",
-                               "videoScale": 1.0, "dvrFramerate": 60,
                                "extraArgs": []}}
     store = ConfigStore(defaults)
     runner = _FakeRunner()      # defined earlier in this file
@@ -258,9 +257,9 @@ def test_combined_wfb_and_pixelpilot_change_bounces_both(tmp_path):
 def test_patch_config_accepts_pixelpilot(tmp_path):
     api, store, pp, runner = _api_with_pp(tmp_path)
     code, _ = api.handle("PATCH", "/gs/config", {},
-                         json.dumps({"pixelpilot": {"videoScale": 1.5}}).encode())
+                         json.dumps({"pixelpilot": {"screenMode": "1280x720@60"}}).encode())
     assert code == 200
-    assert store.pending()["pixelpilot"]["videoScale"] == 1.5
+    assert store.pending()["pixelpilot"]["screenMode"] == "1280x720@60"
 
 
 # --- probe lifecycle rides the dynamicLink transition (no probe config) ---
