@@ -75,6 +75,23 @@ def test_effective_accepts_known_radio_profile():
     schema.validate_effective(_eff(radioProfile="m8812eu2"))  # no raise
 
 
+def test_effective_accepts_snr_margins():
+    schema.validate_effective(_eff(selector={
+        "snrPromoteMarginDb": 1.0, "snrDemoteMarginDb": 2.0}))  # no raise
+
+
+def test_effective_rejects_negative_snr_margin():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(_eff(selector={"snrPromoteMarginDb": -1.0}))
+
+
+def test_effective_rejects_demote_margin_not_above_promote():
+    # demote <= promote collapses the dead-band -> re-creates the knife-edge.
+    with pytest.raises(SchemaError):
+        schema.validate_effective(_eff(selector={
+            "snrPromoteMarginDb": 1.5, "snrDemoteMarginDb": 1.5}))
+
+
 def test_idr_forward_validates():
     schema.validate_effective({"link": {"channel": 1, "region": "US"},
                                "idrForward": {"enabled": True, "port": 11223}})

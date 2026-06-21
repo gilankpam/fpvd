@@ -38,6 +38,18 @@ def test_selector_defaults_when_absent():
     assert s.probe_freshness_ms == 500.0
     assert s.hold_modes_down_ms == 2000
     assert s.starvation_windows == 5
+    # SNR-knee hysteresis dead-band defaults (demote > promote)
+    assert s.snr_promote_margin_db == 1.0
+    assert s.snr_demote_margin_db == 1.5
+
+
+def test_snr_margin_knobs_map_into_selector():
+    cfg = build_policy_config(_block(selector={
+        "snrPromoteMarginDb": 0.5, "snrDemoteMarginDb": 2.0,
+    }))
+    s = cfg.selector
+    assert s.snr_promote_margin_db == 0.5
+    assert s.snr_demote_margin_db == 2.0
 
 
 def test_smoothing_block_overrides_defaults():

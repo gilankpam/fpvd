@@ -148,3 +148,38 @@ def test_load_dict_rejects_non_dict():
     assert m.load_dict(None) is False
     assert m.load_dict([1, 2, 3]) is False
     assert m.ceiling(-50.0) is None       # no crash, stays empty
+
+
+# ── rung_unviable hysteresis margin ──────────────────────────────────────────
+# A zero-margin `value < knee` is a knife-edge: when the live signal settles a
+# hair below a confident knee, the rung is forever "unviable" — and since the
+# knee only relaxes by OPERATING there, the lock is self-perpetuating (the
+# MCS-stuck-at-4 field bug). A promote-side margin reads "unviable" only when the
+# value is CLEARLY below the knee.
+
+def test_rung_unviable_margin_allows_value_just_below_knee():
+    m = _model(min_samples=8)
+    _confident(m, 5, 36.064)             # the field knee
+    # 0.066 dB below the knee: strict says unviable (the lock); margin clears it.
+    assert m.rung_unviable(5, 35.998) is True            # default margin 0.0
+    assert m.rung_unviable(5, 35.998, margin=1.0) is False
+
+
+def test_rung_unviable_margin_still_blocks_clearly_below():
+    m = _model(min_samples=8)
+    _confident(m, 5, 36.0)
+    assert m.rung_unviable(5, 34.0, margin=1.0) is True   # 2 dB below knee-margin
+
+
+def test_rung_unviable_cold_rung_ignores_margin():
+    m = _model(min_samples=8)
+    # rung 5 never learned -> unknown is explorable regardless of margin.
+    assert m.rung_unviable(5, 0.0, margin=1.0) is False
+
+
+def test_rung_unviable_default_margin_unchanged():
+    # Back-compat: no margin == the original strict comparison.
+    m = _model(min_samples=8)
+    _confident(m, 4, 27.0)
+    assert m.rung_unviable(4, 26.9) is True
+    assert m.rung_unviable(4, 27.1) is False

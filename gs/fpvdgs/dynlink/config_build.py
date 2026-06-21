@@ -30,6 +30,8 @@ def build_policy_config(block: dict) -> PolicyConfig:
         min_between_changes_ms=int(sel.get("minBetweenChangesMs", d.min_between_changes_ms)),
         starvation_windows=int(sel.get("starvationWindows", d.starvation_windows)),
         loss_windows=int(sel.get("lossWindows", d.loss_windows)),
+        snr_promote_margin_db=float(sel.get("snrPromoteMarginDb", d.snr_promote_margin_db)),
+        snr_demote_margin_db=float(sel.get("snrDemoteMarginDb", d.snr_demote_margin_db)),
     )
     fl = block.get("flightlog", {}) or {}
     # flightlog internals are frozen — read only `enabled`.

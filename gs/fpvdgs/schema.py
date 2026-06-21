@@ -11,7 +11,8 @@ DRONE_KEYS = {"host", "apiPort"}   # the drone's address; reused by HTTP/IDR/DL
 SELECTOR_KEYS = {"probeViableThreshold", "probeFreshnessMs",
                  "promoteDebounceWindows", "videoDemotePer",
                  "emergencyFecPressure", "holdModesDownMs", "minBetweenChangesMs",
-                 "starvationWindows", "lossWindows"}
+                 "starvationWindows", "lossWindows",
+                 "snrPromoteMarginDb", "snrDemoteMarginDb"}
 SMOOTHING_KEYS = {"ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst",
                   "starvationThresholdPps"}
 LEARNED_PRIOR_KEYS = {"settleTicks", "viableLoss", "alphaTighten",
@@ -142,8 +143,17 @@ def _validate_dynamic_link(dl: dict) -> None:
             _validate_prob(f"dynamicLink.selector.{k}", sel.get(k))
         for k in ("promoteDebounceWindows", "starvationWindows", "lossWindows"):
             _validate_pos_int(f"dynamicLink.selector.{k}", sel.get(k))
-        for k in ("probeFreshnessMs", "holdModesDownMs", "minBetweenChangesMs"):
+        for k in ("probeFreshnessMs", "holdModesDownMs", "minBetweenChangesMs",
+                  "snrPromoteMarginDb", "snrDemoteMarginDb"):
             _validate_non_neg_num(f"dynamicLink.selector.{k}", sel.get(k))
+        # Invariant: the proactive-demote margin must exceed the promote margin or
+        # the SNR-knee gates collapse to a single oscillating edge (no dead-band).
+        # Fallbacks track SelectorConfig defaults; both are validated numeric above.
+        pm = sel.get("snrPromoteMarginDb", 1.0)
+        dm = sel.get("snrDemoteMarginDb", 1.5)
+        if dm <= pm:
+            raise SchemaError("dynamicLink.selector.snrDemoteMarginDb must be > "
+                              "snrPromoteMarginDb (hysteresis dead-band)")
     sm = dl.get("smoothing")
     if sm is not None:
         _validate_block_keys("dynamicLink.smoothing", sm, SMOOTHING_KEYS)
