@@ -67,7 +67,7 @@ private:
 
     // Decision dispatch helpers (run on the control thread only — no locking).
     void dispatchTxApply(const DlRuntimeConfig& cfg, const Decision& d);
-    void dispatchTxSafe(const DlRuntimeConfig& cfg);
+    Decision dispatchTxSafe(const DlRuntimeConfig& cfg);
 
     Endpoints ep_;
     WaybeamClient wb_;            // transport for enc_; built from ep_ in the ctor

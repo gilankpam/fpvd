@@ -13,4 +13,9 @@ namespace fpvd::dynlink {
 // d.bandwidth untouched.
 void applyLocalCompute(const DlRuntimeConfig& cfg, Decision& d);
 
+// Failsafe rung. On a watchdog trip the controller derives a Decision at this
+// MCS (BPSK-1/2 floor, max tx power per the anti-overdrive curve) through
+// applyLocalCompute, instead of a hardcoded config block.
+constexpr int kDlFailsafeMcs = 0;
+
 } // namespace fpvd::dynlink
