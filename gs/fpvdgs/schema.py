@@ -229,15 +229,9 @@ def _validate_connection_monitor(cm: dict) -> None:
 def _validate_pixelpilot(pp: dict) -> None:
     if not isinstance(pp.get("enabled", True), bool):
         raise SchemaError("pixelpilot.enabled must be a bool")
-    vs = pp.get("videoScale", 1.0)
-    if isinstance(vs, bool) or not isinstance(vs, (int, float)) or vs <= 0:
-        raise SchemaError("pixelpilot.videoScale must be a positive number")
     port = pp.get("rtpPort", 5600)
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("pixelpilot.rtpPort must be an int in 1..65535")
-    jit = pp.get("rtpJitterMs", 1)
-    if isinstance(jit, bool) or not isinstance(jit, int) or jit < 0:
-        raise SchemaError("pixelpilot.rtpJitterMs must be a non-negative int")
     for key in ("screenMode", "bin", "configPath", "osdConfigPath", "codec"):
         val = pp.get(key)
         if val is not None and (not isinstance(val, str) or not val):
@@ -245,11 +239,7 @@ def _validate_pixelpilot(pp: dict) -> None:
     dvr = pp.get("dvr", {})
     if not isinstance(dvr, dict):
         raise SchemaError("pixelpilot.dvr must be an object")
-    for key in ("framerate", "maxSizeMb", "reencBitrate", "reencFps"):
-        v = dvr.get(key)
-        if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v <= 0):
-            raise SchemaError(f"pixelpilot.dvr.{key} must be a positive int")
-    for key in ("dir", "template", "mode", "reencCodec", "reencResolution"):
+    for key in ("dir", "template"):
         val = dvr.get(key)
         if val is not None and (not isinstance(val, str) or not val):
             raise SchemaError(f"pixelpilot.dvr.{key} must be a non-empty string")

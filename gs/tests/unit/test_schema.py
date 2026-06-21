@@ -90,12 +90,12 @@ def test_config_patch_accepts_pixelpilot():
 
 def test_validate_effective_accepts_pixelpilot_block():
     cfg = {"link": {"channel": 132, "width": 40, "region": "US"},
-           "pixelpilot": {"enabled": True, "videoScale": 1.0,
+           "pixelpilot": {"enabled": True,
                           "screenMode": "1920x1080@60",
-                          "rtpPort": 5600, "rtpJitterMs": 1,
+                          "rtpPort": 5600,
                           "codec": "h265",
                           "env": {},
-                          "dvr": {"framerate": 60},
+                          "dvr": {"dir": "/media/dvr"},
                           "extraArgs": []}}
     schema.validate_effective(cfg)  # no raise
 
@@ -103,19 +103,14 @@ def test_validate_effective_accepts_pixelpilot_block():
 def test_validate_effective_rejects_bad_pixelpilot():
     base = {"link": {"channel": 132, "width": 40, "region": "US"}}
     for bad in (
-        {"videoScale": 0},
-        {"videoScale": -1.0},
-        {"videoScale": "x"},
         {"enabled": "yes"},
         {"screenMode": ""},
         {"extraArgs": "not-a-list"},
         {"extraArgs": [1, 2]},
         {"rtpPort": 0},
         {"rtpPort": 70000},
-        {"rtpJitterMs": -1},
         {"codec": ""},
-        {"dvr": {"reencBitrate": 0}},
-        {"dvr": {"mode": ""}},
+        {"dvr": {"dir": ""}},
         {"dvr": {"osd": "yes"}},
         {"env": {"A": 1}},
         {"env": "x"},
