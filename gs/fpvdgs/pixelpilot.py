@@ -22,8 +22,6 @@ def render_pixelpilot_argv(effective: dict) -> list[str]:
         "--osd-config", pp.get("osdConfigPath", "/etc/pixelpilot/osd.json"),
         "--codec", pp.get("codec", "h265"),
         "--screen-mode", pp.get("screenMode", "1920x1080@60"),
-        "--video-scale", str(pp.get("videoScale", 1.0)),
-        "--dvr-framerate", str(dvr.get("framerate", 60)),
     ]
     if dvr.get("fmp4", True):
         argv.append("--dvr-fmp4")
@@ -31,18 +29,11 @@ def render_pixelpilot_argv(effective: dict) -> list[str]:
         argv.append("--dvr-sequenced-files")
     argv += [
         "--dvr-template", os.path.join(dvr_dir, dvr_template),
-        "--dvr-mode", dvr.get("mode", "raw"),
-        "--dvr-max-size", str(dvr.get("maxSizeMb", 4000)),
-        "--dvr-reenc-codec", dvr.get("reencCodec", "h264"),
-        "--dvr-reenc-bitrate", str(dvr.get("reencBitrate", 8000)),
-        "--dvr-reenc-fps", str(dvr.get("reencFps", 30)),
-        "--dvr-reenc-resolution", dvr.get("reencResolution", "1080p"),
     ]
     if dvr.get("osd", False):
         argv.append("--dvr-osd")
     argv += [
         "-p", str(pp.get("rtpPort", 5600)),
-        "--rtp-jitter-ms", str(pp.get("rtpJitterMs", 1)),
     ]
     argv += pp.get("extraArgs", [])
     return argv
