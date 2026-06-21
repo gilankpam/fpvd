@@ -33,7 +33,6 @@ TEST_CASE("buildDlSnapshot maps all DynamicLink fields") {
     CHECK(s.debug               == false);
 }
 
-
 TEST_CASE("buildDlSnapshot maps roiQp curve correctly") {
     Config c{};
     c.dynamicLink.roiQp.thresholdKbps = 8000;
@@ -69,7 +68,6 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
     CHECK(s.roiQp.lowAnchorKbps == 2000u);
     CHECK(s.roiQp.floor         == -24);
     CHECK(s.roiQp.step          == 3u);
-
 }
 
 TEST_CASE("buildDlSnapshot maps the Phase-3a bitrate-engine knobs") {

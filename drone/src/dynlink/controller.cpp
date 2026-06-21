@@ -206,9 +206,6 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
 // drop bandwidth on a watchdog trip.
 Decision DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
     useconds_t paceUs = static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
-    // Failsafe derives at the robust MCS-0 floor through the same compute path as
-    // a normal decision (GS-decides-MCS, drone-derives-the-rest). Bandwidth is
-    // pinned to the operating width — never drop bandwidth on a watchdog trip.
     Decision d{};
     d.mcs       = kDlFailsafeMcs;
     d.bandwidth = cfg.linkBandwidth;

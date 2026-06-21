@@ -485,7 +485,12 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
     sf.mcs = fpvd::dynlink::kDlFailsafeMcs;
     sf.bandwidth = snap.linkBandwidth;
     fpvd::dynlink::applyLocalCompute(snap, sf);
-    CHECK(waitFor([&] { return wfb.sawFec(sf.k, sf.n); }, 2000));
+    // sawRadio(0, ...) is the discriminating proof that the watchdog trip fired
+    // (MCS 0 only appears in the failsafe, not the pre-trip decision push).
+    // sawFec(sf.k, sf.n): in swfec mode the failsafe derives k=swfecOverheadPct /
+    // n=swfecDeadlineMs via applyLocalCompute, which equals the steady decision's
+    // FEC (50/30) by design — so this confirms the value but not the re-emit alone.
+    CHECK(waitFor([&] { return wfb.sawFec(sf.k, sf.n) && wfb.sawRadio(0, snap.linkBandwidth); }, 2000));
     CHECK_FALSE(wfb.sawFec(8, 12));  // rs tuple must NOT be pushed in swfec mode
 
     // Neither the apply path nor the watchdog-safe path may emit a retired
@@ -542,6 +547,8 @@ TEST_CASE("setConfig hot-reloads swfec overhead -> next decision re-emits FEC") 
     snap2.swfecOverheadPct = 70;
     c.setConfig(snap2);
 
+    // sawFec(70, 30) is discriminating: overhead 70 cannot appear before setConfig
+    // (the initial snap uses overhead 50), so this proves the reload took effect.
     CHECK(waitFor([&] {
         sendDecision(ep.listenPort, mkDecision(2));
         return wfb.sawFec(70, 30);

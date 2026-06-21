@@ -472,9 +472,9 @@ TEST_CASE("apply: dynamicLink knob change hot-reloads, no orchestrator rebuild")
     // Record orchestrator process identity before the knob change.
     auto namesBefore = d.orchestrator().names();
 
-    // Change a safe.* knob — a pure dynamicLink change.
+    // Change a dynamicLink knob (healthTimeoutMs) — a pure dynamicLink change.
     REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"safe":{"mcs":3}}})")).ok);
+        R"({"dynamicLink":{"healthTimeoutMs":5000}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
 
