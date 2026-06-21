@@ -492,3 +492,58 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
 
     c.stop();
 }
+
+TEST_CASE("setConfig hot-reloads swfec overhead -> next decision re-emits FEC") {
+    FakeWfbTx wfb;
+    FakeEnc enc;
+
+    Endpoints ep;
+    ep.listenAddr = "127.0.0.1";
+    ep.listenPort = 45808;                 // distinct fixed test port
+    ep.wfbCtlAddr = "127.0.0.1";
+    ep.wfbCtlPort = wfb.port;
+    ep.encHost    = "127.0.0.1";
+    ep.encPort    = static_cast<uint16_t>(enc.port);
+    ep.gsTunnelPort = 0;
+    ep.osdUpdateIntervalMs = 1000;
+
+    DlRuntimeConfig snap{};
+    snap.healthTimeoutMs = 10000;          // long -> no trip during the test
+    snap.applyStaggerMs  = 0;
+    snap.applySubPaceMs  = 0;
+    snap.roiQp           = RoiCurve{6000, 2000, -24, 3};
+    snap.iface           = "wlan-test-nonexistent";
+    snap.swfec           = true;           // swfec: d.k=overheadPct, d.n=deadlineMs
+    snap.swfecOverheadPct = 50;
+    snap.swfecDeadlineMs  = 30;
+
+    DynamicLinkController c(ep);
+    c.start(snap);
+
+    auto mkDecision = [](uint32_t seq) {
+        Decision d{};
+        d.magic = kWireMagic; d.version = kWireVersion;
+        d.sequence = seq; d.timestampMs = 1;
+        d.mcs = 3; d.bandwidth = 20; d.txPowerDbm = 10;
+        d.k = 4; d.n = 6; d.bitrateKbps = 4000; d.fps = 60;
+        return d;
+    };
+
+    // First decision: swfec pushes overhead/deadline as k/n.
+    CHECK(waitFor([&] {
+        sendDecision(ep.listenPort, mkDecision(1));
+        return wfb.sawFec(50, 30);
+    }, 1000));
+
+    // Hot-reload a new overhead; the next (distinct-seq) decision must re-emit it.
+    DlRuntimeConfig snap2 = snap;
+    snap2.swfecOverheadPct = 70;
+    c.setConfig(snap2);
+
+    CHECK(waitFor([&] {
+        sendDecision(ep.listenPort, mkDecision(2));
+        return wfb.sawFec(70, 30);
+    }, 1000));
+
+    c.stop();
+}

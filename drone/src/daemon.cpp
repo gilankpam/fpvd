@@ -419,10 +419,11 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             removeProbeStream();   // targeted orch_.remove (no video bounce)
             restateStaticLink();   // revert radio + encoder to the static config
         }
-        else if (enabledOld && enabledNew && (subs.dynamicLink || link.videoRadiotap))
-            // A stbc/ldpc retune is the only videoRadiotap change reachable under
-            // DL (mcs/width/fec are locked), so refresh the controller snapshot;
-            // the loop restates the radio with its current mcs (see reconcile).
+        else if (enabledOld && enabledNew &&
+                 (subs.dynamicLink || link.videoRadiotap || link.videoFec))
+            // stbc/ldpc (videoRadiotap) and swfec overhead/deadline (videoFec) are
+            // static params the controller preserves; refresh its snapshot so the
+            // loop re-emits them on the next decision. mcs/width/rs-k/n stay locked.
             dl_.setConfig(dynlink::buildDlSnapshot(effective_, radio_.iface));
 
         // DL isn't feeding the OSD — (re)assert the system-stats base line so a
@@ -451,7 +452,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
                 return {false, {}, restarted, rr.stderrText, version_};
             }
         }
-        if (link.videoFec) {
+        if (link.videoFec && !enabledNew) {   // DL off: push directly; DL on: controller owns FEC (setConfig above)
             WfbControlClient cli("127.0.0.1", kVideoControlPort);
             const auto& f = effective_.link.fec;
             // swfec rides the same CMD_SET_FEC: k=overhead_pct, n=deadline_ms.
