@@ -170,3 +170,40 @@ TEST_CASE("lock: DL on + body writes video.resilience → allowed (operator-owne
     CHECK(r.ok);
     CHECK(r.lockedPaths.empty());
 }
+
+TEST_CASE("lock: DL on + body writes link.fec.mode → allowed (transport choice)") {
+    auto body = nlohmann::json::parse(R"({"link":{"fec":{"mode":"rs"}}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK(r.ok);
+    CHECK(r.lockedPaths.empty());
+}
+
+TEST_CASE("lock: DL on + body writes link.fec.overheadPct → allowed (static swfec knob)") {
+    auto body = nlohmann::json::parse(R"({"link":{"fec":{"overheadPct":70}}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK(r.ok);
+    CHECK(r.lockedPaths.empty());
+}
+
+TEST_CASE("lock: DL on + body writes link.fec.deadlineMs → allowed (static swfec knob)") {
+    auto body = nlohmann::json::parse(R"({"link":{"fec":{"deadlineMs":40}}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK(r.ok);
+    CHECK(r.lockedPaths.empty());
+}
+
+TEST_CASE("lock: DL on + body writes link.fec.n → rejected (rs geometry is derived)") {
+    auto body = nlohmann::json::parse(R"({"link":{"fec":{"n":10}}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK_FALSE(r.ok);
+    REQUIRE(r.lockedPaths.size() == 1);
+    CHECK(r.lockedPaths[0] == "link.fec.n");
+}
+
+TEST_CASE("lock: DL on + mixed link.fec {mode,k} → rejected (touches k)") {
+    auto body = nlohmann::json::parse(R"({"link":{"fec":{"mode":"rs","k":8}}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK_FALSE(r.ok);
+    REQUIRE(r.lockedPaths.size() == 1);
+    CHECK(r.lockedPaths[0] == "link.fec.k");
+}

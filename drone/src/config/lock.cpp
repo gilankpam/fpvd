@@ -4,10 +4,14 @@ namespace fpvd {
 
 // Locked subtree: writes anywhere inside count. The strings here are the
 // path *prefixes* the body cannot touch when dynamicLink is enabled.
-// `link.fec` covers k, n, and a wholesale subtree overwrite alike.
 static const std::vector<std::vector<std::string>> kLockedPaths = {
     {"link", "mcs"},
-    {"link", "fec"},
+    // Only rs block geometry is DL-derived (computeK/computeN track the MCS), so
+    // only k/n are locked. link.fec.mode / overheadPct / deadlineMs are static
+    // swfec params the controller preserves — unlocked, like link.stbc/link.ldpc.
+    // A wholesale link.fec overwrite still trips via the ancestor check below.
+    {"link", "fec", "k"},
+    {"link", "fec", "n"},
     {"link", "width"},
     {"link", "txPowerDbm"},
     // NOTE: link.stbc / link.ldpc are deliberately NOT locked. They are static
