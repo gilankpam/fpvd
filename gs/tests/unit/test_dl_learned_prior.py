@@ -202,3 +202,13 @@ def test_snr_rung_unviable_none_inputs(tmp_path):
     _settle_snr(p, 4, 27.0, True)
     assert p.snr_rung_unviable(4, None) is False    # no live snr -> can't judge
     assert p.snr_rung_unviable(None, 39.0) is False
+
+
+def test_snr_rung_unviable_margin_threads_through(tmp_path):
+    # The promote/demote hysteresis margin must reach the knee model: a value a
+    # hair below the knee is NOT unviable once a margin is applied.
+    p = _prior(tmp_path, min_samples=3)
+    _settle_snr(p, 4, 27.0, True)                    # knee ~27
+    assert p.snr_rung_unviable(4, 26.6) is True      # strict (default margin 0)
+    assert p.snr_rung_unviable(4, 26.6, margin=1.0) is False
+    assert p.snr_rung_unviable(4, 25.0, margin=1.0) is True   # clearly below

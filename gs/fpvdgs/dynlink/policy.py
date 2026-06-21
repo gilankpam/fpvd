@@ -62,6 +62,15 @@ class SelectorConfig:
     # Proactive SNR demote: consecutive ticks snr_ceiling must stay below the
     # current rung before demoting to it (debounce; snr is already EWMA'd).
     snr_demote_debounce: int = 2
+    # SNR-knee hysteresis (dB). The promote veto blocks a climb only when the
+    # live SNR is more than snr_promote_margin_db BELOW the target rung's learned
+    # knee; the proactive demote fires only when it is more than
+    # snr_demote_margin_db below the current rung's knee. demote > promote opens a
+    # stable dead-band: without it the zero-margin `snr < knee` veto pins MCS at
+    # the rung whose knee sits a hair above the live SNR (it can only relax by
+    # operating there, which the veto blocks) — the MCS-stuck-at-4 field bug.
+    snr_promote_margin_db: float = 1.0
+    snr_demote_margin_db: float = 1.5
 
 
 @dataclass
@@ -380,7 +389,9 @@ class Policy:
         snr_demote_reason = ""
         cur_snr = self.leading.state.current_mcs
         if (loss_demote_target is not None
-                and self.learned_prior.snr_rung_unviable(cur_snr, signals.snr)):
+                and self.learned_prior.snr_rung_unviable(
+                    cur_snr, signals.snr,
+                    margin=self.cfg.selector.snr_demote_margin_db)):
             self._snr_demote_count += 1
             if self._snr_demote_count >= self.cfg.selector.snr_demote_debounce:
                 self.leading.state.current_mcs = loss_demote_target
@@ -393,7 +404,9 @@ class Policy:
         # CONFIDENTLY says that target rung is unviable at the live SNR. A cold
         # (unlearned) target is explorable — see select()'s frontier note.
         promote_target = self.leading.state.current_mcs + 1
-        promote_blocked = self.learned_prior.snr_rung_unviable(promote_target, signals.snr)
+        promote_blocked = self.learned_prior.snr_rung_unviable(
+            promote_target, signals.snr,
+            margin=self.cfg.selector.snr_promote_margin_db)
 
         probe_snap = self._probe_status() if self._probe_status else None
         new_mcs, _changed = self.leading.select(

@@ -168,4 +168,83 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
     assert p._ticks_at_mcs == 0
     assert p.leading._promote_clean == 0
     assert p.learned_prior is prior_before      # persistent knees preserved
+
+
+# ── SNR-knee promote/demote hysteresis (the MCS-stuck-at-4 field bug) ─────────
+# Repro of flight log 000011: probe rung clean+fresh, RSSI ceiling allows the
+# climb, but the live normalized SNR settled 0.066 dB below the target rung's
+# learned SNR knee. The zero-margin veto (`snr < knee`) pinned MCS at 4 forever
+# — and since the knee only relaxes by OPERATING at the rung, the veto blocked
+# its own cure. Two-margin hysteresis (promote margin < demote margin) unsticks
+# it without introducing a promote<->proactive-demote flap.
+
+def _probe_snapshot(viable_mcs, *, per=0.0, age_ms=0.0):
+    mcs = {}
+    for m in range(0, 8):
+        pv = per if m <= viable_mcs else 1.0
+        mcs[str(m)] = {"per": pv, "snr": 20, "rssi": -60, "windows": 50,
+                       "ageMs": age_ms}
+    return {"running": True, "streams": 1, "mcs": mcs}
+
+
+def _settle_snr_knee(policy, rung, snr, clean=True, n=12):
+    for _ in range(n):
+        policy.learned_prior.ingest(rssi=None, snr=snr, operating_mcs=rung,
+                                    operating_clean=clean, settled=True)
+
+
+def _sig_snr(snr, ts):
+    return Signals(rssi=None, snr=snr, residual_loss_w=0.0, fec_work=0.0,
+                   link_starved_w=False, timestamp=ts)
+
+
+def test_snr_knee_hysteresis_unsticks_stuck_promote(tmp_path):
+    prof = _profile()
+    p = Policy(_cfg(tmp_path, min_samples=3), prof,
+               probe_status=lambda: _probe_snapshot(5))
+    _settle_snr_knee(p, 4, 34.0)             # knee[4] ~34
+    _settle_snr_knee(p, 5, 36.0)             # knee[5] ~36 (the wall)
+    p.leading.state.current_mcs = 4
+    dec = None
+    ts = 1.0
+    for _ in range(10):                      # > promote_debounce_windows
+        dec = p.tick(_sig_snr(35.6, ts))     # 0.4 dB below knee[5]: strict locks
+        ts += 1.0
+    assert dec.mcs == 5                       # margin clears the knife-edge veto
+    p.close()
+
+
+def test_snr_knee_hysteresis_holds_no_flap(tmp_path):
+    prof = _profile()
+    p = Policy(_cfg(tmp_path, min_samples=3), prof,
+               probe_status=lambda: _probe_snapshot(5))
+    _settle_snr_knee(p, 4, 34.0)
+    _settle_snr_knee(p, 5, 36.0)
+    p.leading.state.current_mcs = 5          # already climbed onto the rung
+    dec = None
+    ts = 1.0
+    for _ in range(20):                       # well past snr_demote_debounce
+        dec = p.tick(_sig_snr(35.6, ts))      # dead band: promote-ok AND no demote
+        ts += 1.0
+    assert dec.mcs == 5                        # no proactive-demote flap-down
+    p.close()
+
+
+def test_snr_knee_proactive_demote_still_fires_clearly_below(tmp_path):
+    # The demote margin must not disable the proactive SNR-demote: a clear fade
+    # (well past knee - demote_margin) still steps down ahead of loss.
+    prof = _profile()
+    p = Policy(_cfg(tmp_path, min_samples=3), prof,
+               probe_status=lambda: _probe_snapshot(5))
+    _settle_snr_knee(p, 3, 30.0)
+    _settle_snr_knee(p, 4, 34.0)
+    _settle_snr_knee(p, 5, 36.0)
+    p.leading.state.current_mcs = 5
+    dec = None
+    ts = 1.0
+    for _ in range(6):                        # past snr_demote_debounce
+        dec = p.tick(_sig_snr(33.0, ts))      # 3 dB below knee[5] -> genuinely unviable
+        ts += 1.0
+    assert dec.mcs < 5                         # proactive SNR-demote fired
+    p.close()
     p.close()
