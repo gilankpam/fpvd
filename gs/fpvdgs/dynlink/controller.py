@@ -52,7 +52,6 @@ class DynamicLinkController:
         self._policy = None
         self._aggregator = None
         self._pending_cal = None
-        self._rssi_norm_enabled = True  # safe default; overridden in _run
         self._lock = threading.RLock()
         self._lifecycle = threading.RLock()
         self._thread = None
@@ -148,7 +147,6 @@ class DynamicLinkController:
         aggregator = build_aggregator(snap)
         with self._lock:
             self._aggregator = aggregator
-            self._rssi_norm_enabled = bool((snap.get("rssiNorm") or {}).get("enabled", True))
         return_link = ReturnLink(snap["droneAddr"], int(snap["dronePort"]))
         encoder = WireEncoder(seq=1)
 
@@ -229,10 +227,9 @@ class DynamicLinkController:
         agg = self._aggregator
         curve = (radio or {}).get("txPowerCurve")
         adapter = (radio or {}).get("adapterId")
-        # Normalization binds on a valid curve, gated by the rssiNorm rollback
-        # toggle, and independently of the adapter id.
+        # Normalization binds on a valid drone curve; identity until one arrives.
         if agg is not None:
-            if self._rssi_norm_enabled and _valid_curve(curve):
+            if _valid_curve(curve):
                 c = tuple(int(v) for v in curve)
                 agg.rssi_norm = RssiNormConfig(
                     enabled=True, p_ref_dbm=max(c), tx_power_dbm_by_mcs=c
@@ -241,8 +238,7 @@ class DynamicLinkController:
                 log.info("dynlink: bound drone txpower curve=%s", c)
             else:
                 agg.rssi_norm = RssiNormConfig(enabled=False)
-                if not _valid_curve(curve):
-                    log.warning("dynlink: drone supplied no txpower curve — RSSI normalization OFF")
+                log.warning("dynlink: drone supplied no txpower curve — RSSI normalization OFF")
         # Learned-prior key binds on a present adapter id, independent of the curve.
         if adapter:
             self._policy.bind_learned_prior(str(adapter))

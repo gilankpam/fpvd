@@ -18,22 +18,22 @@ WINDOW_S = 0.1  # design cadence: log_interval = 100 ms (§3)
 @dataclass(frozen=True)
 class RssiNormConfig:
     """EIRP-normalization of the video-link RSSI by the drone's per-MCS TX
-    power. At runtime the controller binds `tx_power_dbm_by_mcs` (and the
-    derived `p_ref_dbm`) from the drone's /status curve on the connect event
-    — the drone is the single source of truth. These defaults are only a
-    pre-connect placeholder; `enabled` is the rollback toggle (False ->
-    identity / raw RSSI)."""
+    power. The controller binds `tx_power_dbm_by_mcs` (and the derived
+    `p_ref_dbm`) from the drone's /status curve at the connect event — the
+    drone is the single source of truth. `enabled` is internal bind state, not
+    a config knob: it is False (identity / raw RSSI) until a curve is bound,
+    True while a valid drone curve is in effect."""
 
-    enabled: bool = True
-    p_ref_dbm: int = 29
-    tx_power_dbm_by_mcs: tuple[int, ...] = (29, 28, 25, 23, 19, 19, 19, 19)
+    enabled: bool = False
+    p_ref_dbm: int = 0
+    tx_power_dbm_by_mcs: tuple[int, ...] = ()
 
 
 def normalize_rssi(rssi_raw: float | None, mcs: int | None, cfg: RssiNormConfig) -> float | None:
     """EIRP-normalize one RSSI reading: rssi_raw + (P_ref − curve[mcs]).
     Clamps mcs into the curve's index range. None-safe (returns rssi_raw
     when disabled, or when rssi_raw / mcs is None)."""
-    if not cfg.enabled or rssi_raw is None or mcs is None:
+    if not cfg.enabled or not cfg.tx_power_dbm_by_mcs or rssi_raw is None or mcs is None:
         return rssi_raw
     n = len(cfg.tx_power_dbm_by_mcs)
     m = max(0, min(n - 1, int(mcs)))

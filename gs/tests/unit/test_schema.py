@@ -247,7 +247,6 @@ def test_validate_effective_accepts_flat_dynamic_link():
             selector={"probeViableThreshold": 0.9},
             smoothing={"ewmaAlphaRssi": 0.3},
             flightlog={"enabled": True},
-            rssiNorm={"enabled": True},
         )
     )  # no raise
 

@@ -45,7 +45,6 @@ def _dynamic_link_defaults() -> dict:
             "recencyDecay": lp.recency_decay,
         },
         "flightlog": {"enabled": True},
-        "rssiNorm": {"enabled": True},
     }
 
 

@@ -3,8 +3,8 @@
 the controller consumes, and build the controller snapshot.
 
 The block is explicit (no opaque `tuning` passthrough): `selector` and
-`smoothing` carry the tunable knobs; `flightlog`/`rssiNorm` expose only an
-`enabled` toggle (their internals are frozen code constants);
+`smoothing` carry the tunable knobs; `flightlog` exposes only an `enabled`
+toggle (its internals are frozen code constants);
 learned-prior exposes its learning knobs (settleTicks/alphaTighten/alphaRelax/minSamples/recencyDecay);
 predictive + persistence internals stay frozen. camelCase JSON maps to the
 dataclasses' snake_case fields."""
@@ -57,16 +57,15 @@ def build_policy_config(block: dict) -> PolicyConfig:
 
 def build_aggregator(block: dict) -> SignalAggregator:
     s = block.get("smoothing", {}) or {}
-    rn = block.get("rssiNorm", {}) or {}
     d = SignalAggregator()
-    # rssiNorm curve is bound from the drone at connect — config exposes only the `enabled` rollback toggle.
-    rssi_norm = RssiNormConfig(enabled=bool(rn.get("enabled", True)))
     return SignalAggregator(
         ewma_alpha_rssi=float(s.get("ewmaAlphaRssi", d.ewma_alpha_rssi)),
         ewma_alpha_fec=float(s.get("ewmaAlphaFec", d.ewma_alpha_fec)),
         ewma_alpha_burst=float(s.get("ewmaAlphaBurst", d.ewma_alpha_burst)),
         starvation_threshold_pps=float(s.get("starvationThresholdPps", d.starvation_threshold_pps)),
-        rssi_norm=rssi_norm,
+        rssi_norm=RssiNormConfig(
+            enabled=False
+        ),  # identity until the controller binds the drone curve
     )
 
 

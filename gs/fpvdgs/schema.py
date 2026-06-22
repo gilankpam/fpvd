@@ -17,7 +17,6 @@ DYNAMIC_LINK_KEYS = {
     "selector",
     "smoothing",
     "flightlog",
-    "rssiNorm",
     "learnedPrior",
 }
 DRONE_KEYS = {"host", "apiPort"}  # the drone's address; reused by HTTP/IDR/DL
@@ -197,12 +196,11 @@ def _validate_dynamic_link(dl: dict) -> None:
         _validate_prob("dynamicLink.learnedPrior.viableLoss", lp.get("viableLoss"))
         for k in ("alphaTighten", "alphaRelax", "recencyDecay"):
             _validate_alpha(f"dynamicLink.learnedPrior.{k}", lp.get(k))
-    for sub in ("flightlog", "rssiNorm"):
-        blk = dl.get(sub)
-        if blk is not None:
-            _validate_block_keys(f"dynamicLink.{sub}", blk, {"enabled"})
-            if not isinstance(blk.get("enabled", True), bool):
-                raise SchemaError(f"dynamicLink.{sub}.enabled must be a bool")
+    fl = dl.get("flightlog")
+    if fl is not None:
+        _validate_block_keys("dynamicLink.flightlog", fl, {"enabled"})
+        if not isinstance(fl.get("enabled", True), bool):
+            raise SchemaError("dynamicLink.flightlog.enabled must be a bool")
 
 
 def _validate_block_keys(name: str, blk: dict, known: set) -> None:

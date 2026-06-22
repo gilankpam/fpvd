@@ -369,13 +369,11 @@ def _make_fake_controller():
 
     c._aggregator = _Agg()
     c._policy = _Policy()
-    c._rssi_norm_enabled = True  # required by _bind_calibration
     return c
 
 
 def test_bind_calibration_applies_drone_curve_and_adapter():
     c = _make_fake_controller()
-    c._rssi_norm_enabled = True
 
     c._bind_calibration(
         {"adapterId": "bl-m8812eu2", "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]}
@@ -390,7 +388,6 @@ def test_bind_calibration_applies_drone_curve_and_adapter():
 
 def test_bind_calibration_missing_curve_disables_normalization():
     c = _make_fake_controller()
-    c._rssi_norm_enabled = True
 
     c._bind_calibration({"adapterId": "bl-m8812eu2", "txPowerCurve": None})
 
@@ -402,7 +399,6 @@ def test_bind_calibration_missing_curve_disables_normalization():
 
 def test_bind_calibration_valid_curve_null_adapter_still_normalizes():
     c = _make_fake_controller()
-    c._rssi_norm_enabled = True
 
     c._bind_calibration({"adapterId": None, "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]})
 
@@ -410,20 +406,6 @@ def test_bind_calibration_valid_curve_null_adapter_still_normalizes():
     assert c._aggregator.rssi_norm.enabled is True
     # … and the policy's bind is NOT called.
     assert c._policy.bound == c._policy._UNSET
-
-
-def test_bind_calibration_respects_rssi_norm_disabled_toggle():
-    c = _make_fake_controller()
-    c._rssi_norm_enabled = False  # operator rollback escape hatch
-
-    c._bind_calibration(
-        {"adapterId": "bl-m8812eu2", "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]}
-    )
-
-    # Toggle overrides the valid curve — normalization stays OFF.
-    assert c._aggregator.rssi_norm.enabled is False
-    # Adapter key still binds independently.
-    assert c._policy.bound == "bl-m8812eu2"
 
 
 def test_valid_curve():
