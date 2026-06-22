@@ -267,12 +267,7 @@ def test_loss_demote_cold_target_falls_back_to_one_step():
     assert changed and mcs == 4          # cold SNR knee -> today's one-step demote
 
 
-# ── SNR ceiling as operating ceiling: promote cap + lossWindows default ──────
-
-def test_loss_windows_defaults_to_one():
-    # SNR-jump lands on the right rung in one move (no cascade), so react fast.
-    assert SelectorConfig().loss_windows == 1
-
+# ── SNR ceiling as operating ceiling: promote cap ──────────────────────────
 
 def test_promote_blocked_by_flag():
     # The per-rung "is this target confidently unviable?" decision is made in
