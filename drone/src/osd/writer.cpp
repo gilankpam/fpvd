@@ -46,9 +46,9 @@ const char* signalGlyph(unsigned mcs) {
 /* Beamforming line (or empty string to omit). bfCode: 0 off, 1 armed, 2 active. */
 std::string bfLine(int bfCode) {
     if (bfCode == 2)
-        return osdLine(kColCyan, kGlyphAntenna, "");
+        return osdLine(kColCyan, kGlyphAntenna, ""); // active + fresh CBR report
     if (bfCode == 1)
-        return osdLine(kColWhite, kGlyphAntenna, "");
+        return osdLine(kColYellow, kGlyphAntenna, ""); // armed but stale / no report
     return {};
 }
 

@@ -105,8 +105,8 @@ TEST_CASE("osd: beamforming line by code (omitted/white/cyan)") {
     CHECK(readFile(path).find(kGlyphAntenna) == std::string::npos); // omitted when off
 
     osd.writeStatus(d, /*bfCode=*/1, 0);
-    CHECK(readFile(path).find("&L00&F30 " + std::string(kGlyphAntenna)) !=
-          std::string::npos); // armed=white
+    CHECK(readFile(path).find("&L50&F30 " + std::string(kGlyphAntenna)) !=
+          std::string::npos); // armed/stale=yellow
 
     osd.writeStatus(d, /*bfCode=*/2, 0);
     CHECK(readFile(path).find("&L70&F30 " + std::string(kGlyphAntenna)) !=

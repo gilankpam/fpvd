@@ -32,7 +32,8 @@ TEST_CASE("osd: writeStatus renders the BF state by code (antenna glyph + color)
 
     OsdWriter armed(msg.string(), true);
     armed.writeStatus(d, /*bfCode=*/1, /*idrCount=*/0);
-    CHECK(slurp(msg).find("&L00&F30 " + std::string(kGlyphAntenna)) != std::string::npos); // white
+    CHECK(slurp(msg).find("&L50&F30 " + std::string(kGlyphAntenna)) !=
+          std::string::npos); // armed/stale=yellow
 
     OsdWriter working(msg.string(), true);
     working.writeStatus(d, /*bfCode=*/2, /*idrCount=*/0);
