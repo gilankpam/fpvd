@@ -101,30 +101,6 @@ TEST_CASE("validate: service.restart must be always|on-failure|never") {
     CHECK(errs[0].path == "services.x.restart");
 }
 
-TEST_CASE("validate: dynamicLink.safe.mcs in [0,7]") {
-    Config c{}; c.dynamicLink.safe.mcs = 8;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.mcs");
-}
-
-TEST_CASE("validate: dynamicLink.safe k<n and both in [1,32]") {
-    Config c{}; c.dynamicLink.safe.k = 12; c.dynamicLink.safe.n = 8;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.fec");
-
-    Config c2{}; c2.dynamicLink.safe.k = 0;
-    auto errs2 = validate(c2);
-    REQUIRE(errs2.size() == 1);
-    CHECK(errs2[0].path == "dynamicLink.safe.fec");
-
-    Config c3{}; c3.dynamicLink.safe.n = 33;
-    auto errs3 = validate(c3);
-    REQUIRE(errs3.size() == 1);
-    CHECK(errs3[0].path == "dynamicLink.safe.fec");
-}
-
 TEST_CASE("validate: link.txPowerDbm in [-10,30]") {
     Config c{}; c.link.txPowerDbm = 31;
     auto errs = validate(c);
@@ -142,13 +118,6 @@ TEST_CASE("validate: link.txPowerDbm in [-10,30]") {
     Config c3{}; c3.link.txPowerDbm = 20;   // in range
     auto errs3 = validate(c3);
     for (auto& e : errs3) CHECK(e.path != "link.txPowerDbm");
-}
-
-TEST_CASE("validate: dynamicLink.safe.bitrateKbps > 0") {
-    Config c{}; c.dynamicLink.safe.bitrateKbps = 0;
-    auto errs = validate(c);
-    REQUIRE(errs.size() == 1);
-    CHECK(errs[0].path == "dynamicLink.safe.bitrateKbps");
 }
 
 TEST_CASE("validate: dynamicLink.healthTimeoutMs >= 1000") {
@@ -309,13 +278,6 @@ TEST_CASE("validate: link.fec swfec rules") {
         c = {};
         c.link.fec.deadlineMs = 256;
         CHECK(hasErr(fpvd::validate(c), "link.fec.deadlineMs"));
-    }
-    SUBCASE("safe swfec ranges") {
-        c.dynamicLink.safe.overheadPct = -1;
-        CHECK(hasErr(fpvd::validate(c), "dynamicLink.safe.overheadPct"));
-        c.dynamicLink.safe = {};
-        c.dynamicLink.safe.deadlineMs = 300;
-        CHECK(hasErr(fpvd::validate(c), "dynamicLink.safe.deadlineMs"));
     }
     SUBCASE("valid swfec config passes") {
         c.link.fec.mode = "swfec";

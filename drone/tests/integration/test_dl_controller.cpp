@@ -1,5 +1,6 @@
 #include "doctest.h"
 #include "dynlink/controller.hpp"
+#include "dynlink/local_compute.hpp"
 #include "dynlink/runtime_config.hpp"
 #include "dynlink/wire.hpp"
 #include "translate/wfb_cmd.h"
@@ -231,9 +232,6 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     snap.ldpc                  = true;
     snap.linkBandwidth         = 40;        // A1: bandwidth from config, not wire
     snap.iface                 = "wlan-test-nonexistent";  // iw will fail, not hang
-    snap.safe = SafeDefaults{
-        /*mcs=*/1, /*k=*/8, /*n=*/12,
-        /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -270,12 +268,17 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     // Decision push preserved the configured radiotap flags (not hardcoded 0/false).
     CHECK(wfb.sawRadioFlags(/*stbc=*/1, /*ldpc=*/true));
 
-    // 2) Go silent past healthTimeoutMs -> watchdog trips -> safe-defaults push.
-    //    Safe radio uses operating linkBandwidth (40), not a separate safe.bandwidth.
+    // 2) Go silent past healthTimeoutMs -> watchdog trips -> failsafe derives at
+    //    MCS 0 (robust floor), bandwidth pinned to the operating width (40).
+    //    Mirror applyLocalCompute so the assertion tracks the math, not magic numbers.
+    Decision sf{};
+    sf.mcs = fpvd::dynlink::kDlFailsafeMcs;   // 0
+    sf.bandwidth = snap.linkBandwidth;        // 40 — never dropped on a trip
+    fpvd::dynlink::applyLocalCompute(snap, sf);   // fills k, n, bitrateKbps, txPowerDbm
     CHECK(waitFor([&] {
-        return wfb.sawFec(8, 12) &&
-               wfb.sawRadio(1, 40) &&
-               enc.sawContaining("video0.bitrate=2000");
+        return wfb.sawFec(sf.k, sf.n) &&
+               wfb.sawRadio(0, snap.linkBandwidth) &&
+               enc.sawContaining("video0.bitrate=" + std::to_string(sf.bitrateKbps));
     }, 2000));
     CHECK(waitFor([&] { return c.status().watchdogTripped == true; }, 1000));
     // Both the decision and the safe push carried stbc=1/ldpc=1 — the loop
@@ -313,7 +316,6 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{1, 8, 12, 2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -377,9 +379,6 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     snap.debug                 = false;
     snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
     snap.iface                 = "wlan-test-nonexistent";
-    snap.safe = SafeDefaults{
-        /*mcs=*/1, /*k=*/8, /*n=*/12,
-        /*bitrateKbps=*/2000};
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -405,24 +404,26 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     // Assert still running with original long timeout (watchdog won't trip yet)
     CHECK(c.status().running == true);
 
-    // Hot-reload: shorten watchdog timeout to 400 ms and change safe.mcs=5
+    // Hot-reload: shorten watchdog timeout to 400 ms.
+    // The reload proof is the timeout change itself (10000->400); the failsafe
+    // now derives at MCS 0 through applyLocalCompute, not a config block.
     DlRuntimeConfig snap2 = snap;
     snap2.healthTimeoutMs = 400;             // shorter -> will trip faster
-    snap2.safe.mcs = 5;                      // new safe mcs
 
     c.setConfig(snap2);
 
     // Assert still running (no restart)
     CHECK(c.status().running == true);
 
-    // After the reload, the watchdog should trip at ~400 ms (not 10000 ms),
-    // and the safe push must use mcs=5 (not the original mcs=1).
-    // The watchdog timeout is now 400 ms, tick = min(1000, 200) = 200 ms,
-    // so it should trip within ~400 + 200 ms = ~600 ms from last decision.
-    //
-    // Wait up to 2 s for safe FEC (8/12) and safe radio (mcs=5, bw=20).
+    // After the 400 ms reload trips the watchdog, the failsafe derives at MCS 0
+    // on the operating bandwidth (default 20). The trip happening within 2 s (vs
+    // the original 10000 ms timeout) is itself the proof the reload took effect.
+    Decision sf{};
+    sf.mcs = fpvd::dynlink::kDlFailsafeMcs;   // 0
+    sf.bandwidth = snap.linkBandwidth;        // 20
+    fpvd::dynlink::applyLocalCompute(snap, sf);
     CHECK(waitFor([&] {
-        return wfb.sawFec(8, 12) && wfb.sawRadio(5, 20);
+        return wfb.sawFec(sf.k, sf.n) && wfb.sawRadio(0, snap.linkBandwidth);
     }, 2000));
 
     // Confirm watchdog actually tripped in status
@@ -461,10 +462,6 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
     snap.swfec = true;
     snap.swfecOverheadPct = 50;
     snap.swfecDeadlineMs  = 30;
-    snap.safe = SafeDefaults{/*mcs=*/1, /*k=*/8, /*n=*/12,
-                             /*bitrateKbps=*/2000};
-    snap.safe.overheadPct = 100;            // trailing NSDMI fields, set by name
-    snap.safe.deadlineMs  = 35;
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -482,13 +479,80 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
         return wfb.sawFec(50, 30);
     }, 1000));
 
-    // Watchdog silence -> safe push uses safe.overheadPct/deadlineMs.
-    CHECK(waitFor([&] { return wfb.sawFec(100, 35); }, 2000));
+    // Watchdog silence -> failsafe derives at MCS 0 through applyLocalCompute.
+    // In swfec mode applyLocalCompute sets k=swfecOverheadPct/n=swfecDeadlineMs.
+    Decision sf{};
+    sf.mcs = fpvd::dynlink::kDlFailsafeMcs;
+    sf.bandwidth = snap.linkBandwidth;
+    fpvd::dynlink::applyLocalCompute(snap, sf);
+    // sawRadio(0, ...) is the discriminating proof that the watchdog trip fired
+    // (MCS 0 only appears in the failsafe, not the pre-trip decision push).
+    // sawFec(sf.k, sf.n): in swfec mode the failsafe derives k=swfecOverheadPct /
+    // n=swfecDeadlineMs via applyLocalCompute, which equals the steady decision's
+    // FEC (50/30) by design — so this confirms the value but not the re-emit alone.
+    CHECK(waitFor([&] { return wfb.sawFec(sf.k, sf.n) && wfb.sawRadio(0, snap.linkBandwidth); }, 2000));
     CHECK_FALSE(wfb.sawFec(8, 12));  // rs tuple must NOT be pushed in swfec mode
 
     // Neither the apply path nor the watchdog-safe path may emit a retired
     // (or otherwise unlisted) control command.
     CHECK(wfb.unknownCmds.load() == 0);
+
+    c.stop();
+}
+
+TEST_CASE("setConfig hot-reloads swfec overhead -> next decision re-emits FEC") {
+    FakeWfbTx wfb;
+    FakeEnc enc;
+
+    Endpoints ep;
+    ep.listenAddr = "127.0.0.1";
+    ep.listenPort = 45808;                 // distinct fixed test port
+    ep.wfbCtlAddr = "127.0.0.1";
+    ep.wfbCtlPort = wfb.port;
+    ep.encHost    = "127.0.0.1";
+    ep.encPort    = static_cast<uint16_t>(enc.port);
+    ep.gsTunnelPort = 0;
+    ep.osdUpdateIntervalMs = 1000;
+
+    DlRuntimeConfig snap{};
+    snap.healthTimeoutMs = 10000;          // long -> no trip during the test
+    snap.applyStaggerMs  = 0;
+    snap.applySubPaceMs  = 0;
+    snap.roiQp           = RoiCurve{6000, 2000, -24, 3};
+    snap.iface           = "wlan-test-nonexistent";
+    snap.swfec           = true;           // swfec: d.k=overheadPct, d.n=deadlineMs
+    snap.swfecOverheadPct = 50;
+    snap.swfecDeadlineMs  = 30;
+
+    DynamicLinkController c(ep);
+    c.start(snap);
+
+    auto mkDecision = [](uint32_t seq) {
+        Decision d{};
+        d.magic = kWireMagic; d.version = kWireVersion;
+        d.sequence = seq; d.timestampMs = 1;
+        d.mcs = 3; d.bandwidth = 20; d.txPowerDbm = 10;
+        d.k = 4; d.n = 6; d.bitrateKbps = 4000; d.fps = 60;
+        return d;
+    };
+
+    // First decision: swfec pushes overhead/deadline as k/n.
+    CHECK(waitFor([&] {
+        sendDecision(ep.listenPort, mkDecision(1));
+        return wfb.sawFec(50, 30);
+    }, 1000));
+
+    // Hot-reload a new overhead; the next (distinct-seq) decision must re-emit it.
+    DlRuntimeConfig snap2 = snap;
+    snap2.swfecOverheadPct = 70;
+    c.setConfig(snap2);
+
+    // sawFec(70, 30) is discriminating: overhead 70 cannot appear before setConfig
+    // (the initial snap uses overhead 50), so this proves the reload took effect.
+    CHECK(waitFor([&] {
+        sendDecision(ep.listenPort, mkDecision(2));
+        return wfb.sawFec(70, 30);
+    }, 1000));
 
     c.stop();
 }

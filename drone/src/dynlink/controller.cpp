@@ -200,31 +200,33 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
     lastTx_ = d;
 }
 
-// Port of dl_backend_tx_apply_safe: emit FEC + RADIO unconditionally, with
-// sub-pacing. The safe rung uses the operating linkBandwidth (never changes
-// bandwidth on a watchdog trip — that would drop the link).
-void DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
+// Derives a Decision at the robust MCS-0 floor (kDlFailsafeMcs) through the
+// same applyLocalCompute path as a normal decision (GS-decides-MCS,
+// drone-derives-the-rest). Bandwidth is pinned to the operating width — never
+// drop bandwidth on a watchdog trip.
+Decision DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
     useconds_t paceUs = static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
-    if (cfg.swfec) wfb_->setFec(cfg.safe.overheadPct, cfg.safe.deadlineMs);
-    else           wfb_->setFec(cfg.safe.k, cfg.safe.n);
+    Decision d{};
+    d.mcs       = kDlFailsafeMcs;
+    d.bandwidth = cfg.linkBandwidth;
+    applyLocalCompute(cfg, d);   // fills k, n, bitrateKbps, fps, txPowerDbm
+    wfb_->setFec(d.k, d.n);
     if (paceUs > 0) usleep(paceUs);
-    // Safe recovery drops mcs/fec but still preserves the configured stbc/ldpc
-    // (robustness coding is, if anything, helpful during recovery).
+    // Preserve the configured stbc/ldpc (robustness coding helps during recovery).
     wfb_->setRadio(/*stbc=*/static_cast<uint8_t>(cfg.stbc ? 1 : 0),
                    /*ldpc=*/cfg.ldpc, /*shortGi=*/false,
-                   /*bandwidth=*/cfg.linkBandwidth, /*mcs=*/cfg.safe.mcs,
+                   /*bandwidth=*/d.bandwidth, /*mcs=*/d.mcs,
                    /*vhtMode=*/false, /*vhtNss=*/1);
-    // Move the probe down with the video on a watchdog safe-recovery so it never
-    // sits above the (now reduced) video rung. Best-effort, like dispatchTxApply.
+    // Move the probe down with the video so it never sits above the safe rung.
     if (probeWfb_) {
-        int rung = probeRungFor(cfg.safe.mcs, cfg.probeMcsCeiling);
+        int rung = probeRungFor(d.mcs, cfg.probeMcsCeiling);
         probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc, false,
-                            cfg.linkBandwidth, static_cast<uint8_t>(rung), false, 1);
+                            d.bandwidth, static_cast<uint8_t>(rung), false, 1);
         lastProbeMcs_ = rung;
     }
-    // Safe recovery: drive power for the (low) safe rung unconditionally, matching
-    // the other safe sub-commands. Low MCS -> high power -> robust recovery.
-    if (radio_) radio_->applySafe(txpowerDbmForMcs(cfg.safe.mcs));
+    // Low MCS -> high power -> robust recovery (txPowerDbm == curve[0] from derive).
+    if (radio_) radio_->applySafe(d.txPowerDbm);
+    return d;
 }
 
 // ---- poll loop --------------------------------------------------------------
@@ -460,8 +462,8 @@ void DynamicLinkController::run(int evfd) {
                     if (gapFd >= 0) disarmGap(gapFd);
                     applyState = ApplyState::Idle;
                 }
-                dispatchTxSafe(cfg);
-                enc_->applySafe(cfg.safe.bitrateKbps);
+                Decision sf = dispatchTxSafe(cfg);
+                enc_->applySafe(sf.bitrateKbps);
                 if (osd_) osd_->eventWatchdog();
                 // Invalidate last-states so the next fresh decision emits
                 // everything; reset dedup so a restarted GS recovers.

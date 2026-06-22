@@ -7,15 +7,6 @@ namespace fpvd { struct Config; }
 
 namespace fpvd::dynlink {
 
-struct SafeDefaults {
-    uint8_t  mcs;
-    uint8_t  k;
-    uint8_t  n;
-    uint16_t bitrateKbps;
-    uint8_t  overheadPct{100};
-    uint8_t  deadlineMs{30};
-};
-
 struct BitrateEngineConfig {
     double baseRedundancyRatio{0.5};
     double blocksPerFrame{2.0};
@@ -36,7 +27,6 @@ struct DlRuntimeConfig {
     uint8_t  swfecDeadlineMs{30};
     bool     debug;
     RoiCurve     roiQp;
-    SafeDefaults safe;
     BitrateEngineConfig bitrate;
     // Static link radiotap flags the controller PRESERVES (never decides). The
     // GS never sends stbc/ldpc, so every CMD_SET_RADIO the loop emits carries

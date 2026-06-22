@@ -115,18 +115,6 @@ struct Recording {
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Recording, enabled, format, mode,
                                    maxSeconds, maxMB)
 
-struct DynamicLinkSafe {
-    int mcs{1};
-    int k{8};
-    int n{12};
-    int overheadPct{100};   // swfec-mode safe recovery: more repair at the low rung (0..255, uint8 wire)
-    int deadlineMs{30};     // 1..255 (uint8 wire)
-    int bitrateKbps{2000};
-};
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkSafe, mcs, k, n,
-                                               overheadPct, deadlineMs,
-                                               bitrateKbps)
-
 struct DynamicLinkRoiQp {
     int thresholdKbps{6000};
     int lowAnchorKbps{2000};
@@ -156,13 +144,12 @@ struct DynamicLink {
     int applyStaggerMs{50};
     int applySubPaceMs{5};
     DynamicLinkRoiQp  roiQp{};
-    DynamicLinkSafe   safe{};
     DynamicLinkCompute compute{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled,
                                                healthTimeoutMs, applyStaggerMs,
                                                applySubPaceMs,
-                                               roiQp, safe, compute)
+                                               roiQp, compute)
 
 // OSD overlay (msposd message file). Top-level: the OSD is rendered whether or
 // not the dynamic link is enabled, so its enable flag lives outside dynamicLink.

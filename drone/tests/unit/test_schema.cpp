@@ -25,7 +25,6 @@ TEST_CASE("schema: round-trip a minimal config through json") {
             "applyStaggerMs":50,"applySubPaceMs":5,
             "roiQp":{"thresholdKbps":6000,"lowAnchorKbps":2000,
                      "floor":-24,"step":3},
-            "safe":{"mcs":1,"k":8,"n":12,"overheadPct":100,"deadlineMs":30,"bitrateKbps":2000},
             "compute":{"minBitrateKbps":1000,"maxBitrateKbps":24000,"baseRedundancyRatio":0.5,"blocksPerFrame":2.0,"kMin":2,"kMax":50}
         },
         "services":{}
@@ -101,13 +100,11 @@ TEST_CASE("schema: service entry round-trips") {
 TEST_CASE("schema: dynamicLink round-trips through json") {
     fpvd::Config c{};
     c.dynamicLink.enabled = true;
-    c.dynamicLink.safe.mcs = 3;
     c.dynamicLink.roiQp.floor = -18;
     c.osd.enabled = false;
     json j = c;
     fpvd::Config c2 = j.get<fpvd::Config>();
     CHECK(c2.dynamicLink.enabled == true);
-    CHECK(c2.dynamicLink.safe.mcs == 3);
     CHECK(c2.dynamicLink.roiQp.floor == -18);
     CHECK(c2.osd.enabled == false);
     // unchanged defaults round-trip too
@@ -133,10 +130,6 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
     CHECK(c.dynamicLink.roiQp.lowAnchorKbps == 2000);
     CHECK(c.dynamicLink.roiQp.floor == -24);
     CHECK(c.dynamicLink.roiQp.step == 3);
-    CHECK(c.dynamicLink.safe.mcs == 1);
-    CHECK(c.dynamicLink.safe.k == 8);
-    CHECK(c.dynamicLink.safe.n == 12);
-    CHECK(c.dynamicLink.safe.bitrateKbps == 2000);
 }
 
 TEST_CASE("schema: beamforming defaults and round-trip") {
@@ -182,12 +175,6 @@ TEST_CASE("schema: legacy fec object without swfec keys parses with defaults") {
     CHECK(c.link.fec.mode == "swfec");
 }
 
-TEST_CASE("schema: dynamicLink.safe swfec keys default") {
-    fpvd::Config c{};
-    CHECK(c.dynamicLink.safe.overheadPct == 100);
-    CHECK(c.dynamicLink.safe.deadlineMs == 30);
-}
-
 TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") {
     using nlohmann::json;
     json j = json::parse(R"({
@@ -206,6 +193,5 @@ TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") 
     })");
     fpvd::Config c = j.get<fpvd::Config>();  // must not throw
     CHECK(c.dynamicLink.enabled == false);
-    CHECK(c.dynamicLink.safe.mcs == 1);
     CHECK(c.dynamicLink.healthTimeoutMs == 10000);
 }

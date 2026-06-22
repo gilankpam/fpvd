@@ -154,7 +154,7 @@ TEST_CASE("apply persists the FULL config, not a sparse overlay") {
     CHECK(written.contains("link"));
     CHECK(written.contains("video"));
     CHECK(written["dynamicLink"]["enabled"] == true);
-    CHECK(written["dynamicLink"].contains("safe"));
+    CHECK(written["dynamicLink"].contains("roiQp"));
     fs::remove_all(tmp);
 }
 
@@ -211,7 +211,7 @@ TEST_CASE("daemon: dl_applier never in orchestrator (DynamicLinkController is in
     fs::remove_all(tmp);
 }
 
-TEST_CASE("daemon: dynamicLink in restarted-list when safe.* changes while DL is enabled") {
+TEST_CASE("daemon: dynamicLink in restarted-list when healthTimeoutMs changes while DL is enabled") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-restarted";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
@@ -227,9 +227,9 @@ TEST_CASE("daemon: dynamicLink in restarted-list when safe.* changes while DL is
     d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})"));
     REQUIRE(d.apply(/*reallyRestart=*/false).ok);
 
-    // Now change a safe.* knob: dynamicLink should appear in restarted.
+    // Now change a DL knob: dynamicLink should appear in restarted.
     d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"safe":{"mcs":3}}})"));
+        R"({"dynamicLink":{"healthTimeoutMs":5000}})"));
     auto ar = d.apply(/*reallyRestart=*/false);
     REQUIRE(ar.ok);
     CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink")
@@ -238,7 +238,7 @@ TEST_CASE("daemon: dynamicLink in restarted-list when safe.* changes while DL is
     fs::remove_all(tmp);
 }
 
-TEST_CASE("daemon: dynamicLink NOT in restarted-list when safe.* changes while DL is disabled") {
+TEST_CASE("daemon: dynamicLink NOT in restarted-list when healthTimeoutMs changes while DL is disabled") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-not-restarted";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
@@ -250,9 +250,9 @@ TEST_CASE("daemon: dynamicLink NOT in restarted-list when safe.* changes while D
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
-    // DL stays disabled. Change a safe knob: dynamicLink should NOT be reported.
+    // DL stays disabled. Change a DL knob: dynamicLink should NOT be reported.
     d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"safe":{"mcs":3}}})"));
+        R"({"dynamicLink":{"healthTimeoutMs":5000}})"));
     auto ar = d.apply(/*reallyRestart=*/false);
     REQUIRE(ar.ok);
     CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink")
@@ -472,9 +472,9 @@ TEST_CASE("apply: dynamicLink knob change hot-reloads, no orchestrator rebuild")
     // Record orchestrator process identity before the knob change.
     auto namesBefore = d.orchestrator().names();
 
-    // Change a safe.* knob — a pure dynamicLink change.
+    // Change a dynamicLink knob (healthTimeoutMs) — a pure dynamicLink change.
     REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"safe":{"mcs":3}}})")).ok);
+        R"({"dynamicLink":{"healthTimeoutMs":5000}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
 

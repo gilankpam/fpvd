@@ -10,6 +10,7 @@
 #include "link_width.hpp"
 #include "probe/probe_specs.hpp"
 #include "probe/probe_constants.hpp"
+#include "dynlink/local_compute.hpp"
 #include <algorithm>
 #include <chrono>
 #include <ctime>
@@ -148,8 +149,7 @@ void Daemon::seedOrchestrator() {
     // controller retunes it live on each {mcs} (see DynamicLinkController).
     if (effective_.dynamicLink.enabled) {
         static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
-        const int probeMcs = std::min(effective_.dynamicLink.safe.mcs + 1,
-                                      kProbeMcsCeiling);
+        const int probeMcs = std::min(dynlink::kDlFailsafeMcs + 1, kProbeMcsCeiling);
         for (auto& s : buildProbeSpecs(effective_, iface, key, kProbeFeeder, probeMcs))
             orch_.add(std::move(s));
     }
@@ -251,8 +251,7 @@ void Daemon::startController() {
 void Daemon::addProbeStream() {
     const std::string iface = radio_.iface.empty() ? "wlan0" : radio_.iface;
     static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
-    const int probeMcs = std::min(effective_.dynamicLink.safe.mcs + 1,
-                                  kProbeMcsCeiling);
+    const int probeMcs = std::min(dynlink::kDlFailsafeMcs + 1, kProbeMcsCeiling);
     for (auto& s : buildProbeSpecs(effective_, iface, "/etc/drone.key",
                                    kProbeFeeder, probeMcs)) {
         const std::string name = s.name;
@@ -419,10 +418,11 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             removeProbeStream();   // targeted orch_.remove (no video bounce)
             restateStaticLink();   // revert radio + encoder to the static config
         }
-        else if (enabledOld && enabledNew && (subs.dynamicLink || link.videoRadiotap))
-            // A stbc/ldpc retune is the only videoRadiotap change reachable under
-            // DL (mcs/width/fec are locked), so refresh the controller snapshot;
-            // the loop restates the radio with its current mcs (see reconcile).
+        else if (enabledOld && enabledNew &&
+                 (subs.dynamicLink || link.videoRadiotap || link.videoFec))
+            // stbc/ldpc (videoRadiotap) and swfec overhead/deadline (videoFec) are
+            // static params the controller preserves; refresh its snapshot so the
+            // loop re-emits them on the next decision. mcs/width/rs-k/n stay locked.
             dl_.setConfig(dynlink::buildDlSnapshot(effective_, radio_.iface));
 
         // DL isn't feeding the OSD — (re)assert the system-stats base line so a
@@ -451,7 +451,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
                 return {false, {}, restarted, rr.stderrText, version_};
             }
         }
-        if (link.videoFec) {
+        if (link.videoFec && !enabledNew) {   // DL off: push directly; DL on: controller owns FEC (setConfig above)
             WfbControlClient cli("127.0.0.1", kVideoControlPort);
             const auto& f = effective_.link.fec;
             // swfec rides the same CMD_SET_FEC: k=overhead_pct, n=deadline_ms.

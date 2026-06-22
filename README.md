@@ -65,17 +65,18 @@ entirely by the fpvd config.
 **Locked fields.** While enabled, these fields are read-only via the
 API (`PATCH /config` returns `400 dynamic_link_locked`) because the
 controller mutates them at runtime: `link.mcs`, `link.txpower`,
-`link.fec`, `link.width`, `video.bitrate`, `video.qpDelta`,
-`video.roi`. To edit a baseline, disable `dynamicLink.enabled`, PATCH
-the field, then re-enable.
+`link.fec.k`/`link.fec.n`, `link.width`, `video.bitrate`,
+`video.qpDelta`, `video.roi`. Under the dynamic link `link.fec.mode`,
+`link.fec.overheadPct`, and `link.fec.deadlineMs` stay operator-tunable
+(only the rs block geometry is derived). To edit a locked baseline,
+disable `dynamicLink.enabled`, PATCH the field, then re-enable.
 
 **Hot-reloadable knobs (no bounce).** All `dynamicLink.*` knobs
-(`dynamicLink.safe`, `dynamicLink.roiQp`, timeouts, stagger/pacing,
-OSD toggle, etc.) and `link.mtu` apply live via `POST /apply` —
-re-snapshotting the in-process controller **without bouncing wfb or
-waybeam** (no video blackout). Toggling `dynamicLink.enabled` via
-`/apply` starts or stops the in-process loop without restarting the
-rest of the stack.
+(`dynamicLink.roiQp`, timeouts, stagger/pacing, OSD toggle, etc.) and
+`link.mtu` apply live via `POST /apply` — re-snapshotting the
+in-process controller **without bouncing wfb or waybeam** (no video
+blackout). Toggling `dynamicLink.enabled` via `/apply` starts or stops
+the in-process loop without restarting the rest of the stack.
 
 **Baseline video changes (brief bounce).** `video.fps` and other
 `video.*` baseline changes still trigger a full encoder rebuild (a
@@ -104,8 +105,9 @@ When `enabled` is false the block is `{"enabled":false,"running":false}`.
 Watchdog visibility is surfaced on the video OSD; there is no MAVLink
 status channel.
 
-Per-airframe failsafe ceilings live under `dynamicLink.safe` and the
-ROI-QP curve under `dynamicLink.roiQp`. See the design spec at
+The failsafe derives from MCS 0 with dynamic FEC on the operating
+bandwidth (no config block). The ROI-QP curve is configured under
+`dynamicLink.roiQp`. See the design spec at
 `docs/superpowers/specs/2026-05-27-dynamic-link-design.md` for the
 full list and the lock-rule semantics.
 
