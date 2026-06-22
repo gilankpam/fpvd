@@ -1,6 +1,5 @@
 #include "dynlink/runtime_config.hpp"
 #include "config/schema.hpp"
-#include "link_width.hpp"
 #include "probe/probe_constants.hpp"
 
 namespace fpvd::dynlink {
