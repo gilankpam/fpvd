@@ -3,6 +3,7 @@
 #include "dynlink/local_compute.hpp"
 #include "dynlink/runtime_config.hpp"
 #include "dynlink/wire.hpp"
+#include "link_width.hpp"
 #include "translate/wfb_cmd.h"
 
 #include <httplib.h>
@@ -242,7 +243,7 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     snap.roiQp = RoiCurve{6000, 2000, -24, 3};
     snap.stbc = true; // preserved on every setRadio (incl. safe)
     snap.ldpc = true;
-    snap.linkBandwidth = 40;              // A1: bandwidth from config, not wire
+    snap.linkWidthMhz = 40;               // A1: bandwidth from config, not wire
     snap.iface = "wlan-test-nonexistent"; // iw will fail, not hang
 
     DynamicLinkController c(ep);
@@ -260,7 +261,7 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     d.sequence = 100;
     d.timestampMs = 1;
     d.mcs = 7;
-    d.bandwidth = 20; // wire says 20; config (linkBandwidth=40) must win
+    d.bandwidth = 20; // wire says 20; config (linkWidthMhz=40) must win
     d.txPowerDbm = 10;
     d.k = 4;
     d.n = 6;
@@ -287,12 +288,13 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     //    MCS 0 (robust floor), bandwidth pinned to the operating width (40).
     //    Mirror applyLocalCompute so the assertion tracks the math, not magic numbers.
     Decision sf{};
-    sf.mcs = fpvd::dynlink::kDlFailsafeMcs;     // 0
-    sf.bandwidth = snap.linkBandwidth;          // 40 — never dropped on a trip
-    fpvd::dynlink::applyLocalCompute(snap, sf); // fills k, n, bitrateKbps, txPowerDbm
+    sf.mcs = fpvd::dynlink::kDlFailsafeMcs;                  // 0
+    sf.bandwidth = fpvd::modulationWidth(snap.linkWidthMhz); // 40 — never dropped on a trip
+    fpvd::dynlink::applyLocalCompute(snap, sf);              // fills k, n, bitrateKbps, txPowerDbm
     CHECK(waitFor(
         [&] {
-            return wfb.sawFec(sf.k, sf.n) && wfb.sawRadio(0, snap.linkBandwidth) &&
+            return wfb.sawFec(sf.k, sf.n) &&
+                   wfb.sawRadio(0, fpvd::modulationWidth(snap.linkWidthMhz)) &&
                    enc.sawContaining("video0.bitrate=" + std::to_string(sf.bitrateKbps));
         },
         2000));
@@ -459,11 +461,15 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     // on the operating bandwidth (default 20). The trip happening within 2 s (vs
     // the original 10000 ms timeout) is itself the proof the reload took effect.
     Decision sf{};
-    sf.mcs = fpvd::dynlink::kDlFailsafeMcs; // 0
-    sf.bandwidth = snap.linkBandwidth;      // 20
+    sf.mcs = fpvd::dynlink::kDlFailsafeMcs;                  // 0
+    sf.bandwidth = fpvd::modulationWidth(snap.linkWidthMhz); // 20
     fpvd::dynlink::applyLocalCompute(snap, sf);
-    CHECK(waitFor([&] { return wfb.sawFec(sf.k, sf.n) && wfb.sawRadio(0, snap.linkBandwidth); },
-                  2000));
+    CHECK(waitFor(
+        [&] {
+            return wfb.sawFec(sf.k, sf.n) &&
+                   wfb.sawRadio(0, fpvd::modulationWidth(snap.linkWidthMhz));
+        },
+        2000));
 
     // Confirm watchdog actually tripped in status
     CHECK(waitFor([&] { return c.status().watchdogTripped == true; }, 1000));
@@ -497,7 +503,7 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
     snap.roiQp = RoiCurve{6000, 2000, -24, 3};
     snap.stbc = true;
     snap.ldpc = true;
-    snap.linkBandwidth = 40;
+    snap.linkWidthMhz = 40;
     snap.iface = "wlan-test-nonexistent";
     snap.swfec = true;
     snap.swfecOverheadPct = 50;
@@ -532,15 +538,19 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
     // In swfec mode applyLocalCompute sets k=swfecOverheadPct/n=swfecDeadlineMs.
     Decision sf{};
     sf.mcs = fpvd::dynlink::kDlFailsafeMcs;
-    sf.bandwidth = snap.linkBandwidth;
+    sf.bandwidth = fpvd::modulationWidth(snap.linkWidthMhz);
     fpvd::dynlink::applyLocalCompute(snap, sf);
     // sawRadio(0, ...) is the discriminating proof that the watchdog trip fired
     // (MCS 0 only appears in the failsafe, not the pre-trip decision push).
     // sawFec(sf.k, sf.n): in swfec mode the failsafe derives k=swfecOverheadPct /
     // n=swfecDeadlineMs via applyLocalCompute, which equals the steady decision's
     // FEC (50/30) by design — so this confirms the value but not the re-emit alone.
-    CHECK(waitFor([&] { return wfb.sawFec(sf.k, sf.n) && wfb.sawRadio(0, snap.linkBandwidth); },
-                  2000));
+    CHECK(waitFor(
+        [&] {
+            return wfb.sawFec(sf.k, sf.n) &&
+                   wfb.sawRadio(0, fpvd::modulationWidth(snap.linkWidthMhz));
+        },
+        2000));
     CHECK_FALSE(wfb.sawFec(8, 12)); // rs tuple must NOT be pushed in swfec mode
 
     // Neither the apply path nor the watchdog-safe path may emit a retired

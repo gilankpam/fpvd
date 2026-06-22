@@ -33,7 +33,7 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface) {
 
     s.stbc = c.link.stbc;
     s.ldpc = c.link.ldpc;
-    s.linkBandwidth = static_cast<uint8_t>(modulationWidth(c.link.width));
+    s.linkWidthMhz = static_cast<uint8_t>(c.link.width);
     s.probeCtlPort = static_cast<uint16_t>(kProbeControlPort);
     s.probeMcsCeiling = kProbeMcsCeiling;
     s.iface = iface;

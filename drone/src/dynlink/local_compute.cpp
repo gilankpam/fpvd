@@ -12,7 +12,10 @@ void applyLocalCompute(const DlRuntimeConfig& cfg, Decision& d) {
     // The probe runs FEC-off at a fixed rate; its true on-air kbps.
     double probeKbps =
         static_cast<double>(fpvd::kProbePps) * fpvd::kProbePacketBytes * 8.0 / 1000.0;
-    double wireTarget = computeWireTargetKbps(d.bandwidth, d.mcs, cfg.probeMcsCeiling, probeKbps);
+    // Channel width (10/20/40) drives the rate table — NOT d.bandwidth, which is
+    // the modulation width (20 for a 10 MHz link) and would mis-bill 10 MHz as 20.
+    double wireTarget =
+        computeWireTargetKbps(cfg.linkWidthMhz, d.mcs, cfg.probeMcsCeiling, probeKbps);
     auto sat8 = [](int x) -> uint8_t {
         if (x < 0)
             x = 0;
