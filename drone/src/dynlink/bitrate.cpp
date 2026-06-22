@@ -9,8 +9,14 @@ uint32_t openIpcBaseRateKbps(int bandwidthMhz, int mcs) {
     // long. Index = MCS 0-7.
     static const uint32_t kRate20[8] = {6500, 12000, 15500, 20000, 25000, 42000, 47500, 55000};
     static const uint32_t kRate40[8] = {9800, 18600, 30400, 40200, 55800, 80400, 90200, 97000};
+    // 10 MHz is the 20 MHz channel with the baseband underclocked 2x, so the
+    // effective rate is ~half. Provisional (= kRate20/2, rounded to 250) pending
+    // a bench iperf sweep / the OpenIPC 10 MHz calculator row.
+    static const uint32_t kRate10[8] = {3250, 6000, 7750, 10000, 12500, 21000, 23750, 27500};
     if (mcs < 0 || mcs > 7)
         return 0;
+    if (bandwidthMhz == 10)
+        return kRate10[mcs];
     if (bandwidthMhz == 20)
         return kRate20[mcs];
     if (bandwidthMhz == 40)
