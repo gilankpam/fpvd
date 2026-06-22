@@ -185,6 +185,22 @@ def test_record_snr_evm_none_when_absent(tmp_path):
     assert rec["snr"] is None and rec["evm"] is None
 
 
+def test_record_carries_link_width(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.link_width = 10
+    p = Policy(cfg, _profile())
+    p.tick(_sig(-50.0))
+    p.close()
+    assert _records(tmp_path)[-1]["width"] == 10
+
+
+def test_record_link_width_defaults_to_20(tmp_path):
+    p = Policy(_cfg(tmp_path), _profile())
+    p.tick(_sig(-50.0))
+    p.close()
+    assert _records(tmp_path)[-1]["width"] == 20
+
+
 def test_record_carries_snr_norm_ceiling_knees(tmp_path):
     from fpvdgs.dynlink.signals import Signals
 

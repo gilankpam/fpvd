@@ -76,6 +76,7 @@ class PolicyConfig:
     selector: SelectorConfig = field(default_factory=SelectorConfig)
     learned_prior: LearnedPriorConfig = field(default_factory=LearnedPriorConfig)
     flightlog: FlightLogConfig = field(default_factory=FlightLogConfig)
+    link_width: int = 20  # channel width (10/20/40); logged per tick for analysis
 
 
 # ------------------------------------------------------------------
@@ -452,6 +453,7 @@ class Policy:
                 "evm_lo": signals.evm_lo_w,
                 "evm_min": signals.evm_min_w,
                 "mcs": new_mcs,
+                "width": self.cfg.link_width,
                 "reason": reason,
                 "residual_loss_w": signals.residual_loss_w,
                 "fec_work": signals.fec_work,

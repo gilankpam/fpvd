@@ -52,6 +52,7 @@ def build_policy_config(block: dict) -> PolicyConfig:
         selector=selector,
         learned_prior=learned_prior,
         flightlog=flightlog,
+        link_width=int(block.get("linkWidth", 20)),
     )
 
 

@@ -158,3 +158,11 @@ def test_radio_profile_is_not_a_known_dynamic_link_key():
     from fpvdgs.schema import DYNAMIC_LINK_KEYS
 
     assert "radioProfile" not in DYNAMIC_LINK_KEYS
+
+
+def test_link_width_maps_into_policy_config():
+    assert build_policy_config(_block(linkWidth=10)).link_width == 10
+
+
+def test_link_width_defaults_to_20_when_absent():
+    assert build_policy_config(_block()).link_width == 20
