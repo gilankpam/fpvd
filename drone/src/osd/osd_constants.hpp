@@ -5,7 +5,7 @@ namespace fpvd::osd {
 // The msposd overlay message file the drone writes. msposd reads it, overlays
 // it on the video, and substitutes its &-placeholders (&B bitrate+fps, &T/&W
 // temps, &C cpu%) at render time. Fixed path; the daemon owns the single writer.
-constexpr const char* kOsdMsgPath = "/tmp/MSPOSD.msg";
+inline constexpr const char* kOsdMsgPath = "/tmp/MSPOSD.msg";
 
 // ---- Per-line msposd directives --------------------------------------------
 // Every rendered line is prefixed "&L{color}{zone}&F{size} ". msposd colors and

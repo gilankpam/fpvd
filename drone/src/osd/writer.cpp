@@ -133,6 +133,8 @@ void OsdWriter::writeBaseLine(int bfCode) {
     lines.push_back(osdLine(kColWhite, kGlyphCpu, "&C"));
 
     statusLines_ = join(lines);
+    // Safe to clear unconditionally: the heartbeat only writes the base line
+    // while DL is stopped, and events are emitted only while DL runs.
     eventLine_.clear();
     flushLocked();
 }

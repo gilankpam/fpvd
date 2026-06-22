@@ -136,6 +136,8 @@ TEST_CASE("osd: event line is red, prepended, and cleared by writeStatus") {
     {
         std::string b = readFile(path);
         CHECK(b.find("&L20&F30 WATCHDOG safe_defaults") != std::string::npos); // red toast
+        // The toast is the first line of the file (prepended above any column).
+        CHECK(b.find("&L20&F30 WATCHDOG safe_defaults") == 0);
     }
 
     Decision d{};
