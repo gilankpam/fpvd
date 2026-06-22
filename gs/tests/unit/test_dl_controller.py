@@ -343,3 +343,59 @@ def test_publish_after_stop_is_safe_noop():
     bus.publish(DRONE_CONNECTED, {"state": "connected", "drone": {}})
     bus.publish(DRONE_DISCONNECTED, {"state": "disconnected", "reason": "tunnel_lost"})
     drone_sock.close()  # reaching here without an exception is the assertion
+
+
+def test_bind_calibration_applies_drone_curve_and_adapter():
+    from fpvdgs.dynlink.controller import DynamicLinkController
+
+    c = DynamicLinkController.__new__(DynamicLinkController)  # bypass thread setup
+
+    class _Agg:
+        def __init__(self):
+            self.rssi_norm = None
+            self.reset_called = False
+
+        def reset_smoothed_rssi(self):
+            self.reset_called = True
+
+    class _Policy:
+        def __init__(self):
+            self.bound = None
+
+        def bind_learned_prior(self, a):
+            self.bound = a
+
+    c._aggregator = _Agg()
+    c._policy = _Policy()
+
+    c._bind_calibration(
+        {"adapterId": "bl-m8812eu2", "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]}
+    )
+
+    assert c._aggregator.rssi_norm.enabled is True
+    assert c._aggregator.rssi_norm.tx_power_dbm_by_mcs == (29, 28, 25, 23, 19, 19, 19, 19)
+    assert c._aggregator.rssi_norm.p_ref_dbm == 29
+    assert c._aggregator.reset_called is True
+    assert c._policy.bound == "bl-m8812eu2"
+
+
+def test_bind_calibration_missing_curve_disables_normalization():
+    from fpvdgs.dynlink.controller import DynamicLinkController
+
+    c = DynamicLinkController.__new__(DynamicLinkController)
+
+    class _Agg:
+        rssi_norm = None
+
+        def reset_smoothed_rssi(self):
+            pass
+
+    class _Policy:
+        def bind_learned_prior(self, a):
+            raise AssertionError("must not rekey without a valid curve")
+
+    c._aggregator = _Agg()
+    c._policy = _Policy()
+
+    c._bind_calibration({"adapterId": "bl-m8812eu2", "txPowerCurve": None})
+    assert c._aggregator.rssi_norm.enabled is False

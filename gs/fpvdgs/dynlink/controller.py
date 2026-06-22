@@ -18,10 +18,20 @@ from ..events import DRONE_CONNECTED, DRONE_DISCONNECTED
 from .config_build import build_aggregator, build_policy_config
 from .policy import Policy
 from .return_link import ReturnLink
+from .signals import RssiNormConfig
 from .stats_client import RxEvent, SessionEvent, StatsClient
 from .wire import Encoder as WireEncoder
 
 log = logging.getLogger("fpvdgs.dynlink")
+
+
+def _valid_curve(curve) -> bool:
+    """A drone TX-power curve: a list/tuple of exactly 8 ints (not bools)."""
+    return (
+        isinstance(curve, (list, tuple))
+        and len(curve) == 8
+        and all(isinstance(v, int) and not isinstance(v, bool) for v in curve)
+    )
 
 
 class DynamicLinkController:
@@ -40,6 +50,8 @@ class DynamicLinkController:
         self._probe_status = probe_status
         self._bus = bus
         self._policy = None
+        self._aggregator = None
+        self._pending_cal = None
         self._lock = threading.RLock()
         self._lifecycle = threading.RLock()
         self._thread = None
@@ -129,11 +141,12 @@ class DynamicLinkController:
     async def _run(self):
         with self._lock:
             snap = dict(self._snapshot)
-        profile_name = str(snap.get("radioProfile") or "m8812eu2")
-        policy = Policy(build_policy_config(snap), profile_name, probe_status=self._probe_status)
+        policy = Policy(build_policy_config(snap), probe_status=self._probe_status)
         with self._lock:
             self._policy = policy
         aggregator = build_aggregator(snap)
+        with self._lock:
+            self._aggregator = aggregator
         return_link = ReturnLink(snap["droneAddr"], int(snap["dronePort"]))
         encoder = WireEncoder(seq=1)
 
@@ -176,6 +189,7 @@ class DynamicLinkController:
             return_link.close()
             with self._lock:
                 self._policy = None
+                self._aggregator = None
             self._set(running=False, statsConnected=False)
 
     # ---- connection-event subscribers (called on the monitor's thread) ----
@@ -190,6 +204,9 @@ class DynamicLinkController:
             pass  # loop tearing down
 
     def _on_drone_connected(self, payload):
+        radio = ((payload or {}).get("drone") or {}).get("radio")
+        with self._lock:
+            self._pending_cal = radio
         self._marshal(self._connected_inloop)
 
     def _on_drone_disconnected(self, payload):
@@ -199,9 +216,30 @@ class DynamicLinkController:
         p = self._policy
         if p is None:
             return
+        with self._lock:
+            radio = self._pending_cal
+        self._bind_calibration(radio)  # before warm-start so the prior is right
         p.reset_for_new_session()  # new session: re-warm-start, re-climb
         p.flightlog.begin_flight()  # start a fresh flight file
-        log.info("dynlink: drone connected — reset selector + began new flight")
+        log.info("dynlink: drone connected — bound calibration + began new flight")
+
+    def _bind_calibration(self, radio):
+        agg = self._aggregator
+        curve = (radio or {}).get("txPowerCurve")
+        adapter = (radio or {}).get("adapterId")
+        if not _valid_curve(curve) or not adapter:
+            if agg is not None:
+                agg.rssi_norm = RssiNormConfig(enabled=False)
+            log.warning("dynlink: drone supplied no txpower curve — RSSI normalization OFF")
+            return
+        curve = tuple(int(v) for v in curve)
+        if agg is not None:
+            agg.rssi_norm = RssiNormConfig(
+                enabled=True, p_ref_dbm=max(curve), tx_power_dbm_by_mcs=curve
+            )
+            agg.reset_smoothed_rssi()
+        self._policy.bind_learned_prior(str(adapter))
+        log.info("dynlink: bound drone calibration adapter=%s curve=%s", adapter, curve)
 
     def _disconnected_inloop(self):
         p = self._policy
