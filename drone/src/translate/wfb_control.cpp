@@ -2,13 +2,13 @@
 #include "translate/wfb_cmd.h"
 
 #include <arpa/inet.h>
+#include <cerrno>
+#include <cstddef>
+#include <cstring>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
-#include <cerrno>
-#include <cstddef>
-#include <cstring>
 
 namespace fpvd {
 
@@ -35,21 +35,24 @@ WfbControlClient::WfbControlClient(const std::string& addr, uint16_t port) {
     }
     timeval tv{};
     tv.tv_sec = 0;
-    tv.tv_usec = 500000;   // 500 ms
+    tv.tv_usec = 500000; // 500 ms
     ::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 }
 
 WfbControlClient::~WfbControlClient() {
-    if (fd_ >= 0) ::close(fd_);
+    if (fd_ >= 0)
+        ::close(fd_);
 }
 
-WfbCtlResult WfbControlClient::sendAndRecv(const void* req, size_t reqLen,
-                                           uint32_t reqId, const char* label) {
-    if (fd_ < 0) return {false, std::string(label) + ": " + openError_};
+WfbCtlResult WfbControlClient::sendAndRecv(const void* req, size_t reqLen, uint32_t reqId,
+                                           const char* label) {
+    if (fd_ < 0)
+        return {false, std::string(label) + ": " + openError_};
 
     // Drain stale replies left over from a prior timed-out request.
     WfbCmdResp scratch;
-    while (::recv(fd_, &scratch, sizeof(scratch), MSG_DONTWAIT) > 0) {}
+    while (::recv(fd_, &scratch, sizeof(scratch), MSG_DONTWAIT) > 0) {
+    }
 
     ssize_t nsent = ::send(fd_, req, reqLen, 0);
     if (nsent < 0 || static_cast<size_t>(nsent) != reqLen)
@@ -62,7 +65,8 @@ WfbCtlResult WfbControlClient::sendAndRecv(const void* req, size_t reqLen,
             return {false, std::string(label) + ": timeout"};
         if (static_cast<size_t>(nrecv) < offsetof(WfbCmdResp, u))
             return {false, std::string(label) + ": short reply"};
-        if (ntohl(resp.req_id) != reqId) continue;   // stale; keep waiting
+        if (ntohl(resp.req_id) != reqId)
+            continue; // stale; keep waiting
         uint32_t rc = ntohl(resp.rc);
         if (rc != 0)
             return {false, std::string(label) + ": rc=" + std::to_string(rc)};
@@ -70,9 +74,8 @@ WfbCtlResult WfbControlClient::sendAndRecv(const void* req, size_t reqLen,
     }
 }
 
-WfbCtlResult WfbControlClient::setRadio(uint8_t stbc, bool ldpc, bool shortGi,
-                                        uint8_t bandwidth, uint8_t mcs,
-                                        bool vhtMode, uint8_t vhtNss) {
+WfbCtlResult WfbControlClient::setRadio(uint8_t stbc, bool ldpc, bool shortGi, uint8_t bandwidth,
+                                        uint8_t mcs, bool vhtMode, uint8_t vhtNss) {
     uint32_t id = reqId_++;
     WfbCmdReq req{};
     req.req_id = htonl(id);
@@ -84,8 +87,7 @@ WfbCtlResult WfbControlClient::setRadio(uint8_t stbc, bool ldpc, bool shortGi,
     req.u.set_radio.mcs_index = mcs;
     req.u.set_radio.vht_mode = vhtMode;
     req.u.set_radio.vht_nss = vhtNss;
-    return sendAndRecv(&req, offsetof(WfbCmdReq, u) + sizeof(req.u.set_radio),
-                       id, "set_radio");
+    return sendAndRecv(&req, offsetof(WfbCmdReq, u) + sizeof(req.u.set_radio), id, "set_radio");
 }
 
 WfbCtlResult WfbControlClient::setFec(uint8_t k, uint8_t n) {
@@ -95,8 +97,7 @@ WfbCtlResult WfbControlClient::setFec(uint8_t k, uint8_t n) {
     req.cmd_id = kWfbCmdSetFec;
     req.u.set_fec.k = k;
     req.u.set_fec.n = n;
-    return sendAndRecv(&req, offsetof(WfbCmdReq, u) + sizeof(req.u.set_fec),
-                       id, "set_fec");
+    return sendAndRecv(&req, offsetof(WfbCmdReq, u) + sizeof(req.u.set_fec), id, "set_fec");
 }
 
 } // namespace fpvd

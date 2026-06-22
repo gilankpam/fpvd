@@ -13,13 +13,13 @@ using namespace fpvd::dynlink;
 
 TEST_CASE("v3 Decision encodes to 15 bytes and round-trips mcs/sequence/flags") {
     Decision d{};
-    d.flags    = 0x01;
+    d.flags = 0x01;
     d.sequence = 0xAABBCCDD;
-    d.mcs      = 5;
+    d.mcs = 5;
     uint8_t buf[64];
     size_t n = encodeDecision(d, buf, sizeof(buf));
     CHECK(n == 15);
-    CHECK(buf[4] == 3);            // version
+    CHECK(buf[4] == 3); // version
     Decision out{};
     CHECK(decodeDecision(buf, n, out) == DecodeResult::Ok);
     CHECK(out.version == 3);
@@ -34,23 +34,26 @@ TEST_CASE("v3 decode rejects a v2-sized/old-version buffer") {
     // before CRC is evaluated. The ordering is the wire contract.
     uint8_t buf[31] = {0};
     // write the DLK1 magic big-endian
-    buf[0] = 0x44; buf[1] = 0x4C; buf[2] = 0x4B; buf[3] = 0x31;
-    buf[4] = 2;  // version 2
+    buf[0] = 0x44;
+    buf[1] = 0x4C;
+    buf[2] = 0x4B;
+    buf[3] = 0x31;
+    buf[4] = 2; // version 2
     Decision out{};
     DecodeResult r = decodeDecision(buf, sizeof(buf), out);
     CHECK(r == DecodeResult::BadVersion);
 }
 
 TEST_CASE("wire: v3 protocol constants") {
-    CHECK(kWireVersion     == 3);
+    CHECK(kWireVersion == 3);
     CHECK(kWirePayloadSize == 11u);
-    CHECK(kWireOnWire      == 15u);
+    CHECK(kWireOnWire == 15u);
 }
 
 TEST_CASE("wire: v3 decision big-endian byte order") {
     Decision d{};
     d.sequence = 0x01020304u;
-    d.mcs      = 0xAB;
+    d.mcs = 0xAB;
 
     uint8_t buf[kWireOnWire];
     encodeDecision(d, buf, sizeof(buf));
@@ -74,8 +77,7 @@ TEST_CASE("wire: v3 decision big-endian byte order") {
 TEST_CASE("wire: decision rejects short buffer") {
     // Mirrors test_wire_rejects_short
     Decision r{};
-    CHECK(decodeDecision(reinterpret_cast<const uint8_t*>("short"), 5, r)
-          == DecodeResult::Short);
+    CHECK(decodeDecision(reinterpret_cast<const uint8_t*>("short"), 5, r) == DecodeResult::Short);
 }
 
 TEST_CASE("wire: decision rejects bad magic") {
@@ -93,7 +95,7 @@ TEST_CASE("wire: decision rejects bad version") {
     Decision d{};
     uint8_t buf[kWireOnWire];
     encodeDecision(d, buf, sizeof(buf));
-    buf[4] = 99;  // version byte
+    buf[4] = 99; // version byte
     Decision r{};
     CHECK(decodeDecision(buf, sizeof(buf), r) == DecodeResult::BadVersion);
 }
@@ -104,7 +106,7 @@ TEST_CASE("wire: decision rejects bad crc") {
     d.mcs = 5;
     uint8_t buf[kWireOnWire];
     encodeDecision(d, buf, sizeof(buf));
-    buf[10] ^= 0xFF;  // corrupt mcs payload byte; CRC no longer matches
+    buf[10] ^= 0xFF; // corrupt mcs payload byte; CRC no longer matches
     Decision r{};
     CHECK(decodeDecision(buf, sizeof(buf), r) == DecodeResult::BadCrc);
 }
@@ -134,8 +136,8 @@ TEST_CASE("wire: peekKind dispatches correctly") {
         CHECK(peekKind(dbuf, sizeof(dbuf)) == PacketKind::Decision);
     }
     {
-        uint8_t junk[8] = { 0xDE, 0xAD, 0xBE, 0xEF, 0, 0, 0, 0 };
+        uint8_t junk[8] = {0xDE, 0xAD, 0xBE, 0xEF, 0, 0, 0, 0};
         CHECK(peekKind(junk, sizeof(junk)) == PacketKind::Unknown);
-        CHECK(peekKind(junk, 2)            == PacketKind::Unknown);
+        CHECK(peekKind(junk, 2) == PacketKind::Unknown);
     }
 }

@@ -5,19 +5,32 @@ cross-device link orchestration moves to the client. Transport-free `handle()`."
 
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
-from .schema import SchemaError
 from .dynlink.config_build import make_dl_snapshot
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .probe.config_build import make_probe_snapshot
+from .schema import SchemaError
 
 
 class Api:
-    def __init__(self, store, schema, render_mod, runner, drone,
-                 status_fn, cfg_out, dynlink=None, pixelpilot=None, probe=None,
-                 retune=None, wlans_resolver=None, armer_tick=None,
-                 idr_relay=None):
+    def __init__(
+        self,
+        store,
+        schema,
+        render_mod,
+        runner,
+        drone,
+        status_fn,
+        cfg_out,
+        dynlink=None,
+        pixelpilot=None,
+        probe=None,
+        retune=None,
+        wlans_resolver=None,
+        armer_tick=None,
+        idr_relay=None,
+    ):
         self.store = store
         self.schema = schema
         self.render_mod = render_mod
@@ -57,8 +70,9 @@ class Api:
                 return self._apply_gs()
             if key == ("POST", "/gs/reset"):
                 self.store.reset()
-                self.render_mod.write_cfg(self.cfg_out,
-                                          self.render_mod.render_cfg(self.store.effective()))
+                self.render_mod.write_cfg(
+                    self.cfg_out, self.render_mod.render_cfg(self.store.effective())
+                )
                 self.runner.restart()
                 return 200, {"reset": True}
             if key == ("GET", "/gs/status"):
@@ -79,30 +93,32 @@ class Api:
         self.schema.validate_effective(pending)
 
         link_changed = pending.get("link") != effective.get("link")
-        wfb_changed = (self._without(pending, "dynamicLink", "pixelpilot",
-                                     "idrForward", "link")
-                       != self._without(effective, "dynamicLink", "pixelpilot",
-                                        "idrForward", "link"))
+        wfb_changed = self._without(
+            pending, "dynamicLink", "pixelpilot", "idrForward", "link"
+        ) != self._without(effective, "dynamicLink", "pixelpilot", "idrForward", "link")
 
         if link_changed or wfb_changed:
             # Render the cfg the runner reads on a (re)start, before applying.
-            self.render_mod.write_cfg(self.cfg_out,
-                                      self.render_mod.render_cfg(pending))
-            if not self._apply_link_local(effective.get("link", {}),
-                                          pending.get("link", {}),
-                                          force_bounce=wfb_changed):
-                self.render_mod.write_cfg(self.cfg_out,
-                                          self.render_mod.render_cfg(effective))
+            self.render_mod.write_cfg(self.cfg_out, self.render_mod.render_cfg(pending))
+            if not self._apply_link_local(
+                effective.get("link", {}), pending.get("link", {}), force_bounce=wfb_changed
+            ):
+                self.render_mod.write_cfg(self.cfg_out, self.render_mod.render_cfg(effective))
                 self.runner.restart()
-                return 500, {"applied": False,
-                             "error": "apply failed; rolled back to last-good cfg"}
+                return 500, {
+                    "applied": False,
+                    "error": "apply failed; rolled back to last-good cfg",
+                }
 
-        self._route_dynamic_link(effective.get("dynamicLink", {}),
-                                 pending.get("dynamicLink", {}), pending)
-        self._route_pixelpilot(effective.get("pixelpilot", {}),
-                               pending.get("pixelpilot", {}), pending)
-        self._route_idr_forward(effective.get("idrForward", {}),
-                                pending.get("idrForward", {}), pending)
+        self._route_dynamic_link(
+            effective.get("dynamicLink", {}), pending.get("dynamicLink", {}), pending
+        )
+        self._route_pixelpilot(
+            effective.get("pixelpilot", {}), pending.get("pixelpilot", {}), pending
+        )
+        self._route_idr_forward(
+            effective.get("idrForward", {}), pending.get("idrForward", {}), pending
+        )
         self.store.commit()
         if self.armer_tick is not None:
             self.armer_tick()
@@ -118,8 +134,9 @@ class Api:
         beamforming is reconciled by the armer, so it is excluded here."""
         if self.retune is None:
             return False
-        changed = {k for k in set(old) | set(new)
-                   if k != "beamforming" and old.get(k) != new.get(k)}
+        changed = {
+            k for k in set(old) | set(new) if k != "beamforming" and old.get(k) != new.get(k)
+        }
         if not changed <= {"channel", "width", "txPowerDbm", "region"}:
             return False
         return self._bw_class(old.get("width")) == self._bw_class(new.get("width"))
@@ -127,8 +144,10 @@ class Api:
     def _apply_link_local(self, old_link, new_link, force_bounce=False):
         """Apply the GS-local link delta: live retune when possible, else bounce.
         No drone push (client orchestrates). Returns True on success."""
-        non_bf_changed = any(k != "beamforming" and old_link.get(k) != new_link.get(k)
-                             for k in set(old_link) | set(new_link))
+        non_bf_changed = any(
+            k != "beamforming" and old_link.get(k) != new_link.get(k)
+            for k in set(old_link) | set(new_link)
+        )
         if not force_bounce and non_bf_changed and self._can_retune_live(old_link, new_link):
             if self.retune(new_link):
                 return True
@@ -191,13 +210,14 @@ class Api:
             self.pixelpilot.stop()
 
     def _proxy(self, method, path, body):
-        sub = path[len("/air"):]  # "/config", "/apply", "/status"
+        sub = path[len("/air") :]  # "/config", "/apply", "/status"
         endpoint_method = {"GET": "GET", "PATCH": "PATCH", "POST": "POST"}.get(method)
         if endpoint_method is None:
             return 405, {"error": "method not allowed"}
         try:
-            code, raw = self.drone._request(endpoint_method, sub,
-                                            self._json(body) if body else None)
+            code, raw = self.drone._request(
+                endpoint_method, sub, self._json(body) if body else None
+            )
             return code, json.loads(raw or b"{}")
         except Exception as e:
             return 502, {"error": f"drone unreachable: {e}"}

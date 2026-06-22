@@ -10,7 +10,7 @@
 #include <spawn.h>
 #include <sys/wait.h>
 
-extern char **environ;
+extern char** environ;
 
 namespace fpvd::dynlink {
 
@@ -18,13 +18,13 @@ int RadioTxpower::runIw(int8_t dBm) {
     char mBm_str[16];
     std::snprintf(mBm_str, sizeof(mBm_str), "%d", static_cast<int>(dBm) * 100);
 
-    char *const argv[] = {
-        const_cast<char *>("iw"),
-        const_cast<char *>("dev"),
-        const_cast<char *>(iface_.c_str()),
-        const_cast<char *>("set"),
-        const_cast<char *>("txpower"),
-        const_cast<char *>("fixed"),
+    char* const argv[] = {
+        const_cast<char*>("iw"),
+        const_cast<char*>("dev"),
+        const_cast<char*>(iface_.c_str()),
+        const_cast<char*>("set"),
+        const_cast<char*>("txpower"),
+        const_cast<char*>("fixed"),
         mBm_str,
         nullptr,
     };
@@ -49,7 +49,7 @@ int RadioTxpower::runIw(int8_t dBm) {
 
 int RadioTxpower::apply(int8_t dBm) {
     if (current_ && *current_ == dBm) {
-        return 0;  // unchanged — diff suppressed
+        return 0; // unchanged — diff suppressed
     }
     int rc = runIw(dBm);
     if (rc == 0) {

@@ -1,4 +1,5 @@
 """Tests for EIRP RSSI normalization math (GS RSSI-norm design §Approach)."""
+
 from __future__ import annotations
 
 from fpvdgs.dynlink.signals import RssiNormConfig, normalize_rssi

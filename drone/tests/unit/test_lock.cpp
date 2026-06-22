@@ -1,12 +1,14 @@
-#include "doctest.h"
 #include "config/lock.hpp"
+#include "doctest.h"
 #include <nlohmann/json.hpp>
 
-using fpvd::Config;
 using fpvd::checkDynamicLinkLock;
+using fpvd::Config;
 
 static Config dlOn() {
-    Config c{}; c.dynamicLink.enabled = true; return c;
+    Config c{};
+    c.dynamicLink.enabled = true;
+    return c;
 }
 
 TEST_CASE("lock: DL off → any path passes") {
@@ -56,8 +58,7 @@ TEST_CASE("lock: DL on + body writes link.channel → allowed (not locked)") {
 }
 
 TEST_CASE("lock: DL on + body writes dynamicLink.compute.baseRedundancyRatio → allowed") {
-    auto body = nlohmann::json::parse(
-        R"({"dynamicLink":{"compute":{"baseRedundancyRatio":0.6}}})");
+    auto body = nlohmann::json::parse(R"({"dynamicLink":{"compute":{"baseRedundancyRatio":0.6}}})");
     auto r = checkDynamicLinkLock(body, dlOn());
     CHECK(r.ok);
 }
@@ -67,8 +68,7 @@ TEST_CASE("lock: pending evaluated post-merge — body disables DL and writes lo
     // The caller must pre-compute the merged pending: in this case DL is off
     // after the merge, so the lock is open.
     Config mergedAfterPatch{}; // DL off (default)
-    auto body = nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":false},"link":{"mcs":5}})");
+    auto body = nlohmann::json::parse(R"({"dynamicLink":{"enabled":false},"link":{"mcs":5}})");
     auto r = checkDynamicLinkLock(body, mergedAfterPatch);
     CHECK(r.ok);
 }
@@ -76,8 +76,7 @@ TEST_CASE("lock: pending evaluated post-merge — body disables DL and writes lo
 TEST_CASE("lock: body enables DL and writes locked key → rejected") {
     // Merged pending has enabled=true; body wrote link.mcs in the same op.
     Config merged = dlOn();
-    auto body = nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":true},"link":{"mcs":5}})");
+    auto body = nlohmann::json::parse(R"({"dynamicLink":{"enabled":true},"link":{"mcs":5}})");
     auto r = checkDynamicLinkLock(body, merged);
     CHECK_FALSE(r.ok);
     REQUIRE(r.lockedPaths.size() == 1);
@@ -85,8 +84,7 @@ TEST_CASE("lock: body enables DL and writes locked key → rejected") {
 }
 
 TEST_CASE("lock: multiple locked paths reported together") {
-    auto body = nlohmann::json::parse(
-        R"({"link":{"mcs":5,"width":40},"video":{"bitrate":1000}})");
+    auto body = nlohmann::json::parse(R"({"link":{"mcs":5,"width":40},"video":{"bitrate":1000}})");
     auto r = checkDynamicLinkLock(body, dlOn());
     CHECK_FALSE(r.ok);
     CHECK(r.lockedPaths.size() == 3);

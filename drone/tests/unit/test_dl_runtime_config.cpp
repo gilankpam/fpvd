@@ -1,51 +1,53 @@
 /* test_dl_runtime_config.cpp — unit tests for buildDlSnapshot */
+#include "config/schema.hpp"
 #include "doctest.h"
 #include "dynlink/runtime_config.hpp"
-#include "config/schema.hpp"
 using namespace fpvd;
 using namespace fpvd::dynlink;
 
 TEST_CASE("buildDlSnapshot maps schema + derived inputs") {
-    Config c{};                       // defaults
-    c.link.mtu = 1400; c.video.fps = 90;
-    c.link.stbc = false; c.link.ldpc = true;   // preserved through, not DL-decided
+    Config c{}; // defaults
+    c.link.mtu = 1400;
+    c.video.fps = 90;
+    c.link.stbc = false;
+    c.link.ldpc = true; // preserved through, not DL-decided
     c.dynamicLink.healthTimeoutMs = 8000;
     auto s = buildDlSnapshot(c, "wlan1");
     CHECK(s.iface == "wlan1");
     CHECK(s.stbc == false);
     CHECK(s.ldpc == true);
     CHECK(s.healthTimeoutMs == 8000);
-    CHECK(s.roiQp.thresholdKbps == 6000);   // default carried through
+    CHECK(s.roiQp.thresholdKbps == 6000); // default carried through
 }
 
 TEST_CASE("buildDlSnapshot maps all DynamicLink fields") {
     Config c{};
-    c.dynamicLink.healthTimeoutMs    = 5000;
-    c.dynamicLink.applyStaggerMs     = 25;
-    c.dynamicLink.applySubPaceMs     = 10;
+    c.dynamicLink.healthTimeoutMs = 5000;
+    c.dynamicLink.applyStaggerMs = 25;
+    c.dynamicLink.applySubPaceMs = 10;
 
     auto s = buildDlSnapshot(c, "wlan0");
 
-    CHECK(s.healthTimeoutMs     == 5000u);
-    CHECK(s.applyStaggerMs      == 25u);
-    CHECK(s.applySubPaceMs      == 10u);
+    CHECK(s.healthTimeoutMs == 5000u);
+    CHECK(s.applyStaggerMs == 25u);
+    CHECK(s.applySubPaceMs == 10u);
     // debug field is absent from schema — must default to false
-    CHECK(s.debug               == false);
+    CHECK(s.debug == false);
 }
 
 TEST_CASE("buildDlSnapshot maps roiQp curve correctly") {
     Config c{};
     c.dynamicLink.roiQp.thresholdKbps = 8000;
     c.dynamicLink.roiQp.lowAnchorKbps = 3000;
-    c.dynamicLink.roiQp.floor         = -18;
-    c.dynamicLink.roiQp.step          = 2;
+    c.dynamicLink.roiQp.floor = -18;
+    c.dynamicLink.roiQp.step = 2;
 
     auto s = buildDlSnapshot(c, "wlan0");
 
     CHECK(s.roiQp.thresholdKbps == 8000u);
     CHECK(s.roiQp.lowAnchorKbps == 3000u);
-    CHECK(s.roiQp.floor         == -18);
-    CHECK(s.roiQp.step          == 2u);
+    CHECK(s.roiQp.floor == -18);
+    CHECK(s.roiQp.step == 2u);
 }
 
 TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
@@ -53,31 +55,31 @@ TEST_CASE("buildDlSnapshot default Config produces correct defaults") {
     auto s = buildDlSnapshot(c, "wlan2");
 
     // DynamicLink defaults from schema
-    CHECK(s.healthTimeoutMs      == 10000u);
-    CHECK(s.applyStaggerMs       == 50u);
-    CHECK(s.applySubPaceMs       == 5u);
-    CHECK(s.debug                == false);
+    CHECK(s.healthTimeoutMs == 10000u);
+    CHECK(s.applyStaggerMs == 50u);
+    CHECK(s.applySubPaceMs == 5u);
+    CHECK(s.debug == false);
 
     // Link/video defaults
-    CHECK(s.stbc          == true);   // link defaults now enable stbc/ldpc
-    CHECK(s.ldpc          == true);
-    CHECK(s.iface         == "wlan2");
+    CHECK(s.stbc == true); // link defaults now enable stbc/ldpc
+    CHECK(s.ldpc == true);
+    CHECK(s.iface == "wlan2");
 
     // RoiQp defaults
     CHECK(s.roiQp.thresholdKbps == 6000u);
     CHECK(s.roiQp.lowAnchorKbps == 2000u);
-    CHECK(s.roiQp.floor         == -24);
-    CHECK(s.roiQp.step          == 3u);
+    CHECK(s.roiQp.floor == -24);
+    CHECK(s.roiQp.step == 3u);
 }
 
 TEST_CASE("buildDlSnapshot maps the Phase-3a bitrate-engine knobs") {
     fpvd::Config c{};
-    c.link.mtu  = 1400;
+    c.link.mtu = 1400;
     c.video.fps = 90;
     c.dynamicLink.compute.minBitrateKbps = 1500;
     c.dynamicLink.compute.maxBitrateKbps = 20000;
     c.dynamicLink.compute.baseRedundancyRatio = 0.5;
-    c.dynamicLink.compute.blocksPerFrame      = 2.0;
+    c.dynamicLink.compute.blocksPerFrame = 2.0;
     c.dynamicLink.compute.kMin = 3;
     c.dynamicLink.compute.kMax = 40;
 
@@ -120,24 +122,24 @@ TEST_CASE("buildDlSnapshot: swfec fields from link.fec") {
 
 TEST_CASE("buildDlSnapshot: rs mode -> swfec false") {
     fpvd::Config c{};
-    c.link.fec.mode = "rs";  // default is now swfec; set rs explicitly to exercise the rs path
+    c.link.fec.mode = "rs"; // default is now swfec; set rs explicitly to exercise the rs path
     auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
     CHECK_FALSE(s.swfec);
 }
 
 TEST_CASE("buildDlSnapshot maps dynamicLink.compute -> BitrateEngineConfig") {
     Config c{};
-    c.dynamicLink.compute.minBitrateKbps      = 1500;
-    c.dynamicLink.compute.maxBitrateKbps      = 20000;
+    c.dynamicLink.compute.minBitrateKbps = 1500;
+    c.dynamicLink.compute.maxBitrateKbps = 20000;
     c.dynamicLink.compute.baseRedundancyRatio = 0.4;
-    c.dynamicLink.compute.blocksPerFrame      = 3.0;
-    c.dynamicLink.compute.kMin                = 4;
-    c.dynamicLink.compute.kMax                = 40;
+    c.dynamicLink.compute.blocksPerFrame = 3.0;
+    c.dynamicLink.compute.kMin = 4;
+    c.dynamicLink.compute.kMax = 40;
     auto s = buildDlSnapshot(c, "wlan0");
-    CHECK(s.bitrate.minBitrateKbps     == 1500);
-    CHECK(s.bitrate.maxBitrateKbps     == 20000);
+    CHECK(s.bitrate.minBitrateKbps == 1500);
+    CHECK(s.bitrate.maxBitrateKbps == 20000);
     CHECK(s.bitrate.baseRedundancyRatio == doctest::Approx(0.4));
-    CHECK(s.bitrate.blocksPerFrame     == doctest::Approx(3.0));
-    CHECK(s.bitrate.kMin               == 4);
-    CHECK(s.bitrate.kMax               == 40);
+    CHECK(s.bitrate.blocksPerFrame == doctest::Approx(3.0));
+    CHECK(s.bitrate.kMin == 4);
+    CHECK(s.bitrate.kMax == 40);
 }

@@ -21,15 +21,13 @@ struct SupervisedSpec {
 };
 
 class Supervisor {
-public:
-    Supervisor(SupervisedSpec spec,
-                int backoffStartMs = 1000,
-                int failureCap = 5,
-                std::chrono::seconds failureWindow = std::chrono::seconds(60));
+  public:
+    Supervisor(SupervisedSpec spec, int backoffStartMs = 1000, int failureCap = 5,
+               std::chrono::seconds failureWindow = std::chrono::seconds(60));
     ~Supervisor();
 
-    void start();             // Begin supervision loop in background thread.
-    void shutdown();          // Stop child and join thread.
+    void start();    // Begin supervision loop in background thread.
+    void shutdown(); // Stop child and join thread.
 
     const std::string& name() const { return spec_.name; }
     ProcState state() const { return state_.load(); }
@@ -37,7 +35,7 @@ public:
     std::optional<int> lastExitCode() const;
     pid_t pid() const;
 
-private:
+  private:
     void loop();
 
     SupervisedSpec spec_;

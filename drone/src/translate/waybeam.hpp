@@ -1,7 +1,7 @@
 #pragma once
 #include "config/schema.hpp"
-#include <nlohmann/json.hpp>
 #include <map>
+#include <nlohmann/json.hpp>
 #include <string>
 
 namespace fpvd {
@@ -24,7 +24,6 @@ struct WaybeamFieldDiff {
 // emitted (retired in waybeam — hardcoded H.265). When `dlEnabled`, the
 // dynamic-link-owned fields (video.bitrate, video.qpDelta, video.roi.*,
 // video.fps) are omitted: the dynamic-link controller is their sole writer.
-WaybeamFieldDiff waybeamConfigDiff(const Config& oldc, const Config& newc,
-                                   bool dlEnabled);
+WaybeamFieldDiff waybeamConfigDiff(const Config& oldc, const Config& newc, bool dlEnabled);
 
 } // namespace fpvd

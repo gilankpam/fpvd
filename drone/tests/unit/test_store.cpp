@@ -1,17 +1,16 @@
-#include "doctest.h"
 #include "config/store.hpp"
-#include <nlohmann/json.hpp>
+#include "doctest.h"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <nlohmann/json.hpp>
 namespace fs = std::filesystem;
 
 using fpvd::Config;
 
-
 TEST_CASE("loadEffective: no file yields code defaults") {
     Config c = fpvd::loadEffective("/no/such/config.json");
-    CHECK(c.dynamicLink.healthTimeoutMs == 10000);   // schema default
+    CHECK(c.dynamicLink.healthTimeoutMs == 10000); // schema default
     CHECK(c.link.width == 20);
 }
 
@@ -19,14 +18,13 @@ TEST_CASE("loadEffective: present key overrides, missing key defaults") {
     auto tmp = std::filesystem::temp_directory_path() / "fpvd-cfg-load.json";
     std::ofstream(tmp) << R"({"dynamicLink":{"healthTimeoutMs":7000}})";
     Config c = fpvd::loadEffective(tmp.string());
-    CHECK(c.dynamicLink.healthTimeoutMs == 7000);    // from file
-    CHECK(c.dynamicLink.applyStaggerMs == 50);       // missing -> default
+    CHECK(c.dynamicLink.healthTimeoutMs == 7000); // from file
+    CHECK(c.dynamicLink.applyStaggerMs == 50);    // missing -> default
     std::filesystem::remove(tmp);
 }
 
 TEST_CASE("loadEffective: malformed config throws") {
-    CHECK_THROWS_AS(fpvd::loadEffective("tests/fixtures/malformed.json"),
-                    fpvd::StoreError);
+    CHECK_THROWS_AS(fpvd::loadEffective("tests/fixtures/malformed.json"), fpvd::StoreError);
 }
 
 TEST_CASE("unknownConfigKeys flags strays but not services entries") {

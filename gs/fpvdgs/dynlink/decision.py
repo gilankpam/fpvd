@@ -1,4 +1,5 @@
 """Decision record emitted by the policy engine on every tick."""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -13,6 +14,7 @@ class Decision:
     bitrate / FEC / depth / tx_power locally. `reason` and
     `signals_snapshot` are kept for telemetry / status, not the wire.
     """
+
     timestamp: float
     mcs: int
     reason: str = ""

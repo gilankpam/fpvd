@@ -1,4 +1,4 @@
-from fpvdgs.events import EventBus, DRONE_CONNECTED, DRONE_DISCONNECTED
+from fpvdgs.events import DRONE_CONNECTED, DRONE_DISCONNECTED, EventBus
 
 
 def test_subscribe_receives_published_payload():
@@ -43,7 +43,7 @@ def test_subscriber_exception_is_isolated():
 
     bus.subscribe("e", bad)
     bus.subscribe("e", good)
-    bus.publish("e", {"n": 1})       # bad raises; good must still run
+    bus.publish("e", {"n": 1})  # bad raises; good must still run
     assert got == [{"n": 1}]
 
 
@@ -69,5 +69,5 @@ def test_state_returns_independent_copy():
     bus = EventBus()
     bus.publish(DRONE_CONNECTED, {"state": "connected"})
     got = bus.state("drone")
-    got["state"] = "mutated"               # callers must not be able to corrupt the cache
+    got["state"] = "mutated"  # callers must not be able to corrupt the cache
     assert bus.state("drone")["state"] == "connected"

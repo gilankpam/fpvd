@@ -3,12 +3,9 @@
 
 namespace fpvd::dynlink {
 
-Watchdog::Watchdog(uint32_t timeoutMs)
-    : timeoutMs_(timeoutMs) {}
+Watchdog::Watchdog(uint32_t timeoutMs) : timeoutMs_(timeoutMs) {}
 
-void Watchdog::setTimeout(uint32_t timeoutMs) {
-    timeoutMs_ = timeoutMs;
-}
+void Watchdog::setTimeout(uint32_t timeoutMs) { timeoutMs_ = timeoutMs; }
 
 void Watchdog::notifyDecision(uint64_t nowMs) {
     lastDecisionMs_ = nowMs;
@@ -17,10 +14,11 @@ void Watchdog::notifyDecision(uint64_t nowMs) {
 }
 
 bool Watchdog::tick(uint64_t nowMs) {
-    if (!everSeen_) return false;  /* no reference point yet */
-    if (tripped_) return false;
-    if (nowMs >= lastDecisionMs_ &&
-        (nowMs - lastDecisionMs_) >= timeoutMs_) {
+    if (!everSeen_)
+        return false; /* no reference point yet */
+    if (tripped_)
+        return false;
+    if (nowMs >= lastDecisionMs_ && (nowMs - lastDecisionMs_) >= timeoutMs_) {
         tripped_ = true;
         return true;
     }

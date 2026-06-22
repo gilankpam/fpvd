@@ -4,29 +4,29 @@
 
 namespace fpvd {
 
-Supervisor::Supervisor(SupervisedSpec spec, int backoffStartMs,
-                        int failureCap, std::chrono::seconds failureWindow)
-    : spec_(std::move(spec)), backoffStartMs_(backoffStartMs),
-      failureCap_(failureCap), failureWindow_(failureWindow) {}
+Supervisor::Supervisor(SupervisedSpec spec, int backoffStartMs, int failureCap,
+                       std::chrono::seconds failureWindow)
+    : spec_(std::move(spec)), backoffStartMs_(backoffStartMs), failureCap_(failureCap),
+      failureWindow_(failureWindow) {}
 
 Supervisor::~Supervisor() { shutdown(); }
 
 void Supervisor::start() {
     stopFlag_.store(false);
-    thr_ = std::thread([this]{ loop(); });
+    thr_ = std::thread([this] { loop(); });
 }
 
 void Supervisor::shutdown() {
-    if (!thr_.joinable()) return;
+    if (!thr_.joinable())
+        return;
     stopFlag_.store(true);
-    if (proc_) proc_->stop(std::chrono::seconds(5));
+    if (proc_)
+        proc_->stop(std::chrono::seconds(5));
     thr_.join();
     state_.store(ProcState::Stopped);
 }
 
-pid_t Supervisor::pid() const {
-    return proc_ ? proc_->pid() : -1;
-}
+pid_t Supervisor::pid() const { return proc_ ? proc_->pid() : -1; }
 std::optional<int> Supervisor::lastExitCode() const {
     return proc_ ? proc_->lastExitCode() : std::nullopt;
 }
@@ -45,28 +45,27 @@ void Supervisor::loop() {
         auto startedAt = std::chrono::steady_clock::now();
         // Poll until exit or shutdown.
         while (!stopFlag_.load()) {
-            if (proc_->reapIfReady()) break;
+            if (proc_->reapIfReady())
+                break;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        if (stopFlag_.load()) return;
+        if (stopFlag_.load())
+            return;
         auto exitedAt = std::chrono::steady_clock::now();
-        auto uptime = std::chrono::duration_cast<std::chrono::seconds>(
-            exitedAt - startedAt);
+        auto uptime = std::chrono::duration_cast<std::chrono::seconds>(exitedAt - startedAt);
 
         if (spec_.restart == RestartPolicy::Never) {
             state_.store(ProcState::Exited);
             return;
         }
-        if (spec_.restart == RestartPolicy::OnFailure
-            && proc_->lastExitCode().value_or(1) == 0) {
+        if (spec_.restart == RestartPolicy::OnFailure && proc_->lastExitCode().value_or(1) == 0) {
             state_.store(ProcState::Exited);
             return;
         }
 
         // Record failure; trim outside window.
         recentFailures.push_back(exitedAt);
-        while (!recentFailures.empty() &&
-               (exitedAt - recentFailures.front()) > failureWindow_) {
+        while (!recentFailures.empty() && (exitedAt - recentFailures.front()) > failureWindow_) {
             recentFailures.pop_front();
         }
         restarts_.fetch_add(1);
@@ -83,10 +82,8 @@ void Supervisor::loop() {
             backoffMs = std::min(backoffMs * 2, 30000);
         }
         // Sleep in small chunks so shutdown is responsive.
-        auto wakeAt = std::chrono::steady_clock::now()
-                      + std::chrono::milliseconds(backoffMs);
-        while (!stopFlag_.load()
-               && std::chrono::steady_clock::now() < wakeAt) {
+        auto wakeAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(backoffMs);
+        while (!stopFlag_.load() && std::chrono::steady_clock::now() < wakeAt) {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
     }

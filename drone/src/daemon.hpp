@@ -8,9 +8,9 @@
 #include "idr/relay.hpp"
 #include "osd/osd_constants.hpp"
 #include "osd/writer.hpp"
-#include "waybeam/client.hpp"
-#include "supervise/orchestrator.hpp"
 #include "supervise/beamforming.hpp"
+#include "supervise/orchestrator.hpp"
+#include "waybeam/client.hpp"
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -22,11 +22,11 @@
 namespace fpvd {
 
 struct DaemonPaths {
-    std::string configPath;      // /etc/fpvd/config.json (the full config)
-    std::string radioUpScript;   // /usr/libexec/fpvd/radio-up.sh
-    std::string waybeamJsonPath; // /etc/waybeam.json
-    std::string radioTuneScript{}; // /usr/libexec/fpvd/radio-tune.sh (optional)
-    dynlink::Endpoints dlEndpoints{};  // defaults to production endpoints; overridable in tests
+    std::string configPath;           // /etc/fpvd/config.json (the full config)
+    std::string radioUpScript;        // /usr/libexec/fpvd/radio-up.sh
+    std::string waybeamJsonPath;      // /etc/waybeam.json
+    std::string radioTuneScript{};    // /usr/libexec/fpvd/radio-tune.sh (optional)
+    dynlink::Endpoints dlEndpoints{}; // defaults to production endpoints; overridable in tests
     // UDP port for the always-on IDR relay (GS tunnel -> drone). Not operator
     // config — a fixed transport constant; this field exists only so tests can
     // pick an ephemeral port or disable it (0). Production uses idr::kIdrPort.
@@ -44,7 +44,7 @@ struct DaemonPaths {
 struct PatchResult {
     bool ok{true};
     std::vector<ValidationError> errors;
-    std::vector<std::string> lockedPaths;  // non-empty => 400 dynamic_link_locked
+    std::vector<std::string> lockedPaths; // non-empty => 400 dynamic_link_locked
 };
 
 struct ApplyResult {
@@ -56,7 +56,7 @@ struct ApplyResult {
 };
 
 struct LastApply {
-    std::string at;                  // ISO8601 timestamp
+    std::string at; // ISO8601 timestamp
     bool ok{false};
     std::vector<std::string> restarted;
     std::optional<std::string> error;
@@ -69,7 +69,7 @@ struct RadioInfo {
 };
 
 class Daemon {
-public:
+  public:
     explicit Daemon(DaemonPaths paths);
     ~Daemon();
 
@@ -96,9 +96,9 @@ public:
     void reset();
 
     Orchestrator& orchestrator() { return orch_; }
-    nlohmann::json defaultsJson();   // returns the code-default config (Config{})
+    nlohmann::json defaultsJson(); // returns the code-default config (Config{})
 
-private:
+  private:
     void seedOrchestrator();
     // Targeted add/remove of the observe-only probe pair (probe-tx + probe-feed)
     // on the live dynamicLink on<->off transition — never bounces wfb/video.
@@ -135,7 +135,7 @@ private:
     int version_{0};
     LastApply lastApply_;
     RadioInfo radio_;
-    WaybeamClient waybeam_;   // declared before dl_/orch_/idrRelay_ for init order
+    WaybeamClient waybeam_; // declared before dl_/orch_/idrRelay_ for init order
     // Always-on IDR keyframe relay: shares waybeam_ (thread-safe), runs whether
     // dynamicLink is enabled or not. Declared after waybeam_ so it outlives it.
     idr::IdrRelay idrRelay_;

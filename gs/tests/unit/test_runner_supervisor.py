@@ -12,6 +12,7 @@ def test_resolve_wlans_explicit_list():
 
 def test_resolve_wlans_auto_uses_wfb_nics(monkeypatch):
     import fpvdgs.runner_supervisor as rs
+
     monkeypatch.setattr(rs, "_wfb_nics", lambda: ["wlxAAA", "wlxBBB"])
     assert resolve_wlans({"link": {"wlans": "auto"}}) == ["wlxAAA", "wlxBBB"]
 
@@ -35,9 +36,17 @@ def _listener_cmd(port):
 
 
 def _mk(port, **kw):
-    return RunnerSupervisor(_listener_cmd(port), cfg_out="/tmp/ignored.cfg",
-                            profile="gs", wlans=["wlan0"], ready_port=port,
-                            ready_timeout=5.0, poll_interval=0.05, backoff=0.05, **kw)
+    return RunnerSupervisor(
+        _listener_cmd(port),
+        cfg_out="/tmp/ignored.cfg",
+        profile="gs",
+        wlans=["wlan0"],
+        ready_port=port,
+        ready_timeout=5.0,
+        poll_interval=0.05,
+        backoff=0.05,
+        **kw,
+    )
 
 
 def test_start_reaches_ready_then_stop():
@@ -101,10 +110,17 @@ def test_operator_restart_does_not_trip_fault():
 
 
 def test_crash_loop_sets_fault():
-    sup = RunnerSupervisor(["python3", "-c", "import sys; sys.exit(1)"],
-                           cfg_out="/tmp/ignored.cfg", profile="gs", wlans=["wlan0"],
-                           ready_port=_free_port(), ready_timeout=0.5,
-                           poll_interval=0.05, backoff=0.05, max_restarts=2)
+    sup = RunnerSupervisor(
+        ["python3", "-c", "import sys; sys.exit(1)"],
+        cfg_out="/tmp/ignored.cfg",
+        profile="gs",
+        wlans=["wlan0"],
+        ready_port=_free_port(),
+        ready_timeout=0.5,
+        poll_interval=0.05,
+        backoff=0.05,
+        max_restarts=2,
+    )
     try:
         sup.start()  # exits immediately; never binds the port
         deadline = time.time() + 6

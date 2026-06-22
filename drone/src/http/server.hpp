@@ -8,7 +8,7 @@
 namespace fpvd {
 
 class HttpServer {
-public:
+  public:
     using Handler = std::function<void(const httplib::Request&, httplib::Response&)>;
 
     void get(const std::string& path, Handler h);
@@ -19,7 +19,7 @@ public:
     bool waitUntilReady(std::chrono::milliseconds timeout);
     void stop();
 
-private:
+  private:
     httplib::Server svr_;
     std::thread thr_;
 };

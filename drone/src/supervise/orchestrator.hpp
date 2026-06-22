@@ -14,9 +14,9 @@ struct OrchestrationError : std::runtime_error {
 };
 
 class Orchestrator {
-public:
+  public:
     void add(SupervisedSpec spec);
-    void remove(const std::string& name);  // shuts down if running
+    void remove(const std::string& name); // shuts down if running
     // Bounce one process (shutdown + start); no-op if absent. Blocks the caller
     // for up to the Supervisor SIGTERM grace (~5s) if the child ignores SIGTERM.
     // `settle` is an extra pause inserted AFTER the old process is reaped and
@@ -42,7 +42,7 @@ public:
     // Convenience: list every name.
     std::vector<std::string> names() const;
 
-private:
+  private:
     std::map<std::string, std::unique_ptr<Supervisor>> sups_;
     std::map<std::string, SupervisedSpec> specs_;
 };

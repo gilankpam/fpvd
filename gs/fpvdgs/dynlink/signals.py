@@ -5,6 +5,7 @@ derived signals per window, then EWMA-smooth most of them. residual_loss
 is intentionally *not* smoothed — one lost block in a window is already
 a visible FPV glitch (§3).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -21,14 +22,13 @@ class RssiNormConfig:
     (drone/src/dynlink/txpower_curve.hpp) — both are static calibration
     constants and MUST stay in sync. When `enabled` is False, normalization
     is identity (raw RSSI), for rollback / back-compat."""
+
     enabled: bool = True
     p_ref_dbm: int = 29
     tx_power_dbm_by_mcs: tuple[int, ...] = (29, 28, 25, 23, 19, 19, 19, 19)
 
 
-def normalize_rssi(
-    rssi_raw: float | None, mcs: int | None, cfg: RssiNormConfig
-) -> float | None:
+def normalize_rssi(rssi_raw: float | None, mcs: int | None, cfg: RssiNormConfig) -> float | None:
     """EIRP-normalize one RSSI reading: rssi_raw + (P_ref − curve[mcs]).
     Clamps mcs into the curve's index range. None-safe (returns rssi_raw
     when disabled, or when rssi_raw / mcs is None)."""
@@ -46,21 +46,22 @@ class Signals:
     Raw `_w` fields are per-100 ms-window; EWMA-smoothed inputs have no
     suffix. All optional fields are None until the first window arrives.
     """
+
     # Raw per-window
-    rssi_min_w: float | None = None       # min across antennas of rssi_min
-    rssi_avg_w: float | None = None       # diversity-combined estimate
-    rssi_max_w: float | None = None       # max(rssi_avg) — best-antenna operating point
-    mcs_w: int | None = None              # received MCS of the best antenna this window
-    snr_w: float | None = None            # operating (best-RSSI) antenna SNR (per-antenna diversity)
+    rssi_min_w: float | None = None  # min across antennas of rssi_min
+    rssi_avg_w: float | None = None  # diversity-combined estimate
+    rssi_max_w: float | None = None  # max(rssi_avg) — best-antenna operating point
+    mcs_w: int | None = None  # received MCS of the best antenna this window
+    snr_w: float | None = None  # operating (best-RSSI) antenna SNR (per-antenna diversity)
     # EVM% (lock_quality, higher=better) is per spatial STREAM, not per antenna:
     # combined per dongle then across dongles. None when no real EVM this window.
-    evm_w: float | None = None            # best dongle (operating modulation quality)
-    evm_lo_w: float | None = None         # worst dongle (diversity floor)
-    evm_min_w: float | None = None        # worst per-window sample across dongles
-    residual_loss_w: float = 0.0          # used raw — no smoothing (§3)
+    evm_w: float | None = None  # best dongle (operating modulation quality)
+    evm_lo_w: float | None = None  # worst dongle (diversity floor)
+    evm_min_w: float | None = None  # worst per-window sample across dongles
+    residual_loss_w: float = 0.0  # used raw — no smoothing (§3)
     fec_work_rate_w: float = 0.0
-    packet_rate_w: float = 0.0            # fragments / sec
-    burst_rate_w: float = 0.0             # events / sec
+    packet_rate_w: float = 0.0  # fragments / sec
+    burst_rate_w: float = 0.0  # events / sec
     holdoff_rate_w: float = 0.0
     late_rate_w: float = 0.0
     # Starvation flag: link is up (session known) but data fragments
@@ -70,8 +71,8 @@ class Signals:
 
     # EWMA-smoothed controller inputs
     rssi: float | None = None
-    rssi_raw: float | None = None         # EWMA of the un-normalized RSSI (observability)
-    snr: float | None = None              # EWMA of EIRP-normalized SNR (cross-rung control axis)
+    rssi_raw: float | None = None  # EWMA of the un-normalized RSSI (observability)
+    snr: float | None = None  # EWMA of EIRP-normalized SNR (cross-rung control axis)
     fec_work: float = 0.0
     burst_rate: float = 0.0
     holdoff_rate: float = 0.0
@@ -98,6 +99,7 @@ class SignalAggregator:
     Ownership: one aggregator per running service. Call `consume(ev)`
     on every RxEvent; read `.signals` at controller tick time.
     """
+
     ewma_alpha_rssi: float = 0.2
     ewma_alpha_fec: float = 0.2
     ewma_alpha_burst: float = 0.1
@@ -182,10 +184,7 @@ class SignalAggregator:
         # Only meaningful once we've seen a session — otherwise we'd
         # flag every pre-link tick. Bypasses the survivor-bias trap of
         # rssi because it watches packet_rate, not signal quality.
-        s.link_starved_w = (
-            s.session is not None
-            and s.packet_rate_w < self.starvation_threshold_pps
-        )
+        s.link_starved_w = s.session is not None and s.packet_rate_w < self.starvation_threshold_pps
 
         # --- EWMA smoothing (§3) ---------------------------------------
         # Smoothed inputs feed the leading loop. Use best-antenna
@@ -208,9 +207,7 @@ class SignalAggregator:
 
         s.fec_work = _ewma(s.fec_work, s.fec_work_rate_w, self.ewma_alpha_fec)
         s.burst_rate = _ewma(s.burst_rate, s.burst_rate_w, self.ewma_alpha_burst)
-        s.holdoff_rate = _ewma(
-            s.holdoff_rate, s.holdoff_rate_w, self.ewma_alpha_burst
-        )
+        s.holdoff_rate = _ewma(s.holdoff_rate, s.holdoff_rate_w, self.ewma_alpha_burst)
         s.late_rate = _ewma(s.late_rate, s.late_rate_w, self.ewma_alpha_burst)
 
         return s

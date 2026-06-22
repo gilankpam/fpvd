@@ -1,30 +1,43 @@
 from fpvdgs.pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 
-DEFAULTS = {"pixelpilot": {
-    "bin": "/usr/bin/pixelpilot",
-    "configPath": "/etc/pixelpilot.yaml",
-    "osdConfigPath": "/etc/pixelpilot/osd.json",
-    "screenMode": "1920x1080@60",
-    "codec": "h265",
-    "rtpPort": 5600,
-    "dvr": {"dir": "/media/dvr",
+DEFAULTS = {
+    "pixelpilot": {
+        "bin": "/usr/bin/pixelpilot",
+        "configPath": "/etc/pixelpilot.yaml",
+        "osdConfigPath": "/etc/pixelpilot/osd.json",
+        "screenMode": "1920x1080@60",
+        "codec": "h265",
+        "rtpPort": 5600,
+        "dvr": {
+            "dir": "/media/dvr",
             "template": "record_%Y-%m-%d_%H-%M-%S.mp4",
-            "fmp4": True, "sequencedFiles": True},
-    "extraArgs": [],
-}}
+            "fmp4": True,
+            "sequencedFiles": True,
+        },
+        "extraArgs": [],
+    }
+}
 
 
 def test_defaults_render_full_argset():
     assert render_pixelpilot_argv(DEFAULTS) == [
         "/usr/bin/pixelpilot",
-        "--config", "/etc/pixelpilot.yaml",
-        "--osd", "--osd-custom-message",
-        "--osd-config", "/etc/pixelpilot/osd.json",
-        "--codec", "h265",
-        "--screen-mode", "1920x1080@60",
-        "--dvr-fmp4", "--dvr-sequenced-files",
-        "--dvr-template", "/media/dvr/record_%Y-%m-%d_%H-%M-%S.mp4",
-        "-p", "5600",
+        "--config",
+        "/etc/pixelpilot.yaml",
+        "--osd",
+        "--osd-custom-message",
+        "--osd-config",
+        "/etc/pixelpilot/osd.json",
+        "--codec",
+        "h265",
+        "--screen-mode",
+        "1920x1080@60",
+        "--dvr-fmp4",
+        "--dvr-sequenced-files",
+        "--dvr-template",
+        "/media/dvr/record_%Y-%m-%d_%H-%M-%S.mp4",
+        "-p",
+        "5600",
     ]
 
 
@@ -35,10 +48,18 @@ def test_dvr_osd_knob_removed():
 
 def test_dead_flags_not_emitted():
     argv = render_pixelpilot_argv(DEFAULTS)
-    for dead in ("--video-scale", "--rtp-jitter-ms", "--dvr-framerate",
-                 "--dvr-mode", "--dvr-max-size", "--dvr-reenc-codec",
-                 "--dvr-reenc-bitrate", "--dvr-reenc-fps",
-                 "--dvr-reenc-resolution", "--dvr-osd"):
+    for dead in (
+        "--video-scale",
+        "--rtp-jitter-ms",
+        "--dvr-framerate",
+        "--dvr-mode",
+        "--dvr-max-size",
+        "--dvr-reenc-codec",
+        "--dvr-reenc-bitrate",
+        "--dvr-reenc-fps",
+        "--dvr-reenc-resolution",
+        "--dvr-osd",
+    ):
         assert dead not in argv
 
 
@@ -48,8 +69,7 @@ def test_fmp4_and_sequenced_default_on_can_disable():
 
 
 def test_knobs_reflected():
-    cfg = {"pixelpilot": {"rtpPort": 5602, "codec": "h264",
-                          "screenMode": "1280x720@60"}}
+    cfg = {"pixelpilot": {"rtpPort": 5602, "codec": "h264", "screenMode": "1280x720@60"}}
     argv = render_pixelpilot_argv(cfg)
     assert argv[argv.index("-p") + 1] == "5602"
     assert argv[argv.index("--codec") + 1] == "h264"
@@ -68,10 +88,11 @@ def test_missing_block_uses_defaults():
 
 
 def test_render_env_stringifies():
-    cfg = {"pixelpilot": {"env": {"LD_LIBRARY_PATH": "/usr/lib/pixelpilot95",
-                                  "PP_NO_PANEL_FX": 1}}}
-    assert render_pixelpilot_env(cfg) == {"LD_LIBRARY_PATH": "/usr/lib/pixelpilot95",
-                                          "PP_NO_PANEL_FX": "1"}
+    cfg = {"pixelpilot": {"env": {"LD_LIBRARY_PATH": "/usr/lib/pixelpilot95", "PP_NO_PANEL_FX": 1}}}
+    assert render_pixelpilot_env(cfg) == {
+        "LD_LIBRARY_PATH": "/usr/lib/pixelpilot95",
+        "PP_NO_PANEL_FX": "1",
+    }
 
 
 def test_render_env_empty_default():

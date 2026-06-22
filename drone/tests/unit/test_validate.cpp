@@ -1,5 +1,5 @@
-#include "doctest.h"
 #include "config/validate.hpp"
+#include "doctest.h"
 
 using fpvd::Config;
 using fpvd::validate;
@@ -11,36 +11,43 @@ TEST_CASE("validate: default config is valid") {
 }
 
 TEST_CASE("validate: width must be 10, 20, or 40") {
-    Config c{}; c.link.width = 80;
+    Config c{};
+    c.link.width = 80;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "link.width");
 
-    Config ok{}; ok.link.width = 10;
+    Config ok{};
+    ok.link.width = 10;
     CHECK(validate(ok).empty());
 }
 
 TEST_CASE("validate: fec.k must be less than fec.n") {
-    Config c{}; c.link.fec.k = 12; c.link.fec.n = 8;
+    Config c{};
+    c.link.fec.k = 12;
+    c.link.fec.n = 8;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "link.fec");
 }
 
 TEST_CASE("validate: video.fps must be in (0, 120]") {
-    Config c{}; c.video.fps = 0;
+    Config c{};
+    c.video.fps = 0;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "video.fps");
 
-    Config c2{}; c2.video.fps = 200;
+    Config c2{};
+    c2.video.fps = 200;
     auto errs2 = validate(c2);
     REQUIRE(errs2.size() == 1);
     CHECK(errs2[0].path == "video.fps");
 }
 
 TEST_CASE("validate: video.resolution must parse as WxH") {
-    Config c{}; c.video.resolution = "1080";
+    Config c{};
+    c.video.resolution = "1080";
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "video.resolution");
@@ -48,35 +55,45 @@ TEST_CASE("validate: video.resolution must parse as WxH") {
 
 TEST_CASE("validate: video.codec must be h265 (hardware is H.265-only)") {
     {
-        Config c{}; c.video.codec = "h265";   // the only accepted value
+        Config c{};
+        c.video.codec = "h265"; // the only accepted value
         auto errs = validate(c);
-        for (auto& e : errs) CHECK(e.path != "video.codec");
+        for (auto& e : errs)
+            CHECK(e.path != "video.codec");
     }
     {
-        Config c{}; c.video.codec = "h264";   // previously valid, now rejected
+        Config c{};
+        c.video.codec = "h264"; // previously valid, now rejected
         auto errs = validate(c);
         bool found = false;
-        for (auto& e : errs) if (e.path == "video.codec") found = true;
+        for (auto& e : errs)
+            if (e.path == "video.codec")
+                found = true;
         CHECK(found);
     }
     {
-        Config c{}; c.video.codec = "av1";
+        Config c{};
+        c.video.codec = "av1";
         auto errs = validate(c);
         bool found = false;
-        for (auto& e : errs) if (e.path == "video.codec") found = true;
+        for (auto& e : errs)
+            if (e.path == "video.codec")
+                found = true;
         CHECK(found);
     }
 }
 
 TEST_CASE("validate: image.rotate must be 0/90/180/270") {
-    Config c{}; c.image.rotate = 45;
+    Config c{};
+    c.image.rotate = 45;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "image.rotate");
 }
 
 TEST_CASE("validate: telemetry.router must be msposd|mavfwd|none") {
-    Config c{}; c.telemetry.router = "garbage";
+    Config c{};
+    c.telemetry.router = "garbage";
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "telemetry.router");
@@ -84,9 +101,14 @@ TEST_CASE("validate: telemetry.router must be msposd|mavfwd|none") {
 
 TEST_CASE("validate: service.startAfter cycles are rejected") {
     Config c{};
-    fpvd::Service a{}; a.exec = "/bin/true"; a.startAfter = {"b"};
-    fpvd::Service b{}; b.exec = "/bin/true"; b.startAfter = {"a"};
-    c.services["a"] = a; c.services["b"] = b;
+    fpvd::Service a{};
+    a.exec = "/bin/true";
+    a.startAfter = {"b"};
+    fpvd::Service b{};
+    b.exec = "/bin/true";
+    b.startAfter = {"a"};
+    c.services["a"] = a;
+    c.services["b"] = b;
     auto errs = validate(c);
     REQUIRE(errs.size() >= 1);
     CHECK(errs[0].path.rfind("services", 0) == 0);
@@ -94,7 +116,9 @@ TEST_CASE("validate: service.startAfter cycles are rejected") {
 
 TEST_CASE("validate: service.restart must be always|on-failure|never") {
     Config c{};
-    fpvd::Service s{}; s.exec = "/bin/true"; s.restart = "sometimes";
+    fpvd::Service s{};
+    s.exec = "/bin/true";
+    s.restart = "sometimes";
     c.services["x"] = s;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
@@ -102,68 +126,82 @@ TEST_CASE("validate: service.restart must be always|on-failure|never") {
 }
 
 TEST_CASE("validate: link.txPowerDbm in [-10,30]") {
-    Config c{}; c.link.txPowerDbm = 31;
+    Config c{};
+    c.link.txPowerDbm = 31;
     auto errs = validate(c);
     REQUIRE(errs.size() >= 1);
     bool found = false;
-    for (auto& e : errs) if (e.path == "link.txPowerDbm") found = true;
+    for (auto& e : errs)
+        if (e.path == "link.txPowerDbm")
+            found = true;
     CHECK(found);
 
-    Config c2{}; c2.link.txPowerDbm = -11;
+    Config c2{};
+    c2.link.txPowerDbm = -11;
     auto errs2 = validate(c2);
     bool found2 = false;
-    for (auto& e : errs2) if (e.path == "link.txPowerDbm") found2 = true;
+    for (auto& e : errs2)
+        if (e.path == "link.txPowerDbm")
+            found2 = true;
     CHECK(found2);
 
-    Config c3{}; c3.link.txPowerDbm = 20;   // in range
+    Config c3{};
+    c3.link.txPowerDbm = 20; // in range
     auto errs3 = validate(c3);
-    for (auto& e : errs3) CHECK(e.path != "link.txPowerDbm");
+    for (auto& e : errs3)
+        CHECK(e.path != "link.txPowerDbm");
 }
 
 TEST_CASE("validate: dynamicLink.healthTimeoutMs >= 1000") {
-    Config c{}; c.dynamicLink.healthTimeoutMs = 500;
+    Config c{};
+    c.dynamicLink.healthTimeoutMs = 500;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.healthTimeoutMs");
 }
 
-
 TEST_CASE("validate: dynamicLink.applyStaggerMs in [0,500]") {
-    Config c{}; c.dynamicLink.applyStaggerMs = 501;
+    Config c{};
+    c.dynamicLink.applyStaggerMs = 501;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.applyStaggerMs");
 }
 
 TEST_CASE("validate: dynamicLink.applySubPaceMs in [0,50]") {
-    Config c{}; c.dynamicLink.applySubPaceMs = 51;
+    Config c{};
+    c.dynamicLink.applySubPaceMs = 51;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.applySubPaceMs");
 }
 
 TEST_CASE("validate: dynamicLink.roiQp threshold > lowAnchor > 0") {
-    Config c{}; c.dynamicLink.roiQp.thresholdKbps = 1000;
+    Config c{};
+    c.dynamicLink.roiQp.thresholdKbps = 1000;
     c.dynamicLink.roiQp.lowAnchorKbps = 2000;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.roiQp");
 
-    Config c2{}; c2.dynamicLink.roiQp.lowAnchorKbps = 0;
+    Config c2{};
+    c2.dynamicLink.roiQp.lowAnchorKbps = 0;
     auto errs2 = validate(c2);
     REQUIRE(errs2.size() == 1);
     CHECK(errs2[0].path == "dynamicLink.roiQp");
 }
 
 TEST_CASE("validate: dynamicLink.roiQp.floor must be <= 0") {
-    Config c{}; c.dynamicLink.roiQp.floor = 1;
+    Config c{};
+    c.dynamicLink.roiQp.floor = 1;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.roiQp.floor");
 }
 
 TEST_CASE("validate: dynamicLink.roiQp.step >= 1") {
-    Config c{}; c.dynamicLink.roiQp.step = 0;
+    Config c{};
+    c.dynamicLink.roiQp.step = 0;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.roiQp.step");
@@ -172,8 +210,8 @@ TEST_CASE("validate: dynamicLink.roiQp.step >= 1") {
 TEST_CASE("validate: beamforming off ignores stale fields") {
     Config c{};
     c.link.beamforming.enabled = false;
-    c.link.beamforming.remoteMac = "";   // empty is fine when disabled
-    c.link.stbc = true;                  // irrelevant when disabled
+    c.link.beamforming.remoteMac = ""; // empty is fine when disabled
+    c.link.stbc = true;                // irrelevant when disabled
     CHECK(validate(c).empty());
 }
 
@@ -190,7 +228,7 @@ TEST_CASE("validate: beamforming on requires stbc off") {
 TEST_CASE("validate: beamforming on requires a valid remoteMac") {
     Config c{};
     c.link.beamforming.enabled = true;
-    c.link.stbc = false;                 // stbc defaults true; clear it to isolate the remoteMac rule
+    c.link.stbc = false; // stbc defaults true; clear it to isolate the remoteMac rule
 
     c.link.beamforming.remoteMac = "";
     REQUIRE(validate(c).size() == 1);
@@ -207,59 +245,65 @@ TEST_CASE("validate: beamforming on requires a valid remoteMac") {
 TEST_CASE("validate: beamforming ackTimeout and intervalMs ranges") {
     Config c{};
     c.link.beamforming.enabled = true;
-    c.link.stbc = false;                 // stbc defaults true; clear it to isolate the range rules
+    c.link.stbc = false; // stbc defaults true; clear it to isolate the range rules
     c.link.beamforming.remoteMac = "00:c0:ca:aa:bb:cc";
 
-    c.link.beamforming.ackTimeout = 32;     // below 33
+    c.link.beamforming.ackTimeout = 32; // below 33
     REQUIRE(validate(c).size() == 1);
     CHECK(validate(c)[0].path == "link.beamforming.ackTimeout");
 
     c.link.beamforming.ackTimeout = 255;
-    c.link.beamforming.intervalMs = 0;      // below 1
+    c.link.beamforming.intervalMs = 0; // below 1
     REQUIRE(validate(c).size() == 1);
     CHECK(validate(c)[0].path == "link.beamforming.intervalMs");
 }
 
 TEST_CASE("validate: dynamicLink.compute maxBitrateKbps > minBitrateKbps") {
-    Config c{}; c.dynamicLink.compute.maxBitrateKbps = c.dynamicLink.compute.minBitrateKbps;
+    Config c{};
+    c.dynamicLink.compute.maxBitrateKbps = c.dynamicLink.compute.minBitrateKbps;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.compute");
 }
 
 TEST_CASE("validate: dynamicLink.compute kMax >= kMin") {
-    Config c{}; c.dynamicLink.compute.kMax = c.dynamicLink.compute.kMin - 1;
+    Config c{};
+    c.dynamicLink.compute.kMax = c.dynamicLink.compute.kMin - 1;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.compute.k");
 }
 
 TEST_CASE("validate: dynamicLink.compute.baseRedundancyRatio > 0") {
-    Config c{}; c.dynamicLink.compute.baseRedundancyRatio = 0.0;
+    Config c{};
+    c.dynamicLink.compute.baseRedundancyRatio = 0.0;
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "dynamicLink.compute.baseRedundancyRatio");
 }
 
 TEST_CASE("validate: video.resilience accepts every known preset") {
-    for (const char* p : {"off","rescue","quality","sprint","racing",
-                          "endurance","patrol","rally","range","fpv"}) {
-        Config c{}; c.video.resilience = p;
+    for (const char* p : {"off", "rescue", "quality", "sprint", "racing", "endurance", "patrol",
+                          "rally", "range", "fpv"}) {
+        Config c{};
+        c.video.resilience = p;
         CHECK_MESSAGE(validate(c).empty(), "unexpected error for preset: " << p);
     }
 }
 
 TEST_CASE("validate: video.resilience rejects an unknown preset") {
-    Config c{}; c.video.resilience = "turbo";
+    Config c{};
+    c.video.resilience = "turbo";
     auto errs = validate(c);
     REQUIRE(errs.size() == 1);
     CHECK(errs[0].path == "video.resilience");
 }
 
 TEST_CASE("validate: link.fec swfec rules") {
-    auto hasErr = [](const std::vector<fpvd::ValidationError>& errs,
-                     const std::string& path) {
-        for (auto& e : errs) if (e.path == path) return true;
+    auto hasErr = [](const std::vector<fpvd::ValidationError>& errs, const std::string& path) {
+        for (auto& e : errs)
+            if (e.path == path)
+                return true;
         return false;
     };
     fpvd::Config c{};

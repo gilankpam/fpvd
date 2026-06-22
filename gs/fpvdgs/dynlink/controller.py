@@ -6,6 +6,7 @@ SignalAggregator → Policy → wire encode → ReturnLink. Thread-safe
 surface for the (thread-based) supervisor: start/stop/set_config/status.
 A config change while running rebuilds the loop from the new snapshot;
 the wfb runner is never touched."""
+
 from __future__ import annotations
 
 import asyncio
@@ -24,8 +25,15 @@ log = logging.getLogger("fpvdgs.dynlink")
 
 
 class DynamicLinkController:
-    def __init__(self, snapshot, *, stats_endpoint="tcp://127.0.0.1:8103",
-                 stats_client_factory=StatsClient, probe_status=None, bus=None):
+    def __init__(
+        self,
+        snapshot,
+        *,
+        stats_endpoint="tcp://127.0.0.1:8103",
+        stats_client_factory=StatsClient,
+        probe_status=None,
+        bus=None,
+    ):
         self._snapshot = dict(snapshot)
         self._stats_endpoint = stats_endpoint
         self._make_stats = stats_client_factory
@@ -36,11 +44,16 @@ class DynamicLinkController:
         self._lifecycle = threading.RLock()
         self._thread = None
         self._loop = None
-        self._stop_event = None         # asyncio.Event, created in-loop
+        self._stop_event = None  # asyncio.Event, created in-loop
         self._started = threading.Event()
-        self._status = {"running": False, "statsConnected": False,
-                        "decision": None, "lastEmitMs": None, "emitSeq": 0,
-                        "reason": ""}
+        self._status = {
+            "running": False,
+            "statsConnected": False,
+            "decision": None,
+            "lastEmitMs": None,
+            "emitSeq": 0,
+            "reason": "",
+        }
         if bus is not None:
             bus.subscribe(DRONE_CONNECTED, self._on_drone_connected)
             bus.subscribe(DRONE_DISCONNECTED, self._on_drone_disconnected)
@@ -52,8 +65,9 @@ class DynamicLinkController:
                 if self._thread and self._thread.is_alive():
                     return
                 self._started.clear()
-                self._thread = threading.Thread(target=self._thread_main,
-                                                name="dl-controller", daemon=True)
+                self._thread = threading.Thread(
+                    target=self._thread_main, name="dl-controller", daemon=True
+                )
                 self._thread.start()
             self._started.wait(timeout=5.0)
 
@@ -110,14 +124,13 @@ class DynamicLinkController:
                 with self._lock:
                     self._loop = None
                     self._status.update(running=False, statsConnected=False)
-                self._started.set()   # unblock start() even on early failure
+                self._started.set()  # unblock start() even on early failure
 
     async def _run(self):
         with self._lock:
             snap = dict(self._snapshot)
         profile_name = str(snap.get("radioProfile") or "m8812eu2")
-        policy = Policy(build_policy_config(snap), profile_name,
-                        probe_status=self._probe_status)
+        policy = Policy(build_policy_config(snap), profile_name, probe_status=self._probe_status)
         with self._lock:
             self._policy = policy
         aggregator = build_aggregator(snap)
@@ -129,7 +142,7 @@ class DynamicLinkController:
         # the low/zero-rate uplink streams would trip link_starved and pin MCS at
         # the floor, and pollute the session/loss/fec signals. Match the video
         # stream by id substring (records are e.g. "video rx").
-        video_id = "video"   # frozen: the wfb video stream id
+        video_id = "video"  # frozen: the wfb video stream id
 
         def _is_video(ev):
             return ev.id is not None and video_id in ev.id.lower()
@@ -170,11 +183,11 @@ class DynamicLinkController:
         with self._lock:
             loop = self._loop
         if loop is None:
-            return                       # loop down (dynlink disabled/stopped)
+            return  # loop down (dynlink disabled/stopped)
         try:
             loop.call_soon_threadsafe(fn)
         except RuntimeError:
-            pass                         # loop tearing down
+            pass  # loop tearing down
 
     def _on_drone_connected(self, payload):
         self._marshal(self._connected_inloop)
@@ -186,16 +199,16 @@ class DynamicLinkController:
         p = self._policy
         if p is None:
             return
-        p.reset_for_new_session()        # new session: re-warm-start, re-climb
-        p.flightlog.begin_flight()       # start a fresh flight file
+        p.reset_for_new_session()  # new session: re-warm-start, re-climb
+        p.flightlog.begin_flight()  # start a fresh flight file
         log.info("dynlink: drone connected — reset selector + began new flight")
 
     def _disconnected_inloop(self):
         p = self._policy
         if p is None:
             return
-        p.flightlog.sync()               # make the flight durable at the loss edge
-        p.learned_prior.flush()          # persist the session's learning
+        p.flightlog.sync()  # make the flight durable at the loss edge
+        p.learned_prior.flush()  # persist the session's learning
         log.info("dynlink: drone disconnected — synced flight + flushed prior")
 
     async def _stats_loop(self, on_event):
@@ -207,8 +220,7 @@ class DynamicLinkController:
             stop_task = asyncio.ensure_future(self._stop_event.wait())
             self._set(statsConnected=True)
             try:
-                await asyncio.wait({run_task, stop_task},
-                                   return_when=asyncio.FIRST_COMPLETED)
+                await asyncio.wait({run_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
             finally:
                 client.stop()
                 for t in (run_task, stop_task):
@@ -219,4 +231,4 @@ class DynamicLinkController:
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=1.0)
             except asyncio.TimeoutError:
-                pass   # backoff elapsed → reconnect
+                pass  # backoff elapsed → reconnect

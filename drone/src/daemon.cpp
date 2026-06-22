@@ -2,20 +2,20 @@
 #include "config/lock.hpp"
 #include "config/store.hpp"
 #include "config/validate.hpp"
+#include "dynlink/local_compute.hpp"
+#include "link_width.hpp"
+#include "probe/probe_constants.hpp"
+#include "probe/probe_specs.hpp"
 #include "supervise/radio.hpp"
 #include "translate/telemetry.hpp"
 #include "translate/waybeam.hpp"
 #include "translate/wfb.hpp"
 #include "translate/wfb_control.hpp"
-#include "link_width.hpp"
-#include "probe/probe_specs.hpp"
-#include "probe/probe_constants.hpp"
-#include "dynlink/local_compute.hpp"
 #include <algorithm>
 #include <chrono>
 #include <ctime>
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 #include <thread>
 
 namespace fpvd {
@@ -28,28 +28,24 @@ static std::string nowIso() {
 }
 
 Daemon::Daemon(DaemonPaths paths)
-    : paths_(std::move(paths)),
-      waybeam_(paths_.dlEndpoints.encHost, paths_.dlEndpoints.encPort),
-      idrRelay_(waybeam_, idr::kIdrBindAddr,
-                static_cast<uint16_t>(paths_.idrPort), idr::kIdrMinIntervalMs),
-      osd_(paths_.osdMsgPath, /*enabled=*/true),
-      dl_(paths_.dlEndpoints),
-      startedAt_(std::chrono::steady_clock::now()) {
-}
+    : paths_(std::move(paths)), waybeam_(paths_.dlEndpoints.encHost, paths_.dlEndpoints.encPort),
+      idrRelay_(waybeam_, idr::kIdrBindAddr, static_cast<uint16_t>(paths_.idrPort),
+                idr::kIdrMinIntervalMs),
+      osd_(paths_.osdMsgPath, /*enabled=*/true), dl_(paths_.dlEndpoints),
+      startedAt_(std::chrono::steady_clock::now()) {}
 
 Daemon::~Daemon() {
     // Stop the OSD heartbeat (it touches mu_ + dl_) before tearing those down.
     osdStop_.store(true);
-    if (osdThread_.joinable()) osdThread_.join();
+    if (osdThread_.joinable())
+        osdThread_.join();
     // Stop the always-on IDR relay (joins its thread) while waybeam_ is still alive.
     idrRelay_.stop();
     // Stop the in-process control loop (joins its thread) before any member is destroyed.
     dl_.stop();
 }
 
-nlohmann::json Daemon::defaultsJson() {
-    return nlohmann::json(Config{});
-}
+nlohmann::json Daemon::defaultsJson() { return nlohmann::json(Config{}); }
 
 void Daemon::bootstrap(bool startProcesses) {
     effective_ = loadEffective(paths_.configPath);
@@ -58,7 +54,7 @@ void Daemon::bootstrap(bool startProcesses) {
     if (!errs.empty()) {
         throw StoreError("invalid configuration on bootstrap");
     }
-    osd_.setEnabled(effective_.osd.enabled);   // daemon owns top-level osd.enabled
+    osd_.setEnabled(effective_.osd.enabled); // daemon owns top-level osd.enabled
     rewriteWaybeamJson();
     if (startProcesses) {
         auto rr = bringUpRadio(paths_.radioUpScript, effective_);
@@ -72,13 +68,13 @@ void Daemon::bootstrap(bool startProcesses) {
         reconcileBeamforming(true);
         dl_.setBfCodeProvider([this] { return bfOsdCode(); });
         dl_.setIdrCountProvider([this] { return idrRelay_.count(); });
-        dl_.setOsdWriter(&osd_);   // controller pushes its status line to the shared writer
+        dl_.setOsdWriter(&osd_); // controller pushes its status line to the shared writer
         // Always-on: keyframe requests must work whether dynamicLink is on or off.
         idrRelay_.start();
         if (effective_.dynamicLink.enabled) {
             startController();
         } else {
-            writeOsdBaseLine();   // DL off: seed the system-stats OSD line
+            writeOsdBaseLine(); // DL off: seed the system-stats OSD line
         }
         osdThread_ = std::thread([this] { osdHeartbeat(); });
     }
@@ -87,8 +83,10 @@ void Daemon::bootstrap(bool startProcesses) {
 static SupervisedSpec wfbSpec(const std::string& name, std::vector<std::string> argv,
                               std::vector<std::string> after) {
     SupervisedSpec s{};
-    s.name = name; s.argv = std::move(argv);
-    s.restart = RestartPolicy::Always; s.startAfter = std::move(after);
+    s.name = name;
+    s.argv = std::move(argv);
+    s.restart = RestartPolicy::Always;
+    s.startAfter = std::move(after);
     return s;
 }
 
@@ -98,20 +96,17 @@ void Daemon::seedOrchestrator() {
 
     // Telemetry router process name (empty when router is "none" or unknown).
     std::string telemetryName;
-    if (effective_.telemetry.router == "mavfwd") telemetryName = "mavfwd";
-    else if (effective_.telemetry.router == "msposd") telemetryName = "msposd";
+    if (effective_.telemetry.router == "mavfwd")
+        telemetryName = "mavfwd";
+    else if (effective_.telemetry.router == "msposd")
+        telemetryName = "msposd";
 
-    orch_.add(wfbSpec("wfb_video_tx",
-              wfbArgs(effective_, WfbRole::VideoTx, iface, key), {}));
-    orch_.add(wfbSpec("wfb_tun_rx",
-              wfbArgs(effective_, WfbRole::TunRx, iface, key), {}));
-    orch_.add(wfbSpec("wfb_tun_tx",
-              wfbArgs(effective_, WfbRole::TunTx, iface, key), {}));
+    orch_.add(wfbSpec("wfb_video_tx", wfbArgs(effective_, WfbRole::VideoTx, iface, key), {}));
+    orch_.add(wfbSpec("wfb_tun_rx", wfbArgs(effective_, WfbRole::TunRx, iface, key), {}));
+    orch_.add(wfbSpec("wfb_tun_tx", wfbArgs(effective_, WfbRole::TunTx, iface, key), {}));
     orch_.add(wfbSpec("wfb_tun", wfbTunArgs(), {"wfb_tun_rx", "wfb_tun_tx"}));
-    orch_.add(wfbSpec("wfb_tlm_rx",
-              wfbArgs(effective_, WfbRole::TlmRx, iface, key), {}));
-    orch_.add(wfbSpec("wfb_tlm_tx",
-              wfbArgs(effective_, WfbRole::TlmTx, iface, key), {}));
+    orch_.add(wfbSpec("wfb_tlm_rx", wfbArgs(effective_, WfbRole::TlmRx, iface, key), {}));
+    orch_.add(wfbSpec("wfb_tlm_tx", wfbArgs(effective_, WfbRole::TlmTx, iface, key), {}));
     // Launch waybeam through a guard that first kills any stray /usr/bin/waybeam
     // fpvd does not own — e.g. one that self-respawned out of supervision when an
     // operator manually hit waybeam's /api/v1/restart (the new process reparents
@@ -120,27 +115,29 @@ void Daemon::seedOrchestrator() {
     // never recovers without a reboot. The guard runs as the child before exec,
     // so its own (sh) comm never matches "waybeam"; the 1s pause after a kill
     // lets the SigmaStar driver release the orphan's pipeline before re-init.
-    orch_.add(wfbSpec("waybeam",
-        {"/bin/sh", "-c",
-         "K=0; for p in $(pidof waybeam); do kill -9 \"$p\" 2>/dev/null && K=1; done; "
-         "[ \"$K\" = 1 ] && sleep 1; exec /usr/bin/waybeam"},
-        {"wfb_video_tx"}));
+    orch_.add(
+        wfbSpec("waybeam",
+                {"/bin/sh", "-c",
+                 "K=0; for p in $(pidof waybeam); do kill -9 \"$p\" 2>/dev/null && K=1; done; "
+                 "[ \"$K\" = 1 ] && sleep 1; exec /usr/bin/waybeam"},
+                {"wfb_video_tx"}));
     auto tArgs = telemetryArgs(effective_);
     if (!tArgs.empty() && !telemetryName.empty()) {
-        orch_.add(wfbSpec(telemetryName, std::move(tArgs),
-                          {"wfb_tlm_rx", "wfb_tlm_tx"}));
+        orch_.add(wfbSpec(telemetryName, std::move(tArgs), {"wfb_tlm_rx", "wfb_tlm_tx"}));
     }
     for (auto& [n, s] : effective_.services) {
-        if (!s.enabled) continue;
+        if (!s.enabled)
+            continue;
         SupervisedSpec spec{};
         spec.name = n;
         spec.argv = {s.exec};
-        for (auto& a : s.args) spec.argv.push_back(a);
+        for (auto& a : s.args)
+            spec.argv.push_back(a);
         spec.env = s.env;
         spec.startAfter = s.startAfter;
-        spec.restart = (s.restart == "always") ? RestartPolicy::Always
-                     : (s.restart == "on-failure") ? RestartPolicy::OnFailure
-                     : RestartPolicy::Never;
+        spec.restart = (s.restart == "always")       ? RestartPolicy::Always
+                       : (s.restart == "on-failure") ? RestartPolicy::OnFailure
+                                                     : RestartPolicy::Never;
         orch_.add(std::move(spec));
     }
 
@@ -160,13 +157,17 @@ void Daemon::restartOsd() {
     // restart needs msposd re-registered from the committed config (a plain
     // restart would relaunch it at the old resolution). Only msposd renders the
     // OSD onto the video; mavfwd has no video dependency.
-    if (effective_.telemetry.router != "msposd") return;
-    if (!orch_.get("msposd")) return;            // not supervised (e.g. not bootstrapped)
+    if (effective_.telemetry.router != "msposd")
+        return;
+    if (!orch_.get("msposd"))
+        return; // not supervised (e.g. not bootstrapped)
     auto args = telemetryArgs(effective_);
-    if (args.empty()) return;
-    orch_.remove("msposd");                       // shut down the stale instance
+    if (args.empty())
+        return;
+    orch_.remove("msposd"); // shut down the stale instance
     orch_.add(wfbSpec("msposd", std::move(args), {"wfb_tlm_rx", "wfb_tlm_tx"}));
-    if (auto* s = orch_.get("msposd")) s->start();
+    if (auto* s = orch_.get("msposd"))
+        s->start();
 }
 
 void Daemon::restateStaticLink() {
@@ -180,21 +181,17 @@ void Daemon::restateStaticLink() {
     // apply()): pushing k/n here would silently degrade a swfec link to 8/12.
     const auto& fec = effective_.link.fec;
     if (fec.mode == "swfec")
-        cli.setFec(static_cast<uint8_t>(fec.overheadPct),
-                   static_cast<uint8_t>(fec.deadlineMs));
+        cli.setFec(static_cast<uint8_t>(fec.overheadPct), static_cast<uint8_t>(fec.deadlineMs));
     else
-        cli.setFec(static_cast<uint8_t>(fec.k),
-                   static_cast<uint8_t>(fec.n));
-    cli.setRadio(static_cast<uint8_t>(effective_.link.stbc ? 1 : 0),
-                 effective_.link.ldpc, false,
+        cli.setFec(static_cast<uint8_t>(fec.k), static_cast<uint8_t>(fec.n));
+    cli.setRadio(static_cast<uint8_t>(effective_.link.stbc ? 1 : 0), effective_.link.ldpc, false,
                  static_cast<uint8_t>(modulationWidth(effective_.link.width)),
                  static_cast<uint8_t>(effective_.link.mcs), false, 1);
     if (!paths_.radioTuneScript.empty())
-        tuneRadio(paths_.radioTuneScript, "txpower", effective_,
-                  radio_.iface, radio_.driver);
+        tuneRadio(paths_.radioTuneScript, "txpower", effective_, radio_.iface, radio_.driver);
     waybeam_.setFields({
         {"video0.bitrate", std::to_string(effective_.video.bitrate)},
-        {"fpv.roi_qp",     std::to_string(effective_.video.roi.qp)},
+        {"fpv.roi_qp", std::to_string(effective_.video.roi.qp)},
     });
 }
 
@@ -204,7 +201,8 @@ void Daemon::writeOsdBaseLine() {
     // gating; msposd holds + re-renders the line, substituting the &
     // placeholders (bitrate+fps, board/wifi temp, cpu%) at render time. No-op
     // unless the router is msposd (only msposd renders the OSD).
-    if (effective_.telemetry.router != "msposd") return;
+    if (effective_.telemetry.router != "msposd")
+        return;
     osd_.writeBaseLine(bfOsdCode());
 }
 
@@ -213,20 +211,22 @@ void Daemon::osdHeartbeat() {
         // ~1s cadence, in 100ms chunks so shutdown is responsive.
         for (int i = 0; i < 10 && !osdStop_.load(); ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        if (osdStop_.load()) break;
-        if (dl_.status().running) continue;   // DL feeds the OSD; don't fight it
+        if (osdStop_.load())
+            break;
+        if (dl_.status().running)
+            continue; // DL feeds the OSD; don't fight it
         std::lock_guard<std::mutex> g(mu_);
-        writeOsdBaseLine();                    // re-asserts the line msposd renders
+        writeOsdBaseLine(); // re-asserts the line msposd renders
     }
 }
 
 void Daemon::reconcileBeamforming(bool force) {
     const auto& bfc = effective_.link.beamforming;
     BfParams p;
-    p.iface      = radio_.iface.empty() ? "wlan0" : radio_.iface;
-    p.driver     = radio_.driver;
-    p.remoteMac  = bfc.remoteMac;
-    p.width      = effective_.link.width;
+    p.iface = radio_.iface.empty() ? "wlan0" : radio_.iface;
+    p.driver = radio_.driver;
+    p.remoteMac = bfc.remoteMac;
+    p.width = effective_.link.width;
     p.ackTimeout = bfc.ackTimeout;
     p.intervalMs = bfc.intervalMs;
     bf_.reconcile(bfc.enabled, p, force);
@@ -234,7 +234,8 @@ void Daemon::reconcileBeamforming(bool force) {
 
 int Daemon::bfOsdCode() const {
     auto bf = bf_.status();
-    if (bf.state != BfState::Active) return 0;
+    if (bf.state != BfState::Active)
+        return 0;
     return (bf.cbrRssi != 0 && bf.cbrFresh) ? 2 : 1;
 }
 
@@ -252,16 +253,15 @@ void Daemon::addProbeStream() {
     const std::string iface = radio_.iface.empty() ? "wlan0" : radio_.iface;
     static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
     const int probeMcs = std::min(dynlink::kDlFailsafeMcs + 1, kProbeMcsCeiling);
-    for (auto& s : buildProbeSpecs(effective_, iface, "/etc/drone.key",
-                                   kProbeFeeder, probeMcs)) {
+    for (auto& s : buildProbeSpecs(effective_, iface, "/etc/drone.key", kProbeFeeder, probeMcs)) {
         const std::string name = s.name;
         orch_.add(std::move(s));
-        orch_.restart(name);   // add() registers; restart() starts a not-running spec
+        orch_.restart(name); // add() registers; restart() starts a not-running spec
     }
 }
 
 void Daemon::removeProbeStream() {
-    orch_.remove("probe-feed");   // remove feeder first (it startAfter the tx)
+    orch_.remove("probe-feed"); // remove feeder first (it startAfter the tx)
     orch_.remove("probe-tx");
 }
 
@@ -269,8 +269,9 @@ PatchResult Daemon::patchPending(const nlohmann::json& patch) {
     std::lock_guard<std::mutex> g(mu_);
     nlohmann::json next = deepMergeJson(nlohmann::json(pending_), patch);
     Config candidate;
-    try { candidate = next.get<Config>(); }
-    catch (const nlohmann::json::exception& e) {
+    try {
+        candidate = next.get<Config>();
+    } catch (const nlohmann::json::exception& e) {
         return {false, {{"<root>", e.what()}}, {}};
     }
     auto lockR = checkDynamicLinkLock(patch, candidate);
@@ -278,7 +279,8 @@ PatchResult Daemon::patchPending(const nlohmann::json& patch) {
         return {false, {}, std::move(lockR.lockedPaths)};
     }
     auto errs = validate(candidate);
-    if (!errs.empty()) return {false, std::move(errs), {}};
+    if (!errs.empty())
+        return {false, std::move(errs), {}};
     pending_ = candidate;
     return {true, {}, {}};
 }
@@ -286,41 +288,39 @@ PatchResult Daemon::patchPending(const nlohmann::json& patch) {
 ApplyResult Daemon::apply(bool reallyRestart) {
     std::lock_guard<std::mutex> g(mu_);
     auto errs = validate(pending_);
-    if (!errs.empty()) return {false, std::move(errs), {}, std::nullopt, version_};
+    if (!errs.empty())
+        return {false, std::move(errs), {}, std::nullopt, version_};
 
     auto subs = diffSubsystems(effective_, pending_);
     auto link = classifyLinkChange(effective_, pending_);
-    // enabledOld from effective_ (pre-commit), enabledNew from pending_ (the about-to-be-committed config).
+    // enabledOld from effective_ (pre-commit), enabledNew from pending_ (the about-to-be-committed
+    // config).
     const bool enabledOld = effective_.dynamicLink.enabled;
     const bool enabledNew = pending_.dynamicLink.enabled;
 
     // Beamforming is reconciled (not exec-supervised); report it as restarted
     // when its own block or the derived modulation width changed.
     const bool bfChanged =
-        nlohmann::json(effective_.link.beamforming) !=
-            nlohmann::json(pending_.link.beamforming) ||
+        nlohmann::json(effective_.link.beamforming) != nlohmann::json(pending_.link.beamforming) ||
         effective_.link.width != pending_.link.width;
 
     // Encoder reconcile (computed from the pre-commit diff). codec is excluded;
     // dynamic-link-owned fields are excluded while DL is enabled.
     auto wbDiff = waybeamConfigDiff(effective_, pending_, enabledNew);
-    const bool encRestart = !wbDiff.restart.empty();   // any restart field => restart
-    const bool encLive    = !encRestart && !wbDiff.live.empty();
+    const bool encRestart = !wbDiff.restart.empty(); // any restart field => restart
+    const bool encLive = !encRestart && !wbDiff.live.empty();
     const bool encChanged = encRestart || encLive;
 
     // A full orchestrator rebuild is needed only for non-encoder subsystems.
-    const bool needsRebuild = subs.telemetry ||
-        !subs.servicesAffected.empty() || link.fullRestart;
+    const bool needsRebuild = subs.telemetry || !subs.servicesAffected.empty() || link.fullRestart;
 
     // Transactional LIVE push: apply before committing so a failed push fails the
     // apply with nothing changed and the radio link untouched. Skipped under a
     // full rebuild (it restarts waybeam + reloads the file) and on the dry path.
     if (reallyRestart && !needsRebuild && encLive) {
         if (!waybeam_.setFields(wbDiff.live)) {
-            lastApply_ = {nowIso(), false, {},
-                          std::string("waybeam: /api/v1/set failed")};
-            return {false, {}, {}, std::string("waybeam: /api/v1/set failed"),
-                    version_};
+            lastApply_ = {nowIso(), false, {}, std::string("waybeam: /api/v1/set failed")};
+            return {false, {}, {}, std::string("waybeam: /api/v1/set failed"), version_};
         }
     }
 
@@ -329,21 +329,27 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     atomicWriteJson(paths_.configPath, nlohmann::json(pending_));
 
     effective_ = pending_;
-    osd_.setEnabled(effective_.osd.enabled);   // hot-reconcile top-level osd.enabled (gates both lines)
+    osd_.setEnabled(
+        effective_.osd.enabled); // hot-reconcile top-level osd.enabled (gates both lines)
     rewriteWaybeamJson();
 
     std::vector<std::string> restarted;
-    if (subs.radio) restarted.push_back("radio");
-    if (encChanged) restarted.push_back("encoder");
-    if (subs.telemetry) restarted.push_back("telemetry");
+    if (subs.radio)
+        restarted.push_back("radio");
+    if (encChanged)
+        restarted.push_back("encoder");
+    if (subs.telemetry)
+        restarted.push_back("telemetry");
     // The in-process DynamicLinkController is hot-reloaded (start/stop/setConfig)
     // — never bounced with wfb. Report it as "dynamicLink" when its config moves
     // while it is (or becomes) active, or when it is being toggled on/off.
-    const bool dlAffects =
-        subs.dynamicLink && (enabledOld || enabledNew);
-    if (dlAffects) restarted.push_back("dynamicLink");
-    for (auto& n : subs.servicesAffected) restarted.push_back(n);
-    if (bfChanged) restarted.push_back("beamforming");
+    const bool dlAffects = subs.dynamicLink && (enabledOld || enabledNew);
+    if (dlAffects)
+        restarted.push_back("dynamicLink");
+    for (auto& n : subs.servicesAffected)
+        restarted.push_back(n);
+    if (bfChanged)
+        restarted.push_back("beamforming");
 
     // A rebuild bounces the whole orchestrator (including wfb). It is needed only
     // when a non-link subsystem changes (telemetry/services), or when a link
@@ -362,14 +368,14 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // non-DL reason (e.g. encoder/fps) does not leave the controller dead.
         // On radio bring-up failure below, the controller stays stopped (safe state:
         // no wfb, no decisions); the operator retries POST /apply.
-        if (enabledOld) dl_.stop();
+        if (enabledOld)
+            dl_.stop();
         orch_.stopAll();
         orch_ = Orchestrator{};
         if (subs.radio) {
             auto rr = bringUpRadio(paths_.radioUpScript, effective_);
             if (!rr.ok) {
-                lastApply_ = {nowIso(), false, {},
-                              std::string("radio: ") + rr.stderrText};
+                lastApply_ = {nowIso(), false, {}, std::string("radio: ") + rr.stderrText};
                 return {false, {}, {}, rr.stderrText, version_};
             }
             radio_ = {rr.driver, rr.iface, rr.adapterId};
@@ -381,7 +387,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         if (enabledNew)
             startController();
         else
-            writeOsdBaseLine();   // DL off: rebuilt msposd needs the base OSD line
+            writeOsdBaseLine(); // DL off: rebuilt msposd needs the base OSD line
         version_++;
         lastApply_ = {nowIso(), true, restarted, std::nullopt};
         return {true, {}, restarted, std::nullopt, version_};
@@ -395,8 +401,7 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // pipeline before the fresh waybeam re-inits (a video0.size change wedges
         // the VENC channel otherwise). No-op if waybeam is not currently supervised.
         if (encRestart) {
-            orch_.restart("waybeam",
-                          std::chrono::milliseconds{paths_.waybeamRestartSettleMs});
+            orch_.restart("waybeam", std::chrono::milliseconds{paths_.waybeamRestartSettleMs});
             // msposd renders the OSD onto waybeam's video pipeline; a waybeam
             // restart drops the overlay region, so rebuild + restart msposd to
             // redraw it against the fresh waybeam AT THE NEW CANVAS SIZE (its -z
@@ -410,16 +415,14 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // nicChannel return detaches a worker and returns early). start() binds
         // sockets + launches the thread; setConfig() hot-reloads; stop() joins.
         if (!enabledOld && enabledNew) {
-            addProbeStream();      // targeted orch_.add + start (no video bounce)
+            addProbeStream(); // targeted orch_.add + start (no video bounce)
             startController();
-        }
-        else if (enabledOld && !enabledNew) {
+        } else if (enabledOld && !enabledNew) {
             dl_.stop();
-            removeProbeStream();   // targeted orch_.remove (no video bounce)
-            restateStaticLink();   // revert radio + encoder to the static config
-        }
-        else if (enabledOld && enabledNew &&
-                 (subs.dynamicLink || link.videoRadiotap || link.videoFec))
+            removeProbeStream(); // targeted orch_.remove (no video bounce)
+            restateStaticLink(); // revert radio + encoder to the static config
+        } else if (enabledOld && enabledNew &&
+                   (subs.dynamicLink || link.videoRadiotap || link.videoFec))
             // stbc/ldpc (videoRadiotap) and swfec overhead/deadline (videoFec) are
             // static params the controller preserves; refresh its snapshot so the
             // loop re-emits them on the next decision. mcs/width/rs-k/n stay locked.
@@ -434,35 +437,32 @@ ApplyResult Daemon::apply(bool reallyRestart) {
         // A purely hot-applicable link change — no wfb restart.
         // (A) Immediate, non-link-dropping changes.
         if (link.nicTxpower) {
-            auto rr = tuneRadio(paths_.radioTuneScript, "txpower", effective_,
-                                radio_.iface, radio_.driver);
+            auto rr = tuneRadio(paths_.radioTuneScript, "txpower", effective_, radio_.iface,
+                                radio_.driver);
             if (!rr.ok) {
-                lastApply_ = {nowIso(), false, restarted,
-                              std::string("txpower: ") + rr.stderrText};
+                lastApply_ = {nowIso(), false, restarted, std::string("txpower: ") + rr.stderrText};
                 return {false, {}, restarted, rr.stderrText, version_};
             }
         }
         if (link.nicMtu) {
-            auto rr = tuneRadio(paths_.radioTuneScript, "mtu", effective_,
-                                radio_.iface, radio_.driver);
+            auto rr =
+                tuneRadio(paths_.radioTuneScript, "mtu", effective_, radio_.iface, radio_.driver);
             if (!rr.ok) {
-                lastApply_ = {nowIso(), false, restarted,
-                              std::string("mtu: ") + rr.stderrText};
+                lastApply_ = {nowIso(), false, restarted, std::string("mtu: ") + rr.stderrText};
                 return {false, {}, restarted, rr.stderrText, version_};
             }
         }
-        if (link.videoFec && !enabledNew) {   // DL off: push directly; DL on: controller owns FEC (setConfig above)
+        if (link.videoFec &&
+            !enabledNew) { // DL off: push directly; DL on: controller owns FEC (setConfig above)
             WfbControlClient cli("127.0.0.1", kVideoControlPort);
             const auto& f = effective_.link.fec;
             // swfec rides the same CMD_SET_FEC: k=overhead_pct, n=deadline_ms.
             auto rr = (f.mode == "swfec")
-                ? cli.setFec(static_cast<uint8_t>(f.overheadPct),
-                             static_cast<uint8_t>(f.deadlineMs))
-                : cli.setFec(static_cast<uint8_t>(f.k),
-                             static_cast<uint8_t>(f.n));
+                          ? cli.setFec(static_cast<uint8_t>(f.overheadPct),
+                                       static_cast<uint8_t>(f.deadlineMs))
+                          : cli.setFec(static_cast<uint8_t>(f.k), static_cast<uint8_t>(f.n));
             if (!rr.ok) {
-                lastApply_ = {nowIso(), false, restarted,
-                              std::string("fec: ") + rr.error};
+                lastApply_ = {nowIso(), false, restarted, std::string("fec: ") + rr.error};
                 return {false, {}, restarted, rr.error, version_};
             }
         }
@@ -474,14 +474,12 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             // routed through the controller (setConfig above), which restates
             // the radio preserving its current mcs/bw.
             WfbControlClient cli("127.0.0.1", kVideoControlPort);
-            auto rr = cli.setRadio(
-                static_cast<uint8_t>(effective_.link.stbc ? 1 : 0),
-                effective_.link.ldpc, false,
-                static_cast<uint8_t>(modulationWidth(effective_.link.width)),
-                static_cast<uint8_t>(effective_.link.mcs), false, 1);
+            auto rr = cli.setRadio(static_cast<uint8_t>(effective_.link.stbc ? 1 : 0),
+                                   effective_.link.ldpc, false,
+                                   static_cast<uint8_t>(modulationWidth(effective_.link.width)),
+                                   static_cast<uint8_t>(effective_.link.mcs), false, 1);
             if (!rr.ok) {
-                lastApply_ = {nowIso(), false, restarted,
-                              std::string("radio: ") + rr.error};
+                lastApply_ = {nowIso(), false, restarted, std::string("radio: ") + rr.error};
                 return {false, {}, restarted, rr.error, version_};
             }
         }
@@ -502,8 +500,8 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             std::thread([this, pushWidth] {
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
                 std::lock_guard<std::mutex> g2(mu_);
-                auto rr = tuneRadio(paths_.radioTuneScript, "channel", effective_,
-                                    radio_.iface, radio_.driver);
+                auto rr = tuneRadio(paths_.radioTuneScript, "channel", effective_, radio_.iface,
+                                    radio_.driver);
                 if (!rr.ok) {
                     lastApply_.ok = false;
                     lastApply_.error = std::string("channel: ") + rr.stderrText;
@@ -513,9 +511,8 @@ ApplyResult Daemon::apply(bool reallyRestart) {
                     // NIC retuned first; now bump the video radiotap bandwidth.
                     WfbControlClient cli("127.0.0.1", kVideoControlPort);
                     auto cr = cli.setRadio(
-                        static_cast<uint8_t>(effective_.link.stbc ? 1 : 0),
-                        effective_.link.ldpc, false,
-                        static_cast<uint8_t>(modulationWidth(effective_.link.width)),
+                        static_cast<uint8_t>(effective_.link.stbc ? 1 : 0), effective_.link.ldpc,
+                        false, static_cast<uint8_t>(modulationWidth(effective_.link.width)),
                         static_cast<uint8_t>(effective_.link.mcs), false, 1);
                     if (!cr.ok) {
                         lastApply_.ok = false;
@@ -543,7 +540,7 @@ void Daemon::reset() {
     std::lock_guard<std::mutex> g(mu_);
     std::error_code ec;
     std::filesystem::remove(paths_.configPath, ec);
-    pending_ = Config{};   // reset to code defaults
+    pending_ = Config{}; // reset to code defaults
 }
 
 } // namespace fpvd

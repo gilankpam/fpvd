@@ -19,7 +19,6 @@ struct LockResult {
     std::vector<std::string> lockedPaths{};
 };
 
-LockResult checkDynamicLinkLock(const nlohmann::json& patchBody,
-                                const Config& mergedPending);
+LockResult checkDynamicLinkLock(const nlohmann::json& patchBody, const Config& mergedPending);
 
 } // namespace fpvd

@@ -24,20 +24,22 @@
 using namespace fpvd::dynlink;
 
 static Endpoints ephemeral() {
-    Endpoints e; e.listenPort = 45800;   // fixed test port
+    Endpoints e;
+    e.listenPort = 45800; // fixed test port
     return e;
 }
 
 TEST_CASE("controller starts and stops cleanly") {
-    DlRuntimeConfig snap{};                 // zero-ish; fields not exercised here
-    snap.healthTimeoutMs = 10000; snap.iface = "wlan0";
+    DlRuntimeConfig snap{}; // zero-ish; fields not exercised here
+    snap.healthTimeoutMs = 10000;
+    snap.iface = "wlan0";
     DynamicLinkController c(ephemeral());
     c.start(snap);
     CHECK(c.status().running == true);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     c.stop();
     CHECK(c.status().running == false);
-    c.start(snap);                           // restartable
+    c.start(snap); // restartable
     CHECK(c.status().running == true);
     c.stop();
 }
@@ -59,8 +61,8 @@ struct FakeWfbTx {
 
     std::mutex mu;
     std::vector<std::pair<uint8_t, uint8_t>> fec;     // (k, n)
-    std::vector<std::pair<uint8_t, uint8_t>> radio;    // (mcs, bandwidth)
-    std::vector<std::pair<uint8_t, bool>>    radioFlags; // (stbc, ldpc) per setRadio
+    std::vector<std::pair<uint8_t, uint8_t>> radio;   // (mcs, bandwidth)
+    std::vector<std::pair<uint8_t, bool>> radioFlags; // (stbc, ldpc) per setRadio
     std::atomic<int> unknownCmds{0};
 
     FakeWfbTx() {
@@ -84,8 +86,10 @@ struct FakeWfbTx {
 
     ~FakeWfbTx() {
         stop.store(true);
-        if (th.joinable()) th.join();
-        if (fd >= 0) ::close(fd);
+        if (th.joinable())
+            th.join();
+        if (fd >= 0)
+            ::close(fd);
     }
 
     void serve() {
@@ -93,19 +97,18 @@ struct FakeWfbTx {
             fpvd::WfbCmdReq req{};
             sockaddr_in from{};
             socklen_t flen = sizeof(from);
-            ssize_t n = ::recvfrom(fd, &req, sizeof(req), 0,
-                                   reinterpret_cast<sockaddr*>(&from), &flen);
-            if (n < 0) continue;  // timeout / EAGAIN
+            ssize_t n =
+                ::recvfrom(fd, &req, sizeof(req), 0, reinterpret_cast<sockaddr*>(&from), &flen);
+            if (n < 0)
+                continue; // timeout / EAGAIN
 
             {
                 std::lock_guard<std::mutex> lk(mu);
                 if (req.cmd_id == fpvd::kWfbCmdSetFec) {
                     fec.emplace_back(req.u.set_fec.k, req.u.set_fec.n);
                 } else if (req.cmd_id == fpvd::kWfbCmdSetRadio) {
-                    radio.emplace_back(req.u.set_radio.mcs_index,
-                                       req.u.set_radio.bandwidth);
-                    radioFlags.emplace_back(req.u.set_radio.stbc,
-                                            req.u.set_radio.ldpc);
+                    radio.emplace_back(req.u.set_radio.mcs_index, req.u.set_radio.bandwidth);
+                    radioFlags.emplace_back(req.u.set_radio.stbc, req.u.set_radio.ldpc);
                 } else {
                     // interleave (cmd 5) is retired; any unlisted cmd is a regression.
                     unknownCmds.fetch_add(1);
@@ -113,7 +116,7 @@ struct FakeWfbTx {
             }
 
             fpvd::WfbCmdResp resp{};
-            resp.req_id = req.req_id;   // echo (already network order)
+            resp.req_id = req.req_id; // echo (already network order)
             resp.rc = htonl(0);
             ::sendto(fd, &resp, offsetof(fpvd::WfbCmdResp, u), 0,
                      reinterpret_cast<sockaddr*>(&from), flen);
@@ -122,25 +125,34 @@ struct FakeWfbTx {
 
     bool sawFec(uint8_t k, uint8_t n) {
         std::lock_guard<std::mutex> lk(mu);
-        for (auto& f : fec) if (f.first == k && f.second == n) return true;
+        for (auto& f : fec)
+            if (f.first == k && f.second == n)
+                return true;
         return false;
     }
     bool sawRadio(uint8_t mcs, uint8_t bw) {
         std::lock_guard<std::mutex> lk(mu);
-        for (auto& r : radio) if (r.first == mcs && r.second == bw) return true;
+        for (auto& r : radio)
+            if (r.first == mcs && r.second == bw)
+                return true;
         return false;
     }
     bool sawRadioFlags(uint8_t stbc, bool ldpc) {
         std::lock_guard<std::mutex> lk(mu);
-        for (auto& f : radioFlags) if (f.first == stbc && f.second == ldpc) return true;
+        for (auto& f : radioFlags)
+            if (f.first == stbc && f.second == ldpc)
+                return true;
         return false;
     }
     // True iff EVERY captured setRadio carried these flags (proves the loop
     // never zeroes them — neither on a decision nor on a watchdog-safe push).
     bool allRadioFlags(uint8_t stbc, bool ldpc) {
         std::lock_guard<std::mutex> lk(mu);
-        if (radioFlags.empty()) return false;
-        for (auto& f : radioFlags) if (f.first != stbc || f.second != ldpc) return false;
+        if (radioFlags.empty())
+            return false;
+        for (auto& f : radioFlags)
+            if (f.first != stbc || f.second != ldpc)
+                return false;
         return true;
     }
 };
@@ -171,7 +183,9 @@ struct FakeEnc {
 
     bool sawContaining(const std::string& needle) {
         std::lock_guard<std::mutex> lk(mu);
-        for (auto& h : hits) if (h.find(needle) != std::string::npos) return true;
+        for (auto& h : hits)
+            if (h.find(needle) != std::string::npos)
+                return true;
         return false;
     }
 };
@@ -188,25 +202,23 @@ void sendDecision(uint16_t listenPort, const Decision& d) {
     dst.sin_family = AF_INET;
     dst.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     dst.sin_port = htons(listenPort);
-    ssize_t w = ::sendto(s, buf, n, 0,
-                         reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
+    ssize_t w = ::sendto(s, buf, n, 0, reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
     CHECK(w == static_cast<ssize_t>(n));
     ::close(s);
 }
 
 // Poll a predicate until true or deadline.
-template <typename F>
-bool waitFor(F pred, int timeoutMs) {
-    auto deadline = std::chrono::steady_clock::now() +
-                    std::chrono::milliseconds(timeoutMs);
+template <typename F> bool waitFor(F pred, int timeoutMs) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     while (std::chrono::steady_clock::now() < deadline) {
-        if (pred()) return true;
+        if (pred())
+            return true;
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     return pred();
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("controller applies a decision and trips watchdog to safe") {
     FakeWfbTx wfb;
@@ -214,24 +226,24 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
 
     Endpoints ep;
     ep.listenAddr = "127.0.0.1";
-    ep.listenPort = 45801;                 // fixed test port
+    ep.listenPort = 45801; // fixed test port
     ep.wfbCtlAddr = "127.0.0.1";
     ep.wfbCtlPort = wfb.port;
-    ep.encHost    = "127.0.0.1";
-    ep.encPort    = static_cast<uint16_t>(enc.port);
+    ep.encHost = "127.0.0.1";
+    ep.encPort = static_cast<uint16_t>(enc.port);
     ep.gsTunnelPort = 0;
     ep.osdUpdateIntervalMs = 1000;
 
     DlRuntimeConfig snap{};
-    snap.healthTimeoutMs       = 300;       // small -> watchdog trips fast
-    snap.applyStaggerMs        = 0;         // single-shot dispatch
-    snap.applySubPaceMs        = 0;
-    snap.debug                 = false;
-    snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
-    snap.stbc                  = true;      // preserved on every setRadio (incl. safe)
-    snap.ldpc                  = true;
-    snap.linkBandwidth         = 40;        // A1: bandwidth from config, not wire
-    snap.iface                 = "wlan-test-nonexistent";  // iw will fail, not hang
+    snap.healthTimeoutMs = 300; // small -> watchdog trips fast
+    snap.applyStaggerMs = 0;    // single-shot dispatch
+    snap.applySubPaceMs = 0;
+    snap.debug = false;
+    snap.roiQp = RoiCurve{6000, 2000, -24, 3};
+    snap.stbc = true; // preserved on every setRadio (incl. safe)
+    snap.ldpc = true;
+    snap.linkBandwidth = 40;              // A1: bandwidth from config, not wire
+    snap.iface = "wlan-test-nonexistent"; // iw will fail, not hang
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -243,27 +255,30 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     //    bitrate=24000 (clamped at maxBitrateKbps). The wire values below are
     //    deliberately set to different numbers to prove they are overridden.
     Decision d{};
-    d.magic       = kWireMagic;
-    d.version     = kWireVersion;
-    d.sequence    = 100;
+    d.magic = kWireMagic;
+    d.version = kWireVersion;
+    d.sequence = 100;
     d.timestampMs = 1;
-    d.mcs         = 7;
-    d.bandwidth   = 20;   // wire says 20; config (linkBandwidth=40) must win
-    d.txPowerDbm  = 10;
-    d.k           = 4;
-    d.n           = 6;
+    d.mcs = 7;
+    d.bandwidth = 20; // wire says 20; config (linkBandwidth=40) must win
+    d.txPowerDbm = 10;
+    d.k = 4;
+    d.n = 6;
     d.bitrateKbps = 6000;
-    d.fps         = 60;
+    d.fps = 60;
     // Resend until phase-1 dispatch is observed: the controller binds its
     // listen socket asynchronously after start(), and a UDP datagram sent
     // before the bind is silently dropped. Resends carry the same sequence,
     // so the dedup drops all but the first accepted copy.
-    bool gotFec = waitFor([&] {
-        sendDecision(ep.listenPort, d);
-        return wfb.sawFec(29, 44);   // drone-computed k/n (NOT the wire 4/6)
-    }, 1000);
+    bool gotFec = waitFor(
+        [&] {
+            sendDecision(ep.listenPort, d);
+            return wfb.sawFec(29, 44); // drone-computed k/n (NOT the wire 4/6)
+        },
+        1000);
     CHECK(gotFec);
-    CHECK(waitFor([&] { return wfb.sawRadio(7, 40); }, 1000));  // bw comes from config (40), not the wire (20)
+    CHECK(waitFor([&] { return wfb.sawRadio(7, 40); },
+                  1000)); // bw comes from config (40), not the wire (20)
     CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=24000"); }, 1000));
     // Decision push preserved the configured radiotap flags (not hardcoded 0/false).
     CHECK(wfb.sawRadioFlags(/*stbc=*/1, /*ldpc=*/true));
@@ -272,14 +287,15 @@ TEST_CASE("controller applies a decision and trips watchdog to safe") {
     //    MCS 0 (robust floor), bandwidth pinned to the operating width (40).
     //    Mirror applyLocalCompute so the assertion tracks the math, not magic numbers.
     Decision sf{};
-    sf.mcs = fpvd::dynlink::kDlFailsafeMcs;   // 0
-    sf.bandwidth = snap.linkBandwidth;        // 40 — never dropped on a trip
-    fpvd::dynlink::applyLocalCompute(snap, sf);   // fills k, n, bitrateKbps, txPowerDbm
-    CHECK(waitFor([&] {
-        return wfb.sawFec(sf.k, sf.n) &&
-               wfb.sawRadio(0, snap.linkBandwidth) &&
-               enc.sawContaining("video0.bitrate=" + std::to_string(sf.bitrateKbps));
-    }, 2000));
+    sf.mcs = fpvd::dynlink::kDlFailsafeMcs;     // 0
+    sf.bandwidth = snap.linkBandwidth;          // 40 — never dropped on a trip
+    fpvd::dynlink::applyLocalCompute(snap, sf); // fills k, n, bitrateKbps, txPowerDbm
+    CHECK(waitFor(
+        [&] {
+            return wfb.sawFec(sf.k, sf.n) && wfb.sawRadio(0, snap.linkBandwidth) &&
+                   enc.sawContaining("video0.bitrate=" + std::to_string(sf.bitrateKbps));
+        },
+        2000));
     CHECK(waitFor([&] { return c.status().watchdogTripped == true; }, 1000));
     // Both the decision and the safe push carried stbc=1/ldpc=1 — the loop
     // never overrides the operator's choice, even during recovery.
@@ -301,32 +317,38 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
 
     Endpoints ep;
     ep.listenAddr = "127.0.0.1";
-    ep.listenPort = 45802;                 // distinct fixed test port
+    ep.listenPort = 45802; // distinct fixed test port
     ep.wfbCtlAddr = "127.0.0.1";
     ep.wfbCtlPort = wfb.port;
-    ep.encHost    = "127.0.0.1";
-    ep.encPort    = static_cast<uint16_t>(enc.port);
+    ep.encHost = "127.0.0.1";
+    ep.encPort = static_cast<uint16_t>(enc.port);
     ep.gsTunnelPort = 0;
     ep.osdUpdateIntervalMs = 1000;
 
     DlRuntimeConfig snap{};
-    snap.healthTimeoutMs       = 5000;      // large -> watchdog won't trip mid-test
-    snap.applyStaggerMs        = 120;       // non-zero -> staggered dispatch
-    snap.applySubPaceMs        = 0;
-    snap.debug                 = false;
-    snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
-    snap.iface                 = "wlan-test-nonexistent";
+    snap.healthTimeoutMs = 5000; // large -> watchdog won't trip mid-test
+    snap.applyStaggerMs = 120;   // non-zero -> staggered dispatch
+    snap.applySubPaceMs = 0;
+    snap.debug = false;
+    snap.roiQp = RoiCurve{6000, 2000, -24, 3};
+    snap.iface = "wlan-test-nonexistent";
 
     DynamicLinkController c(ep);
     c.start(snap);
 
     auto mkDecision = [](uint32_t seq, uint8_t mcs, uint16_t br) {
         Decision d{};
-        d.magic = kWireMagic; d.version = kWireVersion;
-        d.sequence = seq; d.timestampMs = 1;
-        d.mcs = mcs; d.bandwidth = 20; d.txPowerDbm = 10;
-        d.k = 4; d.n = 6;
-        d.bitrateKbps = br; d.fps = 60;
+        d.magic = kWireMagic;
+        d.version = kWireVersion;
+        d.sequence = seq;
+        d.timestampMs = 1;
+        d.mcs = mcs;
+        d.bandwidth = 20;
+        d.txPowerDbm = 10;
+        d.k = 4;
+        d.n = 6;
+        d.bitrateKbps = br;
+        d.fps = 60;
         return d;
     };
 
@@ -337,14 +359,24 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
 
     // 1) First decision (seq 1) — first => Equal => single shot. drone bitrate 8739.
     Decision d1 = mkDecision(1, /*mcs=*/3, /*br=*/4000);
-    bool got1 = waitFor([&] { sendDecision(ep.listenPort, d1); return wfb.sawRadio(3, 20); }, 1000);
+    bool got1 = waitFor(
+        [&] {
+            sendDecision(ep.listenPort, d1);
+            return wfb.sawRadio(3, 20);
+        },
+        1000);
     CHECK(got1);
     CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=8739"); }, 1000));
 
     // 2) Second decision (seq 2) — higher drone bitrate => UP. radio applies now;
     //    encoder bitrate expands only after the ~120 ms gap timer.
     Decision d2 = mkDecision(2, /*mcs=*/5, /*br=*/6000);
-    bool gotRadio = waitFor([&] { sendDecision(ep.listenPort, d2); return wfb.sawRadio(5, 20); }, 1000);
+    bool gotRadio = waitFor(
+        [&] {
+            sendDecision(ep.listenPort, d2);
+            return wfb.sawRadio(5, 20);
+        },
+        1000);
     CHECK(gotRadio);
     // Drone bitrate=18501 must eventually arrive (phase 2 over the gap timer).
     CHECK(waitFor([&] { return enc.sawContaining("video0.bitrate=18501"); }, 1000));
@@ -362,23 +394,23 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     FakeEnc enc;
 
     Endpoints ep;
-    ep.listenAddr        = "127.0.0.1";
-    ep.listenPort        = 45805;           // fixed test port
-    ep.wfbCtlAddr        = "127.0.0.1";
-    ep.wfbCtlPort        = wfb.port;
-    ep.encHost           = "127.0.0.1";
-    ep.encPort           = static_cast<uint16_t>(enc.port);
-    ep.gsTunnelPort      = 0;
+    ep.listenAddr = "127.0.0.1";
+    ep.listenPort = 45805; // fixed test port
+    ep.wfbCtlAddr = "127.0.0.1";
+    ep.wfbCtlPort = wfb.port;
+    ep.encHost = "127.0.0.1";
+    ep.encPort = static_cast<uint16_t>(enc.port);
+    ep.gsTunnelPort = 0;
     ep.osdUpdateIntervalMs = 1000;
 
     // Start with a long watchdog timeout and safe.mcs=1
     DlRuntimeConfig snap{};
-    snap.healthTimeoutMs       = 10000;     // long -> won't trip during setup
-    snap.applyStaggerMs        = 0;
-    snap.applySubPaceMs        = 0;
-    snap.debug                 = false;
-    snap.roiQp                 = RoiCurve{6000, 2000, -24, 3};
-    snap.iface                 = "wlan-test-nonexistent";
+    snap.healthTimeoutMs = 10000; // long -> won't trip during setup
+    snap.applyStaggerMs = 0;
+    snap.applySubPaceMs = 0;
+    snap.debug = false;
+    snap.roiQp = RoiCurve{6000, 2000, -24, 3};
+    snap.iface = "wlan-test-nonexistent";
 
     DynamicLinkController c(ep);
     c.start(snap);
@@ -388,17 +420,25 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     // send repeatedly until the controller's listen socket is bound.
     {
         Decision d{};
-        d.magic = kWireMagic; d.version = kWireVersion;
-        d.sequence = 1; d.timestampMs = 1;
-        d.mcs = 3; d.bandwidth = 20; d.txPowerDbm = 10;
-        d.k = 4; d.n = 6;
-        d.bitrateKbps = 4000; d.fps = 60;
+        d.magic = kWireMagic;
+        d.version = kWireVersion;
+        d.sequence = 1;
+        d.timestampMs = 1;
+        d.mcs = 3;
+        d.bandwidth = 20;
+        d.txPowerDbm = 10;
+        d.k = 4;
+        d.n = 6;
+        d.bitrateKbps = 4000;
+        d.fps = 60;
         // Wire k/n ignored (Phase 3a): mcs=3/bw=20 -> drone k=6, n=9.
-        bool gotFec = waitFor([&] {
-            sendDecision(ep.listenPort, d);
-            return wfb.sawFec(6, 9);
-        }, 1000);
-        CHECK(gotFec);  // decision was accepted; watchdog.everSeen_ = true
+        bool gotFec = waitFor(
+            [&] {
+                sendDecision(ep.listenPort, d);
+                return wfb.sawFec(6, 9);
+            },
+            1000);
+        CHECK(gotFec); // decision was accepted; watchdog.everSeen_ = true
     }
 
     // Assert still running with original long timeout (watchdog won't trip yet)
@@ -408,7 +448,7 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     // The reload proof is the timeout change itself (10000->400); the failsafe
     // now derives at MCS 0 through applyLocalCompute, not a config block.
     DlRuntimeConfig snap2 = snap;
-    snap2.healthTimeoutMs = 400;             // shorter -> will trip faster
+    snap2.healthTimeoutMs = 400; // shorter -> will trip faster
 
     c.setConfig(snap2);
 
@@ -419,12 +459,11 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
     // on the operating bandwidth (default 20). The trip happening within 2 s (vs
     // the original 10000 ms timeout) is itself the proof the reload took effect.
     Decision sf{};
-    sf.mcs = fpvd::dynlink::kDlFailsafeMcs;   // 0
-    sf.bandwidth = snap.linkBandwidth;        // 20
+    sf.mcs = fpvd::dynlink::kDlFailsafeMcs; // 0
+    sf.bandwidth = snap.linkBandwidth;      // 20
     fpvd::dynlink::applyLocalCompute(snap, sf);
-    CHECK(waitFor([&] {
-        return wfb.sawFec(sf.k, sf.n) && wfb.sawRadio(0, snap.linkBandwidth);
-    }, 2000));
+    CHECK(waitFor([&] { return wfb.sawFec(sf.k, sf.n) && wfb.sawRadio(0, snap.linkBandwidth); },
+                  2000));
 
     // Confirm watchdog actually tripped in status
     CHECK(waitFor([&] { return c.status().watchdogTripped == true; }, 1000));
@@ -442,42 +481,52 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
 
     Endpoints ep;
     ep.listenAddr = "127.0.0.1";
-    ep.listenPort = 45807;                 // unique fixed test port
+    ep.listenPort = 45807; // unique fixed test port
     ep.wfbCtlAddr = "127.0.0.1";
     ep.wfbCtlPort = wfb.port;
-    ep.encHost    = "127.0.0.1";
-    ep.encPort    = static_cast<uint16_t>(enc.port);
+    ep.encHost = "127.0.0.1";
+    ep.encPort = static_cast<uint16_t>(enc.port);
     ep.gsTunnelPort = 0;
     ep.osdUpdateIntervalMs = 1000;
 
     DlRuntimeConfig snap{};
-    snap.healthTimeoutMs  = 300;            // watchdog trips fast
-    snap.applyStaggerMs   = 0;
-    snap.applySubPaceMs   = 0;
+    snap.healthTimeoutMs = 300; // watchdog trips fast
+    snap.applyStaggerMs = 0;
+    snap.applySubPaceMs = 0;
     snap.debug = false;
     snap.roiQp = RoiCurve{6000, 2000, -24, 3};
-    snap.stbc = true; snap.ldpc = true;
+    snap.stbc = true;
+    snap.ldpc = true;
     snap.linkBandwidth = 40;
     snap.iface = "wlan-test-nonexistent";
     snap.swfec = true;
     snap.swfecOverheadPct = 50;
-    snap.swfecDeadlineMs  = 30;
+    snap.swfecDeadlineMs = 30;
 
     DynamicLinkController c(ep);
     c.start(snap);
 
     Decision d{};
-    d.magic = kWireMagic; d.version = kWireVersion;
-    d.sequence = 100; d.timestampMs = 1;
-    d.mcs = 7; d.bandwidth = 20; d.txPowerDbm = 10;
-    d.k = 4; d.n = 6; d.bitrateKbps = 6000; d.fps = 60;
+    d.magic = kWireMagic;
+    d.version = kWireVersion;
+    d.sequence = 100;
+    d.timestampMs = 1;
+    d.mcs = 7;
+    d.bandwidth = 20;
+    d.txPowerDbm = 10;
+    d.k = 4;
+    d.n = 6;
+    d.bitrateKbps = 6000;
+    d.fps = 60;
 
     // Decision dispatch: the k/n fec slots must carry the STATIC swfec
     // params from the snapshot, never the wire's k/n or RS block math.
-    CHECK(waitFor([&] {
-        sendDecision(ep.listenPort, d);
-        return wfb.sawFec(50, 30);
-    }, 1000));
+    CHECK(waitFor(
+        [&] {
+            sendDecision(ep.listenPort, d);
+            return wfb.sawFec(50, 30);
+        },
+        1000));
 
     // Watchdog silence -> failsafe derives at MCS 0 through applyLocalCompute.
     // In swfec mode applyLocalCompute sets k=swfecOverheadPct/n=swfecDeadlineMs.
@@ -490,8 +539,9 @@ TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline")
     // sawFec(sf.k, sf.n): in swfec mode the failsafe derives k=swfecOverheadPct /
     // n=swfecDeadlineMs via applyLocalCompute, which equals the steady decision's
     // FEC (50/30) by design — so this confirms the value but not the re-emit alone.
-    CHECK(waitFor([&] { return wfb.sawFec(sf.k, sf.n) && wfb.sawRadio(0, snap.linkBandwidth); }, 2000));
-    CHECK_FALSE(wfb.sawFec(8, 12));  // rs tuple must NOT be pushed in swfec mode
+    CHECK(waitFor([&] { return wfb.sawFec(sf.k, sf.n) && wfb.sawRadio(0, snap.linkBandwidth); },
+                  2000));
+    CHECK_FALSE(wfb.sawFec(8, 12)); // rs tuple must NOT be pushed in swfec mode
 
     // Neither the apply path nor the watchdog-safe path may emit a retired
     // (or otherwise unlisted) control command.
@@ -506,41 +556,50 @@ TEST_CASE("setConfig hot-reloads swfec overhead -> next decision re-emits FEC") 
 
     Endpoints ep;
     ep.listenAddr = "127.0.0.1";
-    ep.listenPort = 45808;                 // distinct fixed test port
+    ep.listenPort = 45808; // distinct fixed test port
     ep.wfbCtlAddr = "127.0.0.1";
     ep.wfbCtlPort = wfb.port;
-    ep.encHost    = "127.0.0.1";
-    ep.encPort    = static_cast<uint16_t>(enc.port);
+    ep.encHost = "127.0.0.1";
+    ep.encPort = static_cast<uint16_t>(enc.port);
     ep.gsTunnelPort = 0;
     ep.osdUpdateIntervalMs = 1000;
 
     DlRuntimeConfig snap{};
-    snap.healthTimeoutMs = 10000;          // long -> no trip during the test
-    snap.applyStaggerMs  = 0;
-    snap.applySubPaceMs  = 0;
-    snap.roiQp           = RoiCurve{6000, 2000, -24, 3};
-    snap.iface           = "wlan-test-nonexistent";
-    snap.swfec           = true;           // swfec: d.k=overheadPct, d.n=deadlineMs
+    snap.healthTimeoutMs = 10000; // long -> no trip during the test
+    snap.applyStaggerMs = 0;
+    snap.applySubPaceMs = 0;
+    snap.roiQp = RoiCurve{6000, 2000, -24, 3};
+    snap.iface = "wlan-test-nonexistent";
+    snap.swfec = true; // swfec: d.k=overheadPct, d.n=deadlineMs
     snap.swfecOverheadPct = 50;
-    snap.swfecDeadlineMs  = 30;
+    snap.swfecDeadlineMs = 30;
 
     DynamicLinkController c(ep);
     c.start(snap);
 
     auto mkDecision = [](uint32_t seq) {
         Decision d{};
-        d.magic = kWireMagic; d.version = kWireVersion;
-        d.sequence = seq; d.timestampMs = 1;
-        d.mcs = 3; d.bandwidth = 20; d.txPowerDbm = 10;
-        d.k = 4; d.n = 6; d.bitrateKbps = 4000; d.fps = 60;
+        d.magic = kWireMagic;
+        d.version = kWireVersion;
+        d.sequence = seq;
+        d.timestampMs = 1;
+        d.mcs = 3;
+        d.bandwidth = 20;
+        d.txPowerDbm = 10;
+        d.k = 4;
+        d.n = 6;
+        d.bitrateKbps = 4000;
+        d.fps = 60;
         return d;
     };
 
     // First decision: swfec pushes overhead/deadline as k/n.
-    CHECK(waitFor([&] {
-        sendDecision(ep.listenPort, mkDecision(1));
-        return wfb.sawFec(50, 30);
-    }, 1000));
+    CHECK(waitFor(
+        [&] {
+            sendDecision(ep.listenPort, mkDecision(1));
+            return wfb.sawFec(50, 30);
+        },
+        1000));
 
     // Hot-reload a new overhead; the next (distinct-seq) decision must re-emit it.
     DlRuntimeConfig snap2 = snap;
@@ -549,10 +608,12 @@ TEST_CASE("setConfig hot-reloads swfec overhead -> next decision re-emits FEC") 
 
     // sawFec(70, 30) is discriminating: overhead 70 cannot appear before setConfig
     // (the initial snap uses overhead 50), so this proves the reload took effect.
-    CHECK(waitFor([&] {
-        sendDecision(ep.listenPort, mkDecision(2));
-        return wfb.sawFec(70, 30);
-    }, 1000));
+    CHECK(waitFor(
+        [&] {
+            sendDecision(ep.listenPort, mkDecision(2));
+            return wfb.sawFec(70, 30);
+        },
+        1000));
 
     c.stop();
 }

@@ -25,15 +25,13 @@ namespace fpvd::dynlink {
 static void put_u32(uint8_t* p, uint32_t v) {
     p[0] = static_cast<uint8_t>(v >> 24);
     p[1] = static_cast<uint8_t>((v >> 16) & 0xFF);
-    p[2] = static_cast<uint8_t>((v >>  8) & 0xFF);
+    p[2] = static_cast<uint8_t>((v >> 8) & 0xFF);
     p[3] = static_cast<uint8_t>(v & 0xFF);
 }
 
 static uint32_t get_u32(const uint8_t* p) {
-    return (static_cast<uint32_t>(p[0]) << 24)
-         | (static_cast<uint32_t>(p[1]) << 16)
-         | (static_cast<uint32_t>(p[2]) <<  8)
-         |  static_cast<uint32_t>(p[3]);
+    return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
 }
 
 // ---------------------------------------------------------------------------
@@ -58,7 +56,8 @@ uint32_t crc32(const uint8_t* buf, size_t len) {
 // ---------------------------------------------------------------------------
 
 PacketKind peekKind(const uint8_t* buf, size_t len) {
-    if (len < 4) return PacketKind::Unknown;
+    if (len < 4)
+        return PacketKind::Unknown;
     return get_u32(buf) == kWireMagic ? PacketKind::Decision : PacketKind::Unknown;
 }
 
@@ -67,34 +66,40 @@ PacketKind peekKind(const uint8_t* buf, size_t len) {
 // ---------------------------------------------------------------------------
 
 size_t encodeDecision(const Decision& d, uint8_t* buf, size_t buflen) {
-    if (buflen < kWireOnWire) return 0;
+    if (buflen < kWireOnWire)
+        return 0;
     std::memset(buf, 0, kWireOnWire);
-    put_u32(&buf[0], kWireMagic);        // [0..3]  magic
-    buf[4] = kWireVersion;               // [4]     version = 3
-    buf[5] = d.flags;                    // [5]     flags
-    put_u32(&buf[6], d.sequence);        // [6..9]  sequence
-    buf[10] = d.mcs;                     // [10]    mcs
+    put_u32(&buf[0], kWireMagic); // [0..3]  magic
+    buf[4] = kWireVersion;        // [4]     version = 3
+    buf[5] = d.flags;             // [5]     flags
+    put_u32(&buf[6], d.sequence); // [6..9]  sequence
+    buf[10] = d.mcs;              // [10]    mcs
     uint32_t c = crc32(buf, kWirePayloadSize);
-    put_u32(&buf[kWirePayloadSize], c);  // [11..14] crc32
+    put_u32(&buf[kWirePayloadSize], c); // [11..14] crc32
     return kWireOnWire;
 }
 
 DecodeResult decodeDecision(const uint8_t* buf, size_t len, Decision& d) {
-    if (len < kWireOnWire) return DecodeResult::Short;
+    if (len < kWireOnWire)
+        return DecodeResult::Short;
     uint32_t magic = get_u32(&buf[0]);
-    if (magic != kWireMagic) return DecodeResult::BadMagic;
+    if (magic != kWireMagic)
+        return DecodeResult::BadMagic;
     uint8_t version = buf[4];
-    if (version != kWireVersion) return DecodeResult::BadVersion;
+    if (version != kWireVersion)
+        return DecodeResult::BadVersion;
     uint32_t crc_wire = get_u32(&buf[kWirePayloadSize]);
     uint32_t crc_calc = crc32(buf, kWirePayloadSize);
-    if (crc_wire != crc_calc) return DecodeResult::BadCrc;
+    if (crc_wire != crc_calc)
+        return DecodeResult::BadCrc;
     d = {};
-    d.magic    = magic;
-    d.version  = version;
-    d.flags    = buf[5];
+    d.magic = magic;
+    d.version = version;
+    d.flags = buf[5];
     d.sequence = get_u32(&buf[6]);
-    d.mcs      = buf[10];
-    return DecodeResult::Ok;   // bandwidth/k/n/bitrate/fps left default; filled by config + applyLocalCompute
+    d.mcs = buf[10];
+    return DecodeResult::Ok; // bandwidth/k/n/bitrate/fps left default; filled by config +
+                             // applyLocalCompute
 }
 
 } // namespace fpvd::dynlink

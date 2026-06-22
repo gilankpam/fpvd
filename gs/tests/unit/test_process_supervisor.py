@@ -5,9 +5,15 @@ from fpvdgs.runner_supervisor import ProcessSupervisor
 
 def _settle(argv, **kw):
     # readiness = "still alive at end of a short window" (no port probe)
-    return ProcessSupervisor(argv, ready_check=None, ready_timeout=0.4,
-                             ready_on_timeout=True, poll_interval=0.05,
-                             backoff=0.05, **kw)
+    return ProcessSupervisor(
+        argv,
+        ready_check=None,
+        ready_timeout=0.4,
+        ready_on_timeout=True,
+        poll_interval=0.05,
+        backoff=0.05,
+        **kw,
+    )
 
 
 def test_settle_readiness_start_succeeds_for_living_process():
@@ -42,9 +48,11 @@ def test_set_argv_is_used_on_restart():
         sup.restart()
         # the live process now runs the swapped argv
         import subprocess
+
         pid = sup.state()["pid"]
-        out = subprocess.run(["ps", "-o", "args=", "-p", str(pid)],
-                             capture_output=True, text=True).stdout
+        out = subprocess.run(
+            ["ps", "-o", "args=", "-p", str(pid)], capture_output=True, text=True
+        ).stdout
         assert "31" in out
     finally:
         sup.shutdown()
@@ -53,15 +61,19 @@ def test_set_argv_is_used_on_restart():
 def test_missing_binary_is_failed_start_not_raise():
     # A non-existent binary makes Popen raise synchronously; start() must
     # convert that to a failed start (return False), NOT propagate the error.
-    sup = ProcessSupervisor(["/nonexistent/binary/definitely-not-here"],
-                            ready_check=None, ready_timeout=0.2,
-                            ready_on_timeout=True, poll_interval=0.05,
-                            backoff=0.05)
+    sup = ProcessSupervisor(
+        ["/nonexistent/binary/definitely-not-here"],
+        ready_check=None,
+        ready_timeout=0.2,
+        ready_on_timeout=True,
+        poll_interval=0.05,
+        backoff=0.05,
+    )
     try:
-        assert sup.start() is False           # does not raise FileNotFoundError
+        assert sup.start() is False  # does not raise FileNotFoundError
         st = sup.state()
         assert st["running"] is False
-        assert st["lastExit"] is not None     # errno surfaced
+        assert st["lastExit"] is not None  # errno surfaced
     finally:
         sup.shutdown()
 
@@ -69,17 +81,26 @@ def test_missing_binary_is_failed_start_not_raise():
 def test_set_env_is_applied_on_next_spawn(tmp_path, monkeypatch):
     out = tmp_path / "env.out"
     # a child that records whether MARKER is in its environment
-    code = ("import os,sys;"
-            f"open(r'{out}','a').write(os.environ.get('MARKER','none')+chr(10));"
-            "import time;time.sleep(30)")
-    sup = ProcessSupervisor(["python3", "-c", code], ready_check=None,
-                            ready_timeout=0.4, ready_on_timeout=True,
-                            poll_interval=0.05, backoff=0.05)
+    code = (
+        "import os,sys;"
+        f"open(r'{out}','a').write(os.environ.get('MARKER','none')+chr(10));"
+        "import time;time.sleep(30)"
+    )
+    sup = ProcessSupervisor(
+        ["python3", "-c", code],
+        ready_check=None,
+        ready_timeout=0.4,
+        ready_on_timeout=True,
+        poll_interval=0.05,
+        backoff=0.05,
+    )
     try:
         sup.start()
         sup.set_env({"MARKER": "yes"})
         sup.restart()
-        import time as _t; _t.sleep(0.1)
+        import time as _t
+
+        _t.sleep(0.1)
         lines = out.read_text().split()
         assert lines[0] == "none" and "yes" in lines
     finally:

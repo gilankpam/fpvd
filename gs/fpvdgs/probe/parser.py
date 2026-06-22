@@ -7,6 +7,7 @@ The needed PKT indices (data=4, fec_rec=6, lost=7) are stable across versions
 (newer wfb-ng appends fields). FEC is off on the probe, so fec_rec≈0 and the raw
 on-air PER for a window is lost/(data+lost).
 """
+
 from __future__ import annotations
 
 
@@ -57,8 +58,8 @@ class McsAggregator:
 
     def _slot(self, mcs: int) -> dict:
         return self._m.setdefault(
-            mcs, {"per": None, "rssi": None, "snr": None, "windows": 0,
-                  "_empty": 0})
+            mcs, {"per": None, "rssi": None, "snr": None, "windows": 0, "_empty": 0}
+        )
 
     def on_rx_ant(self, mcs: int, rssi: int, snr: int) -> None:
         s = self._slot(mcs)
@@ -76,10 +77,10 @@ class McsAggregator:
             return
         s["_empty"] = 0
         win_per = lost / denom
-        s["per"] = win_per if s["per"] is None else (
-            self.alpha * win_per + (1 - self.alpha) * s["per"])
+        s["per"] = (
+            win_per if s["per"] is None else (self.alpha * win_per + (1 - self.alpha) * s["per"])
+        )
         s["windows"] += 1
 
     def snapshot(self) -> dict[int, dict]:
-        return {mcs: {k: v for k, v in s.items() if k != "_empty"}
-                for mcs, s in self._m.items()}
+        return {mcs: {k: v for k, v in s.items() if k != "_empty"} for mcs, s in self._m.items()}

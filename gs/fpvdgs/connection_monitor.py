@@ -13,6 +13,7 @@ State machine (evaluated every eval_interval_s):
 
 Invariant: tunnel_stale_s > http_poll_s, so the heartbeat's own HTTP return
 traffic keeps the tunnel 'fresh' on an otherwise-idle but healthy link."""
+
 from __future__ import annotations
 
 import asyncio
@@ -32,16 +33,22 @@ class ConnectionMonitorConfig:
     enabled: bool = True
     tunnel_stale_s: float = 4.0
     http_poll_s: float = 1.5
-    http_timeout_s: float = 1.5   # consumed by build_app: the monitor's DroneClient timeout
+    http_timeout_s: float = 1.5  # consumed by build_app: the monitor's DroneClient timeout
     http_fail_count: int = 2
     eval_interval_s: float = 0.5
 
 
 class ConnectionMonitor:
-    def __init__(self, bus, drone_client, cfg=None, *,
-                 stats_endpoint="tcp://127.0.0.1:8103",
-                 stats_client_factory=StatsClient,
-                 time_fn=time.monotonic):
+    def __init__(
+        self,
+        bus,
+        drone_client,
+        cfg=None,
+        *,
+        stats_endpoint="tcp://127.0.0.1:8103",
+        stats_client_factory=StatsClient,
+        time_fn=time.monotonic,
+    ):
         self._bus = bus
         self._drone = drone_client
         self._cfg = cfg or ConnectionMonitorConfig()
@@ -59,7 +66,7 @@ class ConnectionMonitor:
         self._since = 0.0
         self._reason = ""
         self._drone_info = None
-        self._last_tunnel_rx = -1.0e9   # monotonic; far past => stale at boot
+        self._last_tunnel_rx = -1.0e9  # monotonic; far past => stale at boot
         self._fail = 0
         self._last_http = -1.0e9
 
@@ -72,8 +79,9 @@ class ConnectionMonitor:
                 if self._thread and self._thread.is_alive():
                     return
                 self._started.clear()
-                self._thread = threading.Thread(target=self._thread_main,
-                                                name="conn-monitor", daemon=True)
+                self._thread = threading.Thread(
+                    target=self._thread_main, name="conn-monitor", daemon=True
+                )
                 self._thread.start()
             self._started.wait(timeout=5.0)
 
@@ -130,8 +138,9 @@ class ConnectionMonitor:
         eval_task = asyncio.ensure_future(self._eval_loop())
         stop_task = asyncio.ensure_future(self._stop_event.wait())
         try:
-            await asyncio.wait({run_task, eval_task, stop_task},
-                               return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait(
+                {run_task, eval_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
+            )
         finally:
             client.stop()
             for t in (run_task, eval_task, stop_task):
@@ -150,8 +159,7 @@ class ConnectionMonitor:
             except Exception:
                 log.exception("conn-monitor evaluate failed")
             try:
-                await asyncio.wait_for(self._stop_event.wait(),
-                                       timeout=self._cfg.eval_interval_s)
+                await asyncio.wait_for(self._stop_event.wait(), timeout=self._cfg.eval_interval_s)
             except asyncio.TimeoutError:
                 pass
 
@@ -170,7 +178,7 @@ class ConnectionMonitor:
         if state == "disconnected":
             if not self._tunnel_fresh():
                 return
-            with self._lock:                    # persist so status() can show ARMED
+            with self._lock:  # persist so status() can show ARMED
                 self._state = state = "armed"
 
         if state == "armed":
@@ -180,17 +188,16 @@ class ConnectionMonitor:
             elif not self._tunnel_fresh():
                 with self._lock:
                     self._state = "disconnected"
-            return                              # else: stay armed, retry next tick
+            return  # else: stay armed, retry next tick
 
         # state == "connected"
         if (self._time() - self._last_http) >= self._cfg.http_poll_s:
             self._last_http = self._time()
             ok = await self._call_bool(self._drone.healthz)
             self._fail = 0 if ok else self._fail + 1
-        fresh = self._tunnel_fresh()            # re-read: the heartbeat await took time
+        fresh = self._tunnel_fresh()  # re-read: the heartbeat await took time
         if not fresh or self._fail >= self._cfg.http_fail_count:
-            self._enter_disconnected("tunnel_lost" if not fresh else "http_failed",
-                                     self._time())
+            self._enter_disconnected("tunnel_lost" if not fresh else "http_failed", self._time())
 
     async def _call(self, fn):
         loop = asyncio.get_running_loop()
@@ -216,8 +223,7 @@ class ConnectionMonitor:
             self._fail = 0
             self._last_http = now
         log.info("drone connected: %s", info)
-        self._bus.publish(DRONE_CONNECTED,
-                          {"state": "connected", "at_mono": now, "drone": info})
+        self._bus.publish(DRONE_CONNECTED, {"state": "connected", "at_mono": now, "drone": info})
 
     def _enter_disconnected(self, reason, now):
         with self._lock:
@@ -227,6 +233,12 @@ class ConnectionMonitor:
             self._drone_info = None
             self._fail = 0
         log.info("drone disconnected: reason=%s", reason)
-        self._bus.publish(DRONE_DISCONNECTED,
-                          {"state": "disconnected", "at_mono": now,
-                           "reason": reason, "last_seen_mono": last_seen})
+        self._bus.publish(
+            DRONE_DISCONNECTED,
+            {
+                "state": "disconnected",
+                "at_mono": now,
+                "reason": reason,
+                "last_seen_mono": last_seen,
+            },
+        )

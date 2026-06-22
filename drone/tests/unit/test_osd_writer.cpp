@@ -1,10 +1,10 @@
 /* test_osd_writer.cpp — osd::OsdWriter status/base-line writer. */
 #include "doctest.h"
-#include "osd/writer.hpp"
 #include "dynlink/wire.hpp"
+#include "osd/writer.hpp"
+#include <cstdio> // unlink
 #include <fstream>
 #include <sstream>
-#include <cstdio>   // unlink
 using namespace fpvd::osd;
 using fpvd::dynlink::Decision;
 
@@ -21,11 +21,11 @@ TEST_CASE("osd: status includes IDR counter") {
     OsdWriter osd(path, /*enabled=*/true);
 
     Decision d{};
-    d.mcs          = 5;
-    d.bitrateKbps  = 12000;
-    d.k            = 8;
-    d.n            = 14;
-    d.txPowerDbm   = 18;
+    d.mcs = 5;
+    d.bitrateKbps = 12000;
+    d.k = 8;
+    d.n = 14;
+    d.txPowerDbm = 18;
 
     /* Zero count is rendered as I0. */
     osd.writeStatus(d, 0, /*idrCount=*/0);
@@ -45,11 +45,11 @@ TEST_CASE("osd: status line contains expected fields") {
     OsdWriter osd(path, /*enabled=*/true);
 
     Decision d{};
-    d.mcs         = 3;
+    d.mcs = 3;
     d.bitrateKbps = 6000;
-    d.k           = 8;
-    d.n           = 12;
-    d.txPowerDbm  = 20;
+    d.k = 8;
+    d.n = 12;
+    d.txPowerDbm = 20;
 
     osd.writeStatus(d, 0, /*idrCount=*/0);
     std::string buf = readFile(path);
@@ -78,10 +78,10 @@ TEST_CASE("osd: writeBaseLine renders system stats + BF token, no decision data"
 
     osd.writeBaseLine(/*bfCode=*/2);
     std::string buf = readFile(path);
-    CHECK(buf.find("&L50&F30") != std::string::npos);   // prefix
+    CHECK(buf.find("&L50&F30") != std::string::npos); // prefix
     CHECK(buf.find("&B  T&T  W&W  CPU&C") != std::string::npos);
-    CHECK(buf.find(" B+") != std::string::npos);         // working BF token
-    CHECK(buf.find("MCS") == std::string::npos);         // no link decision data
+    CHECK(buf.find(" B+") != std::string::npos); // working BF token
+    CHECK(buf.find("MCS") == std::string::npos); // no link decision data
 
     std::remove(path.c_str());
 }
@@ -92,7 +92,8 @@ TEST_CASE("osd: disabled writes nothing (status AND base line)") {
 
     OsdWriter osd(path, /*enabled=*/false);
     Decision d{};
-    d.mcs = 3; d.bitrateKbps = 3000;
+    d.mcs = 3;
+    d.bitrateKbps = 3000;
 
     osd.writeStatus(d, 0, /*idrCount=*/0);
     osd.writeEvent("test");
@@ -121,7 +122,7 @@ TEST_CASE("osd: setEnabled(false) clears the overlay") {
 
     OsdWriter osd(path, /*enabled=*/true);
     osd.writeBaseLine(0);
-    CHECK(readFile(path).find("CPU&C") != std::string::npos);   // rendered
+    CHECK(readFile(path).find("CPU&C") != std::string::npos); // rendered
 
     /* Toggling OSD off must actively clear the msg file: msposd holds + re-
      * renders the last bytes forever, so flipping the flag alone leaves a stale
@@ -158,7 +159,10 @@ TEST_CASE("osd: writeStatus clears stale event line") {
 
     /* writeStatus should clear the event line. */
     Decision d{};
-    d.mcs = 2; d.bitrateKbps = 4000; d.k = 4; d.n = 8;
+    d.mcs = 2;
+    d.bitrateKbps = 4000;
+    d.k = 4;
+    d.n = 8;
     osd.writeStatus(d, 0, /*idrCount=*/0);
     {
         std::string buf = readFile(path);

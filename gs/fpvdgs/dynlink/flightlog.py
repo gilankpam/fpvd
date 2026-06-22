@@ -3,6 +3,7 @@
 One file per dynamicLink session, one JSON record per selector tick.
 GS-side, dependency-free. Size-capped + rotated. Pulled off-device for
 analysis by gs/tools/flightlog_analyze.py."""
+
 from __future__ import annotations
 
 import json
@@ -57,7 +58,7 @@ class FlightLog:
                 if not f.endswith(".jsonl"):
                     continue
                 try:
-                    hi = max(hi, int(f[:-len(".jsonl")]))
+                    hi = max(hi, int(f[: -len(".jsonl")]))
                 except ValueError:
                     continue
         except OSError:
@@ -125,7 +126,7 @@ class FlightLog:
         if not self.cfg.enabled:
             return
         if self._fh is not None and self._bytes == 0:
-            return                      # already on a fresh, empty flight file
+            return  # already on a fresh, empty flight file
         self.roll()
 
     def roll(self) -> None:

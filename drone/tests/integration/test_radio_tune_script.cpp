@@ -21,9 +21,8 @@ fs::path setupStubs(const fs::path& tmp) {
           << "echo \"" << tool << " $*\" >> \"" << rec.string() << "\"\n"
           << "exit 0\n";
         s.close();
-        fs::permissions(p, fs::perms::owner_all | fs::perms::group_read |
-                              fs::perms::group_exec | fs::perms::others_read |
-                              fs::perms::others_exec);
+        fs::permissions(p, fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
+                               fs::perms::others_read | fs::perms::others_exec);
     }
     std::string path = tmp.string() + ":" + (std::getenv("PATH") ? std::getenv("PATH") : "");
     ::setenv("PATH", path.c_str(), 1);
@@ -33,7 +32,10 @@ fs::path setupStubs(const fs::path& tmp) {
 std::string readAllText(const fs::path& p) {
     std::ifstream f(p);
     std::string out, line;
-    while (std::getline(f, line)) { out += line; out += "\n"; }
+    while (std::getline(f, line)) {
+        out += line;
+        out += "\n";
+    }
     return out;
 }
 } // namespace
@@ -44,7 +46,7 @@ TEST_CASE("radio-tune.sh: txpower dBm -> mBm (driver-independent)") {
     auto rec = setupStubs(tmp);
 
     fpvd::Config c{};
-    c.link.txPowerDbm = 20;          // 20 dBm -> 2000 mBm
+    c.link.txPowerDbm = 20; // 20 dBm -> 2000 mBm
 
     auto r1 = fpvd::tuneRadio("scripts/radio-tune.sh", "txpower", c, "wlan0", "88XXau");
     REQUIRE(r1.ok);

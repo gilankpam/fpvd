@@ -14,6 +14,7 @@ Wire layout (big-endian, 15 bytes on-wire = 11 payload + 4 CRC32):
     10    1    mcs
     11    4    crc32(bytes[0..10])    # big-endian u32
 """
+
 from __future__ import annotations
 
 import struct
@@ -21,8 +22,8 @@ from dataclasses import dataclass
 
 from .decision import Decision
 
-MAGIC        = 0x444C4B31    # 'DLK1'
-VERSION      = 3
+MAGIC = 0x444C4B31  # 'DLK1'
+VERSION = 3
 PAYLOAD_SIZE = 11
 ON_WIRE_SIZE = 15
 
@@ -31,6 +32,7 @@ def _crc32(data: bytes) -> int:
     """Reflected CRC-32 (IEEE 802.3 / zlib-compatible) — same as
     `dl_wire_crc32` in the C implementation."""
     import binascii
+
     return binascii.crc32(data) & 0xFFFFFFFF
 
 
@@ -41,6 +43,7 @@ class Encoder:
     Start at `seq` (default 1; 0 is reserved as the "never seen" sentinel
     on the drone side's dedup logic, though any value works).
     """
+
     seq: int = 1
 
     def encode(
@@ -60,8 +63,7 @@ class Encoder:
         if sequence is None:
             sequence = self.seq
             self.seq = (self.seq + 1) & 0xFFFFFFFF
-        return _encode_raw(version=VERSION, flags=0,
-                           sequence=sequence, mcs=int(decision.mcs))
+        return _encode_raw(version=VERSION, flags=0, sequence=sequence, mcs=int(decision.mcs))
 
 
 def _encode_raw(

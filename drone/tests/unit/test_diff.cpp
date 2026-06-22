@@ -1,5 +1,5 @@
-#include "doctest.h"
 #include "config/diff.hpp"
+#include "doctest.h"
 
 TEST_CASE("diff: changing link.channel flags Radio") {
     fpvd::Config a{}, b{};
@@ -28,7 +28,8 @@ TEST_CASE("diff: telemetry changes flag Telemetry") {
 
 TEST_CASE("diff: service add/remove/modify") {
     fpvd::Config a{}, b{};
-    fpvd::Service s{}; s.exec = "/bin/true";
+    fpvd::Service s{};
+    s.exec = "/bin/true";
     b.services["x"] = s;
     auto r1 = fpvd::diffSubsystems(a, b);
     CHECK(r1.servicesAffected.count("x"));

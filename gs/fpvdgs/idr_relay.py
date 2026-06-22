@@ -12,6 +12,7 @@ socket is reused to forward each token to the (non-loopback) drone, and a socket
 bound to 127.0.0.1 cannot send off-loopback (sendto fails EINVAL, which the
 relay swallows -> every IDR request silently dropped). INADDR_ANY still accepts
 the player's loopback tokens and lets the kernel pick the drone-route source."""
+
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +28,7 @@ class _IdrRelay(asyncio.DatagramProtocol):
     """Forward every received datagram to a fixed drone destination."""
 
     def __init__(self, dest):
-        self._dest = dest          # (droneHost, IDR_PORT)
+        self._dest = dest  # (droneHost, IDR_PORT)
         self._transport = None
 
     def connection_made(self, transport):
@@ -38,7 +39,7 @@ class _IdrRelay(asyncio.DatagramProtocol):
             try:
                 self._transport.sendto(data, self._dest)
             except OSError:
-                pass               # drone momentarily unreachable — drop, keep relaying
+                pass  # drone momentarily unreachable — drop, keep relaying
 
 
 class IdrRelay:
@@ -52,7 +53,7 @@ class IdrRelay:
         self._lock = threading.RLock()
         self._thread = None
         self._loop = None
-        self._stop_event = None          # asyncio.Event, created in-loop
+        self._stop_event = None  # asyncio.Event, created in-loop
         self._started = threading.Event()
         self._status = {"running": False, "listen": None}
 
@@ -62,8 +63,7 @@ class IdrRelay:
             if self._thread and self._thread.is_alive():
                 return
             self._started.clear()
-            self._thread = threading.Thread(target=self._thread_main,
-                                            name="idr-relay", daemon=True)
+            self._thread = threading.Thread(target=self._thread_main, name="idr-relay", daemon=True)
             self._thread.start()
         self._started.wait(timeout=5.0)
 
@@ -101,19 +101,18 @@ class IdrRelay:
                 with self._lock:
                     self._loop = None
                     self._status.update(running=False, listen=None)
-                self._started.set()   # unblock start() even on early failure
+                self._started.set()  # unblock start() even on early failure
 
     async def _run(self):
         self._stop_event = asyncio.Event()
         transport = None
         try:
             transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(
-                lambda: _IdrRelay(self._dest), local_addr=("0.0.0.0", self._port))
+                lambda: _IdrRelay(self._dest), local_addr=("0.0.0.0", self._port)
+            )
             sa = transport.get_extra_info("sockname")
             with self._lock:
-                self._status.update(
-                    running=True,
-                    listen="%s:%d" % (sa[0], sa[1]) if sa else None)
+                self._status.update(running=True, listen="%s:%d" % (sa[0], sa[1]) if sa else None)
         except OSError as e:
             log.warning("idr-relay bind 0.0.0.0:%d failed: %s", self._port, e)
             with self._lock:

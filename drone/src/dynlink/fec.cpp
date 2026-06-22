@@ -4,18 +4,18 @@
 
 namespace fpvd::dynlink {
 
-int computeK(double wireTargetKbps, int mtuBytes, int fps,
-             double baseRedundancyRatio, double blocksPerFrame,
-             int kMin, int kMax) {
-    if (wireTargetKbps <= 0.0 || mtuBytes <= 0 || fps <= 0 ||
-        blocksPerFrame <= 0.0 || baseRedundancyRatio <= -1.0)
+int computeK(double wireTargetKbps, int mtuBytes, int fps, double baseRedundancyRatio,
+             double blocksPerFrame, int kMin, int kMax) {
+    if (wireTargetKbps <= 0.0 || mtuBytes <= 0 || fps <= 0 || blocksPerFrame <= 0.0 ||
+        baseRedundancyRatio <= -1.0)
         return kMin;
     double anchorKbps = wireTargetKbps / (1.0 + baseRedundancyRatio);
-    double packetsPerFrame =
-        anchorKbps * 1000.0 / (static_cast<double>(fps) * mtuBytes * 8.0);
-    int k = static_cast<int>(packetsPerFrame / blocksPerFrame);  // trunc, matches GS int()
-    if (k < kMin) k = kMin;
-    if (k > kMax) k = kMax;
+    double packetsPerFrame = anchorKbps * 1000.0 / (static_cast<double>(fps) * mtuBytes * 8.0);
+    int k = static_cast<int>(packetsPerFrame / blocksPerFrame); // trunc, matches GS int()
+    if (k < kMin)
+        k = kMin;
+    if (k > kMax)
+        k = kMax;
     return k;
 }
 

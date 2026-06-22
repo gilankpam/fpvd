@@ -72,7 +72,7 @@ def test_noop_when_drone_down():
 
 def test_survives_get_status_raising():
     bf, drone = FakeBf(state="disabled"), FakeDrone(raise_status=True)
-    _armer(bf, drone).tick()   # must not raise
+    _armer(bf, drone).tick()  # must not raise
     assert bf.calls == []
 
 

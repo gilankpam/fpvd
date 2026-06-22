@@ -8,6 +8,7 @@ The block is explicit (no opaque `tuning` passthrough): `selector` and
 learned-prior exposes its learning knobs (settleTicks/alphaTighten/alphaRelax/minSamples/recencyDecay);
 predictive + persistence internals stay frozen. camelCase JSON maps to the
 dataclasses' snake_case fields."""
+
 from __future__ import annotations
 
 from .flightlog import FlightLogConfig
@@ -64,8 +65,7 @@ def build_aggregator(block: dict) -> SignalAggregator:
         ewma_alpha_rssi=float(s.get("ewmaAlphaRssi", d.ewma_alpha_rssi)),
         ewma_alpha_fec=float(s.get("ewmaAlphaFec", d.ewma_alpha_fec)),
         ewma_alpha_burst=float(s.get("ewmaAlphaBurst", d.ewma_alpha_burst)),
-        starvation_threshold_pps=float(
-            s.get("starvationThresholdPps", d.starvation_threshold_pps)),
+        starvation_threshold_pps=float(s.get("starvationThresholdPps", d.starvation_threshold_pps)),
         rssi_norm=rssi_norm,
     )
 

@@ -35,9 +35,15 @@ struct FakeSrv {
     }
 
     // Returns request count
-    size_t count() { std::lock_guard<std::mutex> lk(mu); return hits.size(); }
+    size_t count() {
+        std::lock_guard<std::mutex> lk(mu);
+        return hits.size();
+    }
 
-    std::string last() { std::lock_guard<std::mutex> lk(mu); return hits.back(); }
+    std::string last() {
+        std::lock_guard<std::mutex> lk(mu);
+        return hits.back();
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -56,7 +62,7 @@ TEST_CASE("EncoderClient applies bitrate+roiQp+fps, diffs") {
     CHECK(f.last().find("video0.fps=60") != std::string::npos);
 
     size_t n = f.count();
-    CHECK(enc.apply(6000, 60) == 0);  // identical -> diffed out, no new hit
+    CHECK(enc.apply(6000, 60) == 0); // identical -> diffed out, no new hit
     CHECK(f.count() == n);
 }
 
@@ -93,7 +99,7 @@ TEST_CASE("EncoderClient deduplicates repeat apply") {
 
     enc.apply(4000, 60);
     size_t n1 = f.count();
-    enc.apply(4000, 60);  // identical -> no HTTP
+    enc.apply(4000, 60); // identical -> no HTTP
     CHECK(f.count() == n1);
 }
 
@@ -122,7 +128,7 @@ TEST_CASE("EncoderClient bitrate=0 is no-op sentinel") {
     EncoderClient enc(wb, RoiCurve{6000, 2000, -24, 3});
 
     CHECK(enc.apply(0, 60) == 0);
-    CHECK(f.count() == 0);  // no HTTP request
+    CHECK(f.count() == 0); // no HTTP request
 }
 
 TEST_CASE("EncoderClient applySafe uses compute formula") {
@@ -156,7 +162,7 @@ TEST_CASE("EncoderClient setRoiCurve hot reconcile") {
     fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
     EncoderClient enc(wb, RoiCurve{6000, 2000, -24, 3});
 
-    enc.apply(4000, 60);  // roiQp=-12 cached
+    enc.apply(4000, 60); // roiQp=-12 cached
     size_t n1 = f.count();
 
     // Changing the curve changes computed roiQp -> new request goes out

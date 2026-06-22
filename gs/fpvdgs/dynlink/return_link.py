@@ -6,6 +6,7 @@ terminates on a TUN interface (`gs-wfb` at 10.5.0.1 on the GS,
 drone's TUN IP; kernel routing via the `gs-wfb` interface hands the
 datagram to wfb_tx, which sends it over wifi.
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,7 +43,10 @@ class ReturnLink:
             if self._errors == 1 or self._errors % 100 == 0:
                 log.warning(
                     "return_link: sendto %s:%d: %s (%d errors total)",
-                    self.host, self.port, e, self._errors,
+                    self.host,
+                    self.port,
+                    e,
+                    self._errors,
                 )
             else:
                 log.debug("return_link: sendto: %s", e)

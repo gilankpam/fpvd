@@ -11,7 +11,8 @@
 namespace fpvd::idr {
 
 IdrListener::IdrListener(const std::string& bindAddr, uint16_t port) {
-    if (port == 0) return;  // disabled — fd_ stays -1
+    if (port == 0)
+        return; // disabled — fd_ stays -1
 
     int fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (fd < 0) {
@@ -23,7 +24,7 @@ IdrListener::IdrListener(const std::string& bindAddr, uint16_t port) {
 
     struct sockaddr_in sa{};
     sa.sin_family = AF_INET;
-    sa.sin_port   = htons(port);
+    sa.sin_port = htons(port);
     if (bindAddr.empty()) {
         sa.sin_addr.s_addr = htonl(INADDR_ANY);
     } else if (inet_pton(AF_INET, bindAddr.c_str(), &sa.sin_addr) != 1) {
@@ -31,7 +32,7 @@ IdrListener::IdrListener(const std::string& bindAddr, uint16_t port) {
         return;
     }
 
-    if (bind(fd, reinterpret_cast<struct sockaddr *>(&sa), sizeof(sa)) < 0) {
+    if (bind(fd, reinterpret_cast<struct sockaddr*>(&sa), sizeof(sa)) < 0) {
         close(fd);
         return;
     }
@@ -40,19 +41,23 @@ IdrListener::IdrListener(const std::string& bindAddr, uint16_t port) {
 }
 
 IdrListener::~IdrListener() {
-    if (fd_ >= 0) close(fd_);
+    if (fd_ >= 0)
+        close(fd_);
 }
 
 size_t IdrListener::drain() {
-    if (fd_ < 0) return 0;
+    if (fd_ < 0)
+        return 0;
 
     size_t count = 0;
     uint8_t buf[64];
     while (true) {
         ssize_t n = recvfrom(fd_, buf, sizeof(buf), 0, nullptr, nullptr);
         if (n < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) break;
-            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                break;
+            if (errno == EINTR)
+                continue;
             break;
         }
         ++count;

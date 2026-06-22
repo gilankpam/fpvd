@@ -9,7 +9,7 @@ def test_relay_forwards_datagrams():
     dst.bind(("127.0.0.1", 0))
     dst_port = dst.getsockname()[1]
     relay = IdrRelay("127.0.0.1", port=0)
-    relay._dest = ("127.0.0.1", dst_port)   # forward target
+    relay._dest = ("127.0.0.1", dst_port)  # forward target
     relay.start()
     try:
         listen = relay.status()["listen"]

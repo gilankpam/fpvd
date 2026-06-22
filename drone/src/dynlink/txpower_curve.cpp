@@ -4,8 +4,10 @@
 namespace fpvd::dynlink {
 
 int8_t txpowerDbmForMcs(int mcs) {
-    if (mcs < 0) mcs = 0;
-    if (mcs > 7) mcs = 7;
+    if (mcs < 0)
+        mcs = 0;
+    if (mcs > 7)
+        mcs = 7;
     return kTxPowerDbmByMcs[mcs];
 }
 

@@ -1,0 +1,7 @@
+# Chosen to match the existing hand-written drone/ style and minimize churn:
+# 4-space indent, attached braces, left-aligned pointers, 100-column limit.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+PointerAlignment: Left
+DerivePointerAlignment: false

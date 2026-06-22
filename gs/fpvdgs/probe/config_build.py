@@ -2,15 +2,16 @@
 probe wfb_rx on kProbePort (matching the drone's probe radio_port). No probe
 config — the probe lifecycle follows dynamicLink. Measurement knobs
 (rxL/ewmaAlpha/blackoutWindows) are frozen module constants — no config path."""
+
 from __future__ import annotations
 
 from ..runner_supervisor import resolve_wlans
 
 GS_KEY = "/etc/gs.key"
-PROBE_PORT = 50    # wfb radio_port; MUST match the drone's kProbeRadioPort
-PROBE_RX_L = 50    # wfb_rx -l log interval (ms)
-PROBE_EWMA_ALPHA = 0.25         # per-MCS PER EWMA smoothing
-PROBE_BLACKOUT_WINDOWS = 10     # consecutive empty windows before per=1.0
+PROBE_PORT = 50  # wfb radio_port; MUST match the drone's kProbeRadioPort
+PROBE_RX_L = 50  # wfb_rx -l log interval (ms)
+PROBE_EWMA_ALPHA = 0.25  # per-MCS PER EWMA smoothing
+PROBE_BLACKOUT_WINDOWS = 10  # consecutive empty windows before per=1.0
 
 
 def make_probe_snapshot(effective: dict) -> dict:

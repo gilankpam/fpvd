@@ -4,9 +4,9 @@
 #include "dynlink/local_compute.hpp"
 #include "dynlink/txpower_curve.hpp"
 
+#include <arpa/inet.h>
 #include <cassert>
 #include <cstring>
-#include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -23,7 +23,8 @@ namespace fpvd::dynlink {
 
 static int openListenSocket(const std::string& addr, uint16_t port) {
     int fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    if (fd < 0) return -1;
+    if (fd < 0)
+        return -1;
 
     int one = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
@@ -52,13 +53,14 @@ static uint64_t nowMonotonicMs() {
 // Phase state for the staggered apply (port of apply_state_t in dl_applier.c).
 enum class ApplyState {
     Idle = 0,
-    UpGap,    // phase 1 = tx+radio applied; encoder pending
-    DownGap,  // phase 1 = encoder applied; tx+radio pending
+    UpGap,   // phase 1 = tx+radio applied; encoder pending
+    DownGap, // phase 1 = encoder applied; tx+radio pending
 };
 
 static int openTickTimer(uint32_t intervalMs) {
     int fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-    if (fd < 0) return -1;
+    if (fd < 0)
+        return -1;
     struct itimerspec ts{};
     ts.it_value.tv_sec = intervalMs / 1000;
     ts.it_value.tv_nsec = static_cast<long>(intervalMs % 1000) * 1000000L;
@@ -88,20 +90,22 @@ static int disarmGap(int gapFd) {
 DynamicLinkController::DynamicLinkController(Endpoints ep)
     : ep_(std::move(ep)), wb_(ep_.encHost, ep_.encPort) {}
 
-DynamicLinkController::~DynamicLinkController() {
-    stop();
-}
+DynamicLinkController::~DynamicLinkController() { stop(); }
 
 void DynamicLinkController::start(const DlRuntimeConfig& snap) {
     std::lock_guard<std::mutex> lk(lifetimeMu_);
-    if (running_.load()) stopLocked();  // NOT stop() — avoid re-locking lifetimeMu_
+    if (running_.load())
+        stopLocked(); // NOT stop() — avoid re-locking lifetimeMu_
 
-    { std::lock_guard<std::mutex> cg(cfgMu_); cfg_ = std::make_shared<const DlRuntimeConfig>(snap); }
+    {
+        std::lock_guard<std::mutex> cg(cfgMu_);
+        cfg_ = std::make_shared<const DlRuntimeConfig>(snap);
+    }
     stopFlag_.store(false);
 
     // Construct backend clients fresh from the snapshot + endpoints. They are
     // used only from the run() thread, so no locking is needed on them.
-    wfb_      = std::make_unique<WfbControlClient>(ep_.wfbCtlAddr, ep_.wfbCtlPort);
+    wfb_ = std::make_unique<WfbControlClient>(ep_.wfbCtlAddr, ep_.wfbCtlPort);
     // Probe retune client: built only when a control port is configured; a fresh
     // unique_ptr per start() (reset first) so a stop()+start() cycle rebuilds it,
     // mirroring wfb_. Held nullptr when the probe is disabled.
@@ -118,15 +122,15 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap) {
 
     // Reset diff baselines to "first/invalid" so the first decision re-emits all.
     lastTx_ = Decision{};
-    lastRadio_ = Decision{};   // vestigial — radio_/lastRadio_ removed in Phase 3b
+    lastRadio_ = Decision{}; // vestigial — radio_/lastRadio_ removed in Phase 3b
     lastEnc_ = Decision{};
     lastApplied_ = Decision{};
-    lastProbeMcs_ = -1;            // force the probe to re-tune on the first decision
+    lastProbeMcs_ = -1; // force the probe to re-tune on the first decision
     lastDecisionMs_ = 0;
-    lastOsdWriteMs_ = 0;           // first decision writes the OSD immediately
+    lastOsdWriteMs_ = 0; // first decision writes the OSD immediately
 
     int efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    eventFd_.store(efd);                // -1 tolerated (run() handles it)
+    eventFd_.store(efd); // -1 tolerated (run() handles it)
     {
         std::lock_guard<std::mutex> sg(statusMu_);
         status_.running = true;
@@ -134,7 +138,7 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap) {
         status_.lastDecisionAgeMs = -1;
     }
     running_.store(true);
-    thread_ = std::thread([this, efd]{ run(efd); });
+    thread_ = std::thread([this, efd] { run(efd); });
 }
 
 void DynamicLinkController::stop() {
@@ -143,14 +147,24 @@ void DynamicLinkController::stop() {
 }
 
 void DynamicLinkController::stopLocked() {
-    if (!running_.load()) return;
+    if (!running_.load())
+        return;
     stopFlag_.store(true);
-    int fd = eventFd_.exchange(-1);  // take ownership of the fd atomically
-    if (fd >= 0) { uint64_t one = 1; ssize_t w = write(fd, &one, sizeof(one)); (void)w; }
-    if (thread_.joinable()) thread_.join();
-    if (fd >= 0) ::close(fd);        // stop() owns the close, AFTER join
+    int fd = eventFd_.exchange(-1); // take ownership of the fd atomically
+    if (fd >= 0) {
+        uint64_t one = 1;
+        ssize_t w = write(fd, &one, sizeof(one));
+        (void)w;
+    }
+    if (thread_.joinable())
+        thread_.join();
+    if (fd >= 0)
+        ::close(fd); // stop() owns the close, AFTER join
     running_.store(false);
-    { std::lock_guard<std::mutex> sg(statusMu_); status_.running = false; }
+    {
+        std::lock_guard<std::mutex> sg(statusMu_);
+        status_.running = false;
+    }
 }
 
 // ---- dispatch helpers -------------------------------------------------------
@@ -169,7 +183,8 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
         emitted = true;
     }
     if (first || lastTx_.mcs != d.mcs || lastTx_.bandwidth != d.bandwidth) {
-        if (emitted && paceUs > 0) usleep(paceUs);
+        if (emitted && paceUs > 0)
+            usleep(paceUs);
         // stbc/ldpc are preserved from config, not decided by the loop (the GS
         // decision carries neither). CMD_SET_RADIO is atomic over the whole
         // radiotap word, so we must restate the configured flags on every push.
@@ -184,8 +199,8 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
         if (probeWfb_) {
             int rung = probeRungFor(d.mcs, cfg.probeMcsCeiling);
             if (rung != lastProbeMcs_) {
-                probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0),
-                                    cfg.ldpc, /*shortGi=*/false,
+                probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc,
+                                    /*shortGi=*/false,
                                     /*bandwidth=*/d.bandwidth,
                                     /*mcs=*/static_cast<uint8_t>(rung),
                                     /*vhtMode=*/false, /*vhtNss=*/1);
@@ -195,7 +210,8 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
         // Per-MCS tx power (operating-rung coupling): back off on the high-PAPR
         // 64-QAM rungs to keep the PA linear, full power at low MCS for range.
         // RadioTxpower::apply is diff-based, so iw only runs when the value changes.
-        if (radio_) radio_->apply(d.txPowerDbm);
+        if (radio_)
+            radio_->apply(d.txPowerDbm);
     }
     lastTx_ = d;
 }
@@ -207,11 +223,12 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
 Decision DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
     useconds_t paceUs = static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
     Decision d{};
-    d.mcs       = kDlFailsafeMcs;
+    d.mcs = kDlFailsafeMcs;
     d.bandwidth = cfg.linkBandwidth;
-    applyLocalCompute(cfg, d);   // fills k, n, bitrateKbps, fps, txPowerDbm
+    applyLocalCompute(cfg, d); // fills k, n, bitrateKbps, fps, txPowerDbm
     wfb_->setFec(d.k, d.n);
-    if (paceUs > 0) usleep(paceUs);
+    if (paceUs > 0)
+        usleep(paceUs);
     // Preserve the configured stbc/ldpc (robustness coding helps during recovery).
     wfb_->setRadio(/*stbc=*/static_cast<uint8_t>(cfg.stbc ? 1 : 0),
                    /*ldpc=*/cfg.ldpc, /*shortGi=*/false,
@@ -220,12 +237,13 @@ Decision DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
     // Move the probe down with the video so it never sits above the safe rung.
     if (probeWfb_) {
         int rung = probeRungFor(d.mcs, cfg.probeMcsCeiling);
-        probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc, false,
-                            d.bandwidth, static_cast<uint8_t>(rung), false, 1);
+        probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc, false, d.bandwidth,
+                            static_cast<uint8_t>(rung), false, 1);
         lastProbeMcs_ = rung;
     }
     // Low MCS -> high power -> robust recovery (txPowerDbm == curve[0] from derive).
-    if (radio_) radio_->applySafe(d.txPowerDbm);
+    if (radio_)
+        radio_->applySafe(d.txPowerDbm);
     return d;
 }
 
@@ -239,9 +257,12 @@ void DynamicLinkController::run(int evfd) {
     // the local `cfg` in-place (Task 17). cfg_ is always set in start() before
     // this thread is launched, so cfgPtr must never be null here.
     std::shared_ptr<const DlRuntimeConfig> cfgPtr;
-    { std::lock_guard<std::mutex> cg(cfgMu_); cfgPtr = cfg_; }
+    {
+        std::lock_guard<std::mutex> cg(cfgMu_);
+        cfgPtr = cfg_;
+    }
     assert(cfgPtr && "controller started without config");
-    DlRuntimeConfig cfg = *cfgPtr;  // mutable: hot-reconcile updates this in-place
+    DlRuntimeConfig cfg = *cfgPtr; // mutable: hot-reconcile updates this in-place
 
     // Open listen socket; tolerate failure — loop still runs for clean stop.
     int listenFd = -1;
@@ -254,8 +275,10 @@ void DynamicLinkController::run(int evfd) {
     // tickMs is kept as a local so hot-reconcile can detect changes and re-arm.
     auto computeTickMs = [&](const DlRuntimeConfig& c) -> uint32_t {
         uint32_t t = ep_.osdUpdateIntervalMs;
-        if (c.healthTimeoutMs / 2 < t) t = c.healthTimeoutMs / 2;
-        if (t < 100) t = 100;
+        if (c.healthTimeoutMs / 2 < t)
+            t = c.healthTimeoutMs / 2;
+        if (t < 100)
+            t = 100;
         return t;
     };
     uint32_t tickMs = computeTickMs(cfg);
@@ -269,18 +292,35 @@ void DynamicLinkController::run(int evfd) {
     int nfds = 0;
     int listenIdx = -1, tickIdx = -1, gapIdx = -1, eventIdx = -1;
 
-    if (listenFd    >= 0) { pfds[nfds].fd = listenFd;    pfds[nfds].events = POLLIN; listenIdx = nfds++; }
-    if (tickFd      >= 0) { pfds[nfds].fd = tickFd;      pfds[nfds].events = POLLIN; tickIdx   = nfds++; }
-    if (gapFd       >= 0) { pfds[nfds].fd = gapFd;       pfds[nfds].events = POLLIN; gapIdx    = nfds++; }
-    if (evfd        >= 0) { pfds[nfds].fd = evfd;        pfds[nfds].events = POLLIN; eventIdx  = nfds++; }
+    if (listenFd >= 0) {
+        pfds[nfds].fd = listenFd;
+        pfds[nfds].events = POLLIN;
+        listenIdx = nfds++;
+    }
+    if (tickFd >= 0) {
+        pfds[nfds].fd = tickFd;
+        pfds[nfds].events = POLLIN;
+        tickIdx = nfds++;
+    }
+    if (gapFd >= 0) {
+        pfds[nfds].fd = gapFd;
+        pfds[nfds].events = POLLIN;
+        gapIdx = nfds++;
+    }
+    if (evfd >= 0) {
+        pfds[nfds].fd = evfd;
+        pfds[nfds].events = POLLIN;
+        eventIdx = nfds++;
+    }
 
     ApplyState applyState = ApplyState::Idle;
-    Decision   applyPending{};
+    Decision applyPending{};
 
     while (true) {
         if (nfds == 0) {
             // No fds to poll — spin-check stopFlag with a short sleep.
-            if (stopFlag_.load()) break;
+            if (stopFlag_.load())
+                break;
             struct timespec ts{0, 10 * 1000 * 1000}; // 10 ms
             nanosleep(&ts, nullptr);
             continue;
@@ -288,7 +328,8 @@ void DynamicLinkController::run(int evfd) {
 
         int n = poll(pfds, static_cast<nfds_t>(nfds), -1);
         if (n < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             break;
         }
 
@@ -297,7 +338,8 @@ void DynamicLinkController::run(int evfd) {
             uint64_t val;
             ssize_t r = read(evfd, &val, sizeof(val));
             (void)r; // drain; ignore EAGAIN
-            if (stopFlag_.load()) break;
+            if (stopFlag_.load())
+                break;
 
             // Hot-reload reconcile: load the latest cfg_ snapshot and apply
             // structural changes that the components hold their own copies of.
@@ -305,18 +347,22 @@ void DynamicLinkController::run(int evfd) {
             // are picked up automatically on the next iteration via the
             // now-mutable local `cfg`.
             std::shared_ptr<const DlRuntimeConfig> newCfgPtr;
-            { std::lock_guard<std::mutex> cg(cfgMu_); newCfgPtr = cfg_; }
+            {
+                std::lock_guard<std::mutex> cg(cfgMu_);
+                newCfgPtr = cfg_;
+            }
             if (newCfgPtr) {
                 const DlRuntimeConfig& newCfg = *newCfgPtr;
 
                 // Watchdog: update its internal timeout copy.
-                if (watchdog_) watchdog_->setTimeout(newCfg.healthTimeoutMs);
+                if (watchdog_)
+                    watchdog_->setTimeout(newCfg.healthTimeoutMs);
 
                 // Tick timer: re-arm if the interval changed.
                 uint32_t newTickMs = computeTickMs(newCfg);
                 if (newTickMs != tickMs && tickFd >= 0) {
                     struct itimerspec ts{};
-                    ts.it_value.tv_sec  = newTickMs / 1000;
+                    ts.it_value.tv_sec = newTickMs / 1000;
                     ts.it_value.tv_nsec = static_cast<long>(newTickMs % 1000) * 1000000L;
                     ts.it_interval = ts.it_value;
                     timerfd_settime(tickFd, 0, &ts, nullptr);
@@ -350,9 +396,8 @@ void DynamicLinkController::run(int evfd) {
                 // next decision's dispatch carries the new flags.
                 if (radiotapFlagsChanged && lastTx_.magic == kWireMagic &&
                     applyState == ApplyState::Idle && wfb_) {
-                    wfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0),
-                                   cfg.ldpc, /*shortGi=*/false,
-                                   lastTx_.bandwidth, lastTx_.mcs,
+                    wfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc,
+                                   /*shortGi=*/false, lastTx_.bandwidth, lastTx_.mcs,
                                    /*vhtMode=*/false, /*vhtNss=*/1);
                 }
             }
@@ -380,7 +425,8 @@ void DynamicLinkController::run(int evfd) {
                         // New decision supersedes any in-flight phase 2; the
                         // per-backend diff below reapplies anything that differs.
                         if (applyState != ApplyState::Idle) {
-                            if (gapFd >= 0) disarmGap(gapFd);
+                            if (gapFd >= 0)
+                                disarmGap(gapFd);
                             applyState = ApplyState::Idle;
                         }
 
@@ -394,8 +440,7 @@ void DynamicLinkController::run(int evfd) {
 
                         uint64_t now = nowMonotonicMs();
                         bool first = (lastEnc_.magic != kWireMagic);
-                        ApplyDir dir = applyDirection(lastEnc_.bitrateKbps,
-                                                      d.bitrateKbps, first);
+                        ApplyDir dir = applyDirection(lastEnc_.bitrateKbps, d.bitrateKbps, first);
 
                         // canStagger: staggered dispatch requires both a non-zero
                         // gap interval AND a live gap timerfd. If the fd failed to
@@ -416,7 +461,7 @@ void DynamicLinkController::run(int evfd) {
                             applyPending = d;
                             applyState = ApplyState::UpGap;
                             armGap(gapFd, cfg.applyStaggerMs);
-                        } else {  // ApplyDir::Down
+                        } else { // ApplyDir::Down
                             // Throttle producer first, then narrow capacity after gap.
                             enc_->apply(d.bitrateKbps, d.fps);
                             lastEnc_ = d;
@@ -431,10 +476,8 @@ void DynamicLinkController::run(int evfd) {
                         // needs ~1 Hz, so most writes are coalesced — but mcs/
                         // bitrate still display within one interval. The watchdog
                         // event line is untouched (it fires on the tick).
-                        if (osd_ && osdWriteDue(now, lastOsdWriteMs_,
-                                                ep_.osdUpdateIntervalMs)) {
-                            osd_->writeStatus(lastApplied_,
-                                              bfCodeProvider_ ? bfCodeProvider_() : 0,
+                        if (osd_ && osdWriteDue(now, lastOsdWriteMs_, ep_.osdUpdateIntervalMs)) {
+                            osd_->writeStatus(lastApplied_, bfCodeProvider_ ? bfCodeProvider_() : 0,
                                               idrCountProvider_ ? idrCountProvider_() : 0);
                             lastOsdWriteMs_ = now;
                         }
@@ -454,17 +497,19 @@ void DynamicLinkController::run(int evfd) {
         if (tickIdx >= 0 && (pfds[tickIdx].revents & POLLIN)) {
             uint64_t expirations;
             ssize_t r = read(tickFd, &expirations, sizeof(expirations));
-            (void)r;  // drained; count ignored
+            (void)r; // drained; count ignored
             uint64_t now = nowMonotonicMs();
             if (watchdog_->tick(now)) {
                 // Drop any queued phase 2 — safe values supersede.
                 if (applyState != ApplyState::Idle) {
-                    if (gapFd >= 0) disarmGap(gapFd);
+                    if (gapFd >= 0)
+                        disarmGap(gapFd);
                     applyState = ApplyState::Idle;
                 }
                 Decision sf = dispatchTxSafe(cfg);
                 enc_->applySafe(sf.bitrateKbps);
-                if (osd_) osd_->eventWatchdog();
+                if (osd_)
+                    osd_->eventWatchdog();
                 // Invalidate last-states so the next fresh decision emits
                 // everything; reset dedup so a restarted GS recovers.
                 // (Port of dl_applier.c's memset(&last_tx/radio/enc, 0).)
@@ -489,8 +534,7 @@ void DynamicLinkController::run(int evfd) {
             // decision branch; the tick only emits the watchdog event.
             if (lastDecisionMs_ != 0) {
                 std::lock_guard<std::mutex> sg(statusMu_);
-                status_.lastDecisionAgeMs =
-                    static_cast<long>(now - lastDecisionMs_);
+                status_.lastDecisionAgeMs = static_cast<long>(now - lastDecisionMs_);
             }
         }
 
@@ -498,7 +542,7 @@ void DynamicLinkController::run(int evfd) {
         if (gapIdx >= 0 && (pfds[gapIdx].revents & POLLIN)) {
             uint64_t expirations;
             ssize_t r = read(gapFd, &expirations, sizeof(expirations));
-            (void)r;  // always drain to clear POLLIN
+            (void)r; // always drain to clear POLLIN
             if (applyState == ApplyState::UpGap) {
                 enc_->apply(applyPending.bitrateKbps, applyPending.fps);
                 lastEnc_ = applyPending;
@@ -514,12 +558,14 @@ void DynamicLinkController::run(int evfd) {
             // disarm landed — drained, ignore.
             applyState = ApplyState::Idle;
         }
-
     }
 
-    if (listenFd    >= 0) ::close(listenFd);
-    if (tickFd      >= 0) ::close(tickFd);
-    if (gapFd       >= 0) ::close(gapFd);
+    if (listenFd >= 0)
+        ::close(listenFd);
+    if (tickFd >= 0)
+        ::close(tickFd);
+    if (gapFd >= 0)
+        ::close(gapFd);
     // do NOT close evfd/eventFd_ here — stop() owns the close after join()
 }
 
@@ -538,10 +584,17 @@ void DynamicLinkController::publishStatus(const DlStatus& s) {
 }
 
 void DynamicLinkController::setConfig(const DlRuntimeConfig& snap) {
-    std::lock_guard<std::mutex> lk(lifetimeMu_);  // excludes a concurrent stop closing the fd
-    { std::lock_guard<std::mutex> cg(cfgMu_); cfg_ = std::make_shared<const DlRuntimeConfig>(snap); }
+    std::lock_guard<std::mutex> lk(lifetimeMu_); // excludes a concurrent stop closing the fd
+    {
+        std::lock_guard<std::mutex> cg(cfgMu_);
+        cfg_ = std::make_shared<const DlRuntimeConfig>(snap);
+    }
     int fd = eventFd_.load();
-    if (fd >= 0) { uint64_t one = 1; ssize_t w = write(fd, &one, sizeof(one)); (void)w; }
+    if (fd >= 0) {
+        uint64_t one = 1;
+        ssize_t w = write(fd, &one, sizeof(one));
+        (void)w;
+    }
 }
 
 } // namespace fpvd::dynlink
