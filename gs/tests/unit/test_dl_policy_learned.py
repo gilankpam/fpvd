@@ -150,7 +150,6 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
     # Simulate a session that climbed + accumulated hysteresis state.
     p.leading.state.current_mcs = 5
     p._cold_started = True
-    p._loss_count = 3
     p._starvation_count = 4
     p._snr_demote_count = 2
     p._predict_demote_count = 5
@@ -161,7 +160,6 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
 
     assert p.leading.state.current_mcs == 1     # back to the boot MCS
     assert p._cold_started is False             # warm-start will re-run
-    assert p._loss_count == 0
     assert p._starvation_count == 0
     assert p._snr_demote_count == 0
     assert p._predict_demote_count == 0

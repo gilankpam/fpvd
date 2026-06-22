@@ -119,13 +119,6 @@ def test_make_dl_snapshot_falls_back_to_default_port():
     assert snap["dronePort"] == 9999
 
 
-def test_loss_windows_reads_and_defaults():
-    from fpvdgs.dynlink.config_build import build_policy_config
-    over = build_policy_config(_block(selector={"lossWindows": 4}))
-    assert over.selector.loss_windows == 4
-    assert build_policy_config(_block()).selector.loss_windows == 1  # default (SNR-jump = react fast)
-
-
 def test_learned_prior_knob_survives_loader_and_reaches_policy(tmp_path):
     import json
     from fpvdgs.config import ConfigStore

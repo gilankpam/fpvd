@@ -37,7 +37,7 @@ def probe_target_per(rec) -> float | None:
 def summarize(path) -> dict:
     recs = list(_records(path))
     time_at_mcs = Counter()
-    predictive = reactive = warm_fallback = gated = loss_gated = 0
+    predictive = reactive = warm_fallback = gated = 0
     prior_learn = 0
     last_knees = None
     ceilings, mcss = [], []
@@ -52,8 +52,6 @@ def summarize(path) -> dict:
             reactive += 1
         if r.get("predict_gated"):
             gated += 1
-        if r.get("loss_gated"):
-            loss_gated += 1
         if r.get("prior_learn"):
             prior_learn += 1
         if r.get("knees") is not None:
@@ -74,7 +72,6 @@ def summarize(path) -> dict:
         "predictive_demotes": predictive,
         "reactive_demotes": reactive,
         "gated_demotes": gated,
-        "loss_gated_demotes": loss_gated,
         "prior_learn_ticks": prior_learn,
         "last_knees": last_knees,
         "mean_mcs": (sum(mcss) / len(mcss)) if mcss else None,
@@ -91,7 +88,6 @@ def _print_summary(s: dict) -> None:
     print(f"predictive demotes: {s['predictive_demotes']}")
     print(f"reactive demotes:   {s['reactive_demotes']}")
     print(f"gated demotes:      {s['gated_demotes']}")
-    print(f"loss-gated demotes: {s['loss_gated_demotes']}")
     print(f"prior-learn ticks:  {s['prior_learn_ticks']}")
     print(f"last knees:          {s['last_knees']}")
     print(f"mean SNR / EVM:      {s['mean_snr']} / {s['mean_evm']}   min EVM: {s['min_evm']}")

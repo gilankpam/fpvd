@@ -260,6 +260,13 @@ def test_selector_non_dict_rejected():
         schema.validate_effective(_dl(selector=0))
 
 
+def test_selector_loss_windows_is_unknown_key_rejected():
+    # lossWindows was removed (loss-demote is always single-window); it is now
+    # an unknown selector key.
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(_dl(selector={"lossWindows": 2}))
+
+
 def test_learned_prior_block_accepted_in_patch():
     validate_config_patch({"dynamicLink": {"learnedPrior": {"settleTicks": 8,
                                                             "alphaTighten": 0.4}}})  # no raise

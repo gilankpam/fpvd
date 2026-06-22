@@ -54,11 +54,6 @@ class SelectorConfig:
     # Total-blackout failsafe: consecutive starved windows before link_starved
     # feeds the emergency demote (10 Hz → 5 windows = 0.5 s).
     starvation_windows: int = 5
-    # Loss hysteresis: consecutive breaching windows (residual_loss_w >=
-    # video_demote_per) before a loss demote. 1 = react on the first window:
-    # safe because the reactive demote is now an SNR-jump that lands on the
-    # right rung in one move (nothing to cascade), so faster is strictly better.
-    loss_windows: int = 1
     # Proactive SNR demote: consecutive ticks snr_ceiling must stay below the
     # current rung before demoting to it (debounce; snr is already EWMA'd).
     snr_demote_debounce: int = 2
@@ -288,7 +283,6 @@ class Policy:
         # glitches). At 10 Hz, starvation_windows=5 = 0.5 s of below-
         # threshold packet rate before declaring blackout.
         self._starvation_count: int = 0
-        self._loss_count: int = 0
         # Knee-prior learning gate: only ingest once the operating rung has
         # been unchanged for settle_ticks (loss from the last change drained).
         self._ticks_at_mcs = 0
@@ -316,17 +310,11 @@ class Policy:
             self._starvation_count >= self.cfg.selector.starvation_windows
         )
 
-        # Loss hysteresis (mirrors starvation): residual_loss_w is raw and
-        # spikes on a single bad window. Require loss_windows consecutive
-        # breaching windows before a loss demote; flag suppressed ones.
-        if signals.residual_loss_w >= self.cfg.selector.video_demote_per:
-            self._loss_count += 1
-        else:
-            self._loss_count = 0
-        sustained_loss = self._loss_count >= self.cfg.selector.loss_windows
-        loss_gated = (
+        # Reactive loss demote: single-window. residual_loss_w is raw, but the
+        # reactive demote is an SNR-jump that lands on the right rung in one move
+        # (nothing to cascade), so react on the first breaching window.
+        sustained_loss = (
             signals.residual_loss_w >= self.cfg.selector.video_demote_per
-            and not sustained_loss
         )
 
         # Warm-start seed (one-shot). Uses the learned per-card curve ONLY —
@@ -464,7 +452,6 @@ class Policy:
             "residual_loss_w": signals.residual_loss_w,
             "fec_work": signals.fec_work,
             "link_starved": sustained_starved,
-            "loss_gated": loss_gated,
             "ceiling": (self.learned_prior.ceiling(signals.rssi)
                         if signals.rssi is not None else None),
             "probe": probe_log,
@@ -500,7 +487,6 @@ class Policy:
         self.leading = LeadingSelector(self.cfg.selector)
         self._cold_started = False
         self._starvation_count = 0
-        self._loss_count = 0
         self._ticks_at_mcs = 0
         self._last_ingest_mcs = None
         self._predict_demote_count = 0

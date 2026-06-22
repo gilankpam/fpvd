@@ -205,8 +205,7 @@ def test_reactive_demote_jumps_to_snr_ceiling(tmp_path):
         return Signals(rssi=-60.0, residual_loss_w=0.30, fec_work=0.0,
                        link_starved_w=False, timestamp=ts, snr=12.0)
 
-    p.tick(sig(1.0))            # loss count 1 (default loss_windows=2): no demote
-    dec = p.tick(sig(1.1))      # loss count 2 -> sustained -> jump to snr_ceiling(12)=1
+    dec = p.tick(sig(1.0))      # single breaching window -> jump to snr_ceiling(12)=1
     assert dec.mcs == 1         # 5 -> 1 in one move, not 5 -> 4
     p.close()
 
