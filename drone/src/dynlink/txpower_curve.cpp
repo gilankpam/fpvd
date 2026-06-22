@@ -11,4 +11,11 @@ int8_t txpowerDbmForMcs(int mcs) {
     return kTxPowerDbmByMcs[mcs];
 }
 
+nlohmann::json txPowerCurveJson() {
+    nlohmann::json arr = nlohmann::json::array();
+    for (int8_t v : kTxPowerDbmByMcs)
+        arr.push_back(static_cast<int>(v));
+    return arr;
+}
+
 } // namespace fpvd::dynlink

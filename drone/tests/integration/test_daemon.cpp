@@ -308,6 +308,28 @@ TEST_CASE("status: includes beamforming block") {
     fs::remove_all(tmp);
 }
 
+TEST_CASE("status: radio block includes the per-MCS txPowerCurve") {
+    auto tmp = fs::temp_directory_path() / "fpvd-test-txcurve-status";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "etc" / "fpvd");
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
+
+    auto j = fpvd::buildStatus(d);
+    REQUIRE(j.contains("radio"));
+    REQUIRE(j["radio"].contains("txPowerCurve"));
+    auto curve = j["radio"]["txPowerCurve"];
+    REQUIRE(curve.is_array());
+    CHECK(curve.size() == 8);
+    CHECK(curve[0] == 29);
+    CHECK(curve[3] == 23);
+    CHECK(curve[7] == 19);
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("daemon: txpower change takes hot path (tuneRadio, no rebuild)") {
     auto tmp = fs::temp_directory_path() / "fpvd-hot-txpower";
     fs::remove_all(tmp);
