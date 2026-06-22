@@ -6,43 +6,50 @@ namespace fpvd {
 
 static const char* stateName(ProcState s) {
     switch (s) {
-        case ProcState::Stopped:  return "stopped";
-        case ProcState::Starting: return "starting";
-        case ProcState::Running:  return "running";
-        case ProcState::Exited:   return "exited";
-        case ProcState::Failed:   return "failed";
+    case ProcState::Stopped:
+        return "stopped";
+    case ProcState::Starting:
+        return "starting";
+    case ProcState::Running:
+        return "running";
+    case ProcState::Exited:
+        return "exited";
+    case ProcState::Failed:
+        return "failed";
     }
     return "unknown";
 }
 
 static const char* bfStateName(BfState s) {
     switch (s) {
-        case BfState::Disabled:    return "disabled";
-        case BfState::Unsupported: return "unsupported";
-        case BfState::Active:      return "active";
-        case BfState::Error:       return "error";
+    case BfState::Disabled:
+        return "disabled";
+    case BfState::Unsupported:
+        return "unsupported";
+    case BfState::Active:
+        return "active";
+    case BfState::Error:
+        return "error";
     }
     return "unknown";
 }
 
 nlohmann::json buildStatus(Daemon& d) {
     using namespace std::chrono;
-    auto uptimeSec = duration_cast<seconds>(
-        steady_clock::now() - d.startedAt()).count();
+    auto uptimeSec = duration_cast<seconds>(steady_clock::now() - d.startedAt()).count();
 
     nlohmann::json procs = nlohmann::json::array();
     for (auto& name : d.orchestrator().names()) {
         auto* s = d.orchestrator().get(name);
-        if (!s) continue;
-        nlohmann::json p = {
-            {"name", name},
-            {"pid", s->pid()},
-            {"state", stateName(s->state())},
-            {"restarts", s->restartCount()},
-            {"lastExitCode", s->lastExitCode().has_value()
-                              ? nlohmann::json(s->lastExitCode().value())
-                              : nlohmann::json(nullptr)}
-        };
+        if (!s)
+            continue;
+        nlohmann::json p = {{"name", name},
+                            {"pid", s->pid()},
+                            {"state", stateName(s->state())},
+                            {"restarts", s->restartCount()},
+                            {"lastExitCode", s->lastExitCode().has_value()
+                                                 ? nlohmann::json(s->lastExitCode().value())
+                                                 : nlohmann::json(nullptr)}};
         procs.push_back(p);
     }
 
@@ -50,14 +57,12 @@ nlohmann::json buildStatus(Daemon& d) {
     if (d.lastApply().at.empty()) {
         last = nullptr;
     } else {
-        last = {
-            {"at", d.lastApply().at},
-            {"ok", d.lastApply().ok},
-            {"restarted", d.lastApply().restarted},
-            {"error", d.lastApply().error.has_value()
-                       ? nlohmann::json(d.lastApply().error.value())
-                       : nlohmann::json(nullptr)}
-        };
+        last = {{"at", d.lastApply().at},
+                {"ok", d.lastApply().ok},
+                {"restarted", d.lastApply().restarted},
+                {"error", d.lastApply().error.has_value()
+                              ? nlohmann::json(d.lastApply().error.value())
+                              : nlohmann::json(nullptr)}};
     }
 
     auto bf = d.beamformingStatus();
@@ -67,51 +72,44 @@ nlohmann::json buildStatus(Daemon& d) {
     if (!d.effective().dynamicLink.enabled) {
         dlj = {{"enabled", false}, {"running", false}};
     } else {
-        const char* hello = dls.hello == dynlink::HelloPub::Keepalive  ? "keepalive"
-                          : dls.hello == dynlink::HelloPub::Announcing ? "announcing"
-                          : "disabled";
-        dlj = {
-            {"enabled", true},
-            {"running", dls.running},
-            {"watchdogTripped", dls.watchdogTripped},
-            {"lastDecisionAgeMs", dls.lastDecisionAgeMs < 0
-                ? nlohmann::json(nullptr) : nlohmann::json(dls.lastDecisionAgeMs)},
-            {"hello", hello}
-        };
+        const char* hello = dls.hello == dynlink::HelloPub::Keepalive    ? "keepalive"
+                            : dls.hello == dynlink::HelloPub::Announcing ? "announcing"
+                                                                         : "disabled";
+        dlj = {{"enabled", true},
+               {"running", dls.running},
+               {"watchdogTripped", dls.watchdogTripped},
+               {"lastDecisionAgeMs", dls.lastDecisionAgeMs < 0
+                                         ? nlohmann::json(nullptr)
+                                         : nlohmann::json(dls.lastDecisionAgeMs)},
+               {"hello", hello}};
     }
 
-    return {
-        {"uptime", uptimeSec},
-        {"version", d.version()},
-        {"lastApply", last},
-        {"radio", {
-            {"driver", d.radio().driver},
-            {"iface", d.radio().iface},
-            {"adapterId", d.radio().adapterId.has_value()
-                           ? nlohmann::json(d.radio().adapterId.value())
-                           : nlohmann::json(nullptr)}
-        }},
-        {"beamforming", {
-            {"requested", bf.requested},
-            {"state", bfStateName(bf.state)},
-            {"reason", bf.reason},
-            {"localMac", bf.localMac},
-            {"remoteMac", bf.remoteMac},
-            {"bw", bf.bw},
-            {"soundingCount", bf.soundingCount},
-            {"cbrRssi", bf.cbrRssi},
-            {"cbrFresh", bf.cbrFresh},
-            {"lastCbr", bf.lastCbr.has_value()
-                         ? nlohmann::json(bf.lastCbr.value())
-                         : nlohmann::json(nullptr)}
-        }},
-        {"processes", procs},
-        {"dynamicLink", dlj},
-        {"probe", {
-            {"enabled", d.effective().dynamicLink.enabled},
-            {"running", d.orchestrator().get("probe-tx") != nullptr}
-        }}
-    };
+    return {{"uptime", uptimeSec},
+            {"version", d.version()},
+            {"lastApply", last},
+            {"radio",
+             {{"driver", d.radio().driver},
+              {"iface", d.radio().iface},
+              {"adapterId", d.radio().adapterId.has_value()
+                                ? nlohmann::json(d.radio().adapterId.value())
+                                : nlohmann::json(nullptr)}}},
+            {"beamforming",
+             {{"requested", bf.requested},
+              {"state", bfStateName(bf.state)},
+              {"reason", bf.reason},
+              {"localMac", bf.localMac},
+              {"remoteMac", bf.remoteMac},
+              {"bw", bf.bw},
+              {"soundingCount", bf.soundingCount},
+              {"cbrRssi", bf.cbrRssi},
+              {"cbrFresh", bf.cbrFresh},
+              {"lastCbr", bf.lastCbr.has_value() ? nlohmann::json(bf.lastCbr.value())
+                                                 : nlohmann::json(nullptr)}}},
+            {"processes", procs},
+            {"dynamicLink", dlj},
+            {"probe",
+             {{"enabled", d.effective().dynamicLink.enabled},
+              {"running", d.orchestrator().get("probe-tx") != nullptr}}}};
 }
 
 } // namespace fpvd

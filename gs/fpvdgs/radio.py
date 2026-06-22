@@ -46,8 +46,9 @@ def retune_commands(wlans, link: dict) -> list[list[str]]:
         if txpower_dbm is None:
             cmds.append(["iw", "dev", wlan, "set", "txpower", "auto"])
         else:
-            cmds.append(["iw", "dev", wlan, "set", "txpower", "fixed",
-                         str(round(txpower_dbm * 100))])
+            cmds.append(
+                ["iw", "dev", wlan, "set", "txpower", "fixed", str(round(txpower_dbm * 100))]
+            )
     return cmds
 
 

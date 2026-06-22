@@ -1,6 +1,6 @@
 #include "waybeam/client.hpp"
-#include <httplib.h>
 #include <cctype>
+#include <httplib.h>
 
 namespace fpvd {
 
@@ -20,25 +20,27 @@ static std::string urlEncode(const std::string& s) {
     return out;
 }
 
-WaybeamClient::WaybeamClient(std::string host, uint16_t port,
-                             int connectTimeoutMs, int readTimeoutMs)
-    : host_(std::move(host)), port_(port),
-      connectTimeoutMs_(connectTimeoutMs), readTimeoutMs_(readTimeoutMs) {}
+WaybeamClient::WaybeamClient(std::string host, uint16_t port, int connectTimeoutMs,
+                             int readTimeoutMs)
+    : host_(std::move(host)), port_(port), connectTimeoutMs_(connectTimeoutMs),
+      readTimeoutMs_(readTimeoutMs) {}
 
 bool WaybeamClient::get(const std::string& path) {
     httplib::Client cli(host_, static_cast<int>(port_));
-    cli.set_connection_timeout(0, connectTimeoutMs_ * 1000);  // µs
+    cli.set_connection_timeout(0, connectTimeoutMs_ * 1000); // µs
     cli.set_read_timeout(0, readTimeoutMs_ * 1000);
     auto res = cli.Get(path.c_str());
     return res && res->status / 100 == 2;
 }
 
 bool WaybeamClient::setFields(const std::map<std::string, std::string>& fields) {
-    if (fields.empty()) return true;
+    if (fields.empty())
+        return true;
     std::string path = "/api/v1/set?";
     bool first = true;
     for (const auto& [k, v] : fields) {
-        if (!first) path.push_back('&');
+        if (!first)
+            path.push_back('&');
         first = false;
         path += urlEncode(k);
         path.push_back('=');

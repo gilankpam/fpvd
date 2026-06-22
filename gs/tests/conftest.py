@@ -20,6 +20,7 @@ def _reset_bf_capable():
     teardown; reset it around every test so a leaked probe can't shell out to
     `wfb-nics` or spuriously reject a later validate_effective."""
     from fpvdgs import schema
+
     schema.set_bf_capable(None)
     yield
     schema.set_bf_capable(None)

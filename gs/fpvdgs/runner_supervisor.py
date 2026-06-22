@@ -44,9 +44,19 @@ def _port_open(port: int, host: str = "127.0.0.1") -> bool:
 
 
 class ProcessSupervisor:
-    def __init__(self, argv, env=None, ready_check=None, ready_timeout=10.0,
-                 ready_on_timeout=False, log_path=None, max_restarts=5,
-                 restart_window=60.0, poll_interval=0.5, backoff=0.5):
+    def __init__(
+        self,
+        argv,
+        env=None,
+        ready_check=None,
+        ready_timeout=10.0,
+        ready_on_timeout=False,
+        log_path=None,
+        max_restarts=5,
+        restart_window=60.0,
+        poll_interval=0.5,
+        backoff=0.5,
+    ):
         self._argv_list = list(argv)
         self._extra_env = dict(env or {})
         self._ready_check = ready_check
@@ -60,12 +70,12 @@ class ProcessSupervisor:
 
         self._proc = None
         self._log_fh = None
-        self._restarts = 0          # operator-initiated restarts (visibility)
-        self._auto_restarts = 0     # watcher-initiated (crash) restarts
+        self._restarts = 0  # operator-initiated restarts (visibility)
+        self._auto_restarts = 0  # watcher-initiated (crash) restarts
         self._last_exit = None
         self._fault = False
-        self._recent = []           # timestamps of crash auto-restarts (budget)
-        self._supervise = False     # watcher resurrects only while True
+        self._recent = []  # timestamps of crash auto-restarts (budget)
+        self._supervise = False  # watcher resurrects only while True
         self._watcher = None
         self._stop_evt = threading.Event()
         self._lock = threading.RLock()
@@ -88,10 +98,13 @@ class ProcessSupervisor:
     def _spawn(self):
         self._log_fh = open(self.log_path, "ab") if self.log_path else None
         try:
-            self._proc = subprocess.Popen(self._argv_list, env=self._env(),
-                                          stdout=(self._log_fh or subprocess.DEVNULL),
-                                          stderr=subprocess.STDOUT,
-                                          start_new_session=True)
+            self._proc = subprocess.Popen(
+                self._argv_list,
+                env=self._env(),
+                stdout=(self._log_fh or subprocess.DEVNULL),
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
         except OSError:
             self._close_log()
             self._proc = None
@@ -219,14 +232,30 @@ class RunnerSupervisor(ProcessSupervisor):
     """The wfb data plane: argv = runner_cmd --profiles P --wlans W..., env sets
     WIFIBROADCAST_CFG, readiness = the wfb-ng stats port (:8103) opening."""
 
-    def __init__(self, runner_cmd, cfg_out, profile, wlans, ready_port=8103,
-                 ready_timeout=10.0, log_path=None, max_restarts=5,
-                 restart_window=60.0, poll_interval=0.5, backoff=0.5):
+    def __init__(
+        self,
+        runner_cmd,
+        cfg_out,
+        profile,
+        wlans,
+        ready_port=8103,
+        ready_timeout=10.0,
+        log_path=None,
+        max_restarts=5,
+        restart_window=60.0,
+        poll_interval=0.5,
+        backoff=0.5,
+    ):
         argv = list(runner_cmd) + ["--profiles", profile, "--wlans", *wlans]
         super().__init__(
-            argv, env={"WIFIBROADCAST_CFG": cfg_out},
+            argv,
+            env={"WIFIBROADCAST_CFG": cfg_out},
             ready_check=lambda: _port_open(ready_port),
-            ready_timeout=ready_timeout, ready_on_timeout=False,
-            log_path=log_path, max_restarts=max_restarts,
-            restart_window=restart_window, poll_interval=poll_interval,
-            backoff=backoff)
+            ready_timeout=ready_timeout,
+            ready_on_timeout=False,
+            log_path=log_path,
+            max_restarts=max_restarts,
+            restart_window=restart_window,
+            poll_interval=poll_interval,
+            backoff=backoff,
+        )

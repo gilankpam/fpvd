@@ -1,12 +1,14 @@
 from fpvdgs.probe.config_build import (
-    make_probe_snapshot, PROBE_PORT, PROBE_RX_L, PROBE_EWMA_ALPHA,
     PROBE_BLACKOUT_WINDOWS,
+    PROBE_EWMA_ALPHA,
+    PROBE_PORT,
+    PROBE_RX_L,
+    make_probe_snapshot,
 )
 
 
 def _eff(**dl):
-    return {"link": {"linkId": 7669206, "wlans": ["wlan0"]},
-            "dynamicLink": {"enabled": True, **dl}}
+    return {"link": {"linkId": 7669206, "wlans": ["wlan0"]}, "dynamicLink": {"enabled": True, **dl}}
 
 
 def test_snapshot_uses_frozen_probe_constants():

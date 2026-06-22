@@ -1,8 +1,8 @@
 import time
 
 from fpvdgs.connection_monitor import ConnectionMonitor, ConnectionMonitorConfig
-from fpvdgs.events import EventBus, DRONE_CONNECTED, DRONE_DISCONNECTED
 from fpvdgs.dynlink.stats_client import RxEvent
+from fpvdgs.events import DRONE_CONNECTED, DRONE_DISCONNECTED, EventBus
 
 
 def _tunnel_rx(stream_id="tunnel rx"):
@@ -12,6 +12,7 @@ def _tunnel_rx(stream_id="tunnel rx"):
 def _stats_factory(control):
     """Factory whose client emits a tunnel rx each loop while control['emit'];
     control['id'] selects the stream id so a test can emit non-tunnel records."""
+
     class _Stats:
         def __init__(self, endpoint, on_event):
             self._on = on_event
@@ -19,6 +20,7 @@ def _stats_factory(control):
 
         async def run(self):
             import asyncio
+
             while not self._stop:
                 if control.get("emit"):
                     self._on(_tunnel_rx(control.get("id", "tunnel rx")))
@@ -46,8 +48,13 @@ class _FakeDrone:
 
 
 def _fast_cfg(**over):
-    base = dict(tunnel_stale_s=0.2, http_poll_s=0.02,
-                http_timeout_s=0.5, http_fail_count=2, eval_interval_s=0.02)
+    base = dict(
+        tunnel_stale_s=0.2,
+        http_poll_s=0.02,
+        http_timeout_s=0.5,
+        http_fail_count=2,
+        eval_interval_s=0.02,
+    )
     base.update(over)
     return ConnectionMonitorConfig(**base)
 
@@ -66,8 +73,9 @@ def test_connects_when_tunnel_and_http_ok():
     bus = EventBus()
     got = []
     bus.subscribe(DRONE_CONNECTED, got.append)
-    m = ConnectionMonitor(bus, _FakeDrone(version="d-9"), _fast_cfg(),
-                          stats_client_factory=_stats_factory(control))
+    m = ConnectionMonitor(
+        bus, _FakeDrone(version="d-9"), _fast_cfg(), stats_client_factory=_stats_factory(control)
+    )
     m.start()
     try:
         assert _wait(lambda: bool(got)), "expected DRONE_CONNECTED"
@@ -82,12 +90,13 @@ def test_disconnect_on_tunnel_loss():
     bus = EventBus()
     events = []
     bus.subscribe(DRONE_DISCONNECTED, events.append)
-    m = ConnectionMonitor(bus, _FakeDrone(), _fast_cfg(),
-                          stats_client_factory=_stats_factory(control))
+    m = ConnectionMonitor(
+        bus, _FakeDrone(), _fast_cfg(), stats_client_factory=_stats_factory(control)
+    )
     m.start()
     try:
         assert _wait(lambda: m.status()["state"] == "connected")
-        control["emit"] = False                      # tunnel goes silent
+        control["emit"] = False  # tunnel goes silent
         assert _wait(lambda: bool(events)), "expected DRONE_DISCONNECTED"
         assert events[0]["reason"] == "tunnel_lost"
     finally:
@@ -100,12 +109,11 @@ def test_disconnect_on_http_failure():
     events = []
     bus.subscribe(DRONE_DISCONNECTED, events.append)
     drone = _FakeDrone()
-    m = ConnectionMonitor(bus, drone, _fast_cfg(),
-                          stats_client_factory=_stats_factory(control))
+    m = ConnectionMonitor(bus, drone, _fast_cfg(), stats_client_factory=_stats_factory(control))
     m.start()
     try:
         assert _wait(lambda: m.status()["state"] == "connected")
-        drone.healthz_ok = False                     # heartbeat starts failing
+        drone.healthz_ok = False  # heartbeat starts failing
         assert _wait(lambda: bool(events)), "expected DRONE_DISCONNECTED"
         assert events[0]["reason"] == "http_failed"
     finally:
@@ -117,28 +125,30 @@ def test_armed_without_http_never_announces_connected():
     bus = EventBus()
     got = []
     bus.subscribe(DRONE_CONNECTED, got.append)
-    m = ConnectionMonitor(bus, _FakeDrone(status_ok=False), _fast_cfg(),
-                          stats_client_factory=_stats_factory(control))
+    m = ConnectionMonitor(
+        bus, _FakeDrone(status_ok=False), _fast_cfg(), stats_client_factory=_stats_factory(control)
+    )
     m.start()
     try:
         time.sleep(0.5)
-        assert got == []                             # tunnel up but HTTP never confirms
-        assert m.status()["state"] == "armed"        # ARMED is observable in status()
+        assert got == []  # tunnel up but HTTP never confirms
+        assert m.status()["state"] == "armed"  # ARMED is observable in status()
     finally:
         m.stop()
 
 
 def test_only_tunnel_stream_arms_the_monitor():
-    control = {"emit": True, "id": "video rx"}       # video, not tunnel
+    control = {"emit": True, "id": "video rx"}  # video, not tunnel
     bus = EventBus()
     got = []
     bus.subscribe(DRONE_CONNECTED, got.append)
-    m = ConnectionMonitor(bus, _FakeDrone(), _fast_cfg(),
-                          stats_client_factory=_stats_factory(control))
+    m = ConnectionMonitor(
+        bus, _FakeDrone(), _fast_cfg(), stats_client_factory=_stats_factory(control)
+    )
     m.start()
     try:
         time.sleep(0.5)
-        assert got == []                             # never armed -> never connected
+        assert got == []  # never armed -> never connected
     finally:
         m.stop()
 
@@ -147,8 +157,12 @@ def test_disabled_does_not_start_a_thread():
     bus = EventBus()
     got = []
     bus.subscribe(DRONE_CONNECTED, got.append)
-    m = ConnectionMonitor(bus, _FakeDrone(), _fast_cfg(enabled=False),
-                          stats_client_factory=_stats_factory({"emit": True}))
+    m = ConnectionMonitor(
+        bus,
+        _FakeDrone(),
+        _fast_cfg(enabled=False),
+        stats_client_factory=_stats_factory({"emit": True}),
+    )
     m.start()
     try:
         time.sleep(0.3)

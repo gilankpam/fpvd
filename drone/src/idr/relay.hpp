@@ -19,9 +19,8 @@ namespace fpvd::idr {
  * port == 0 disables the relay entirely (no socket, no thread).
  */
 class IdrRelay {
-public:
-    IdrRelay(WaybeamClient& enc, std::string bindAddr, uint16_t port,
-             uint32_t minIntervalMs);
+  public:
+    IdrRelay(WaybeamClient& enc, std::string bindAddr, uint16_t port, uint32_t minIntervalMs);
     ~IdrRelay();
     IdrRelay(const IdrRelay&) = delete;
     IdrRelay& operator=(const IdrRelay&) = delete;
@@ -42,19 +41,19 @@ public:
     // arms on any attempt (including failure). nowMs is a monotonic clock.
     int requestIdr(uint64_t nowMs);
 
-private:
+  private:
     void run();
 
-    IdrListener    listener_;
+    IdrListener listener_;
     WaybeamClient* enc_;
-    uint32_t       minIntervalMs_;
+    uint32_t minIntervalMs_;
 
     std::atomic<uint64_t> count_{0};
-    std::atomic<bool>     stop_{false};
-    int                   wakeFd_{-1};   // eventfd: interrupts poll() on stop()
-    std::thread           thread_;
+    std::atomic<bool> stop_{false};
+    int wakeFd_{-1}; // eventfd: interrupts poll() on stop()
+    std::thread thread_;
 
-    bool     everSent_{false};
+    bool everSent_{false};
     uint64_t lastIdrMs_{0};
 };
 

@@ -13,21 +13,19 @@ struct WfbCtlResult {
 // 127.0.0.1). Connected UDP; req_id htonl + match-on-recv; 500 ms recv
 // timeout; drains stale replies before each send.
 class WfbControlClient {
-public:
+  public:
     WfbControlClient(const std::string& addr, uint16_t port);
     ~WfbControlClient();
 
     WfbControlClient(const WfbControlClient&) = delete;
     WfbControlClient& operator=(const WfbControlClient&) = delete;
 
-    WfbCtlResult setRadio(uint8_t stbc, bool ldpc, bool shortGi,
-                          uint8_t bandwidth, uint8_t mcs,
+    WfbCtlResult setRadio(uint8_t stbc, bool ldpc, bool shortGi, uint8_t bandwidth, uint8_t mcs,
                           bool vhtMode, uint8_t vhtNss);
     WfbCtlResult setFec(uint8_t k, uint8_t n);
 
-private:
-    WfbCtlResult sendAndRecv(const void* req, size_t reqLen,
-                             uint32_t reqId, const char* label);
+  private:
+    WfbCtlResult sendAndRecv(const void* req, size_t reqLen, uint32_t reqId, const char* label);
     int fd_{-1};
     uint32_t reqId_{1};
     std::string openError_;

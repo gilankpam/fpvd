@@ -5,18 +5,16 @@
 using namespace fpvd::dynlink;
 
 TEST_CASE("roi qp above threshold is zero") {
-    CHECK(computeRoiQp(6000,  6000, 2000, -24, 3) == 0);
+    CHECK(computeRoiQp(6000, 6000, 2000, -24, 3) == 0);
     CHECK(computeRoiQp(10000, 6000, 2000, -24, 3) == 0);
 }
 
-TEST_CASE("roi qp at low anchor is floor") {
-    CHECK(computeRoiQp(2000, 6000, 2000, -24, 3) == -24);
-}
+TEST_CASE("roi qp at low anchor is floor") { CHECK(computeRoiQp(2000, 6000, 2000, -24, 3) == -24); }
 
 TEST_CASE("roi qp below low anchor clamps at floor") {
     CHECK(computeRoiQp(1500, 6000, 2000, -24, 3) == -24);
-    CHECK(computeRoiQp(500,  6000, 2000, -24, 3) == -24);
-    CHECK(computeRoiQp(0,    6000, 2000, -24, 3) == -24);
+    CHECK(computeRoiQp(500, 6000, 2000, -24, 3) == -24);
+    CHECK(computeRoiQp(0, 6000, 2000, -24, 3) == -24);
 }
 
 TEST_CASE("roi qp midpoint ramps linearly") {

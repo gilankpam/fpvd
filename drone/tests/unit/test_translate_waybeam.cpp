@@ -1,5 +1,5 @@
-#include "doctest.h"
 #include "config/schema.hpp"
+#include "doctest.h"
 #include "translate/waybeam.hpp"
 #include <fstream>
 #include <sstream>

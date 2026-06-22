@@ -4,10 +4,20 @@ import configparser
 from fpvdgs.render import render_cfg, write_cfg
 
 EFFECTIVE = {
-    "link": {"channel": 132, "width": 40, "txPowerDbm": 19, "region": "US",
-             "linkId": 7669206, "beamforming": {"enabled": False}, "wlans": "auto"},
-    "wfb": {"profile": "gs", "mavlink": {"peer": "connect://127.0.0.1:14550"},
-            "raw": {"gs_tunnel": {"ldpc": 1}}},
+    "link": {
+        "channel": 132,
+        "width": 40,
+        "txPowerDbm": 19,
+        "region": "US",
+        "linkId": 7669206,
+        "beamforming": {"enabled": False},
+        "wlans": "auto",
+    },
+    "wfb": {
+        "profile": "gs",
+        "mavlink": {"peer": "connect://127.0.0.1:14550"},
+        "raw": {"gs_tunnel": {"ldpc": 1}},
+    },
     "drone": {"endpoint": "http://10.5.0.10:8080"},
 }
 
@@ -55,7 +65,7 @@ def test_render_does_not_emit_link_id():
 
 
 def test_render_maps_video_bandwidth_from_width():
-    cfg = _parse_literals(render_cfg(EFFECTIVE))   # width 40
+    cfg = _parse_literals(render_cfg(EFFECTIVE))  # width 40
     assert cfg["gs_video"]["bandwidth"] == 40
     # uplink services cap at 20 MHz (the card width comes from gs_video=40)
     assert cfg["gs_mavlink"]["bandwidth"] == 20
@@ -65,8 +75,10 @@ def test_render_maps_video_bandwidth_from_width():
 def test_render_10mhz_narrows_all_services():
     # The card width = max(all service bandwidths), so a 10 MHz link must narrow
     # every service to 10 or the card stays at 20.
-    eff = {"link": {"channel": 132, "width": 10, "region": "US"},
-           "wfb": {"mavlink": {"peer": "connect://127.0.0.1:14550"}}}
+    eff = {
+        "link": {"channel": 132, "width": 10, "region": "US"},
+        "wfb": {"mavlink": {"peer": "connect://127.0.0.1:14550"}},
+    }
     cfg = _parse_literals(render_cfg(eff))
     assert cfg["gs_video"]["bandwidth"] == 10
     assert cfg["gs_mavlink"]["bandwidth"] == 10
@@ -93,6 +105,7 @@ def test_write_cfg_atomic_keeps_bak(tmp_path):
 
 def test_render_emits_10hz_log_interval():
     from fpvdgs import render
+
     cfg = {"link": {"channel": 132, "width": 40, "region": "US"}, "wfb": {}}
     text = render.render_cfg(cfg)
     assert "log_interval = 100" in text

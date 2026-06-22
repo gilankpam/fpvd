@@ -2,8 +2,8 @@
  * GS-sent bitrate/k/n/fps on a decoded Decision with values the drone
  * derives from {mcs, bandwidth} via the OpenIPC calculator + block-fill FEC. */
 #pragma once
-#include "dynlink/wire.hpp"            // Decision
-#include "dynlink/runtime_config.hpp"  // DlRuntimeConfig
+#include "dynlink/runtime_config.hpp" // DlRuntimeConfig
+#include "dynlink/wire.hpp"           // Decision
 #include <cstdint>
 
 namespace fpvd::dynlink {

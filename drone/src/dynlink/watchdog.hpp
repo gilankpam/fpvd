@@ -4,13 +4,14 @@
 namespace fpvd::dynlink {
 
 class Watchdog {
-public:
+  public:
     explicit Watchdog(uint32_t timeoutMs);
-    void setTimeout(uint32_t timeoutMs);          // for hot reconcile (new)
-    void notifyDecision(uint64_t nowMs);          // port dl_watchdog_notify_decision
-    bool tick(uint64_t nowMs);                    // port dl_watchdog_tick (one-shot)
+    void setTimeout(uint32_t timeoutMs); // for hot reconcile (new)
+    void notifyDecision(uint64_t nowMs); // port dl_watchdog_notify_decision
+    bool tick(uint64_t nowMs);           // port dl_watchdog_tick (one-shot)
     bool isTripped() const { return tripped_; }
-private:
+
+  private:
     uint64_t lastDecisionMs_{0};
     uint32_t timeoutMs_{0};
     bool everSeen_{false};

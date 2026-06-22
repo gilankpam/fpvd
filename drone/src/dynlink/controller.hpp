@@ -2,10 +2,10 @@
 #include "dynlink/dedup.hpp"
 #include "dynlink/encoder_client.hpp"
 #include "dynlink/radio_txpower.hpp"
-#include "osd/writer.hpp"
 #include "dynlink/runtime_config.hpp"
 #include "dynlink/watchdog.hpp"
 #include "dynlink/wire.hpp"
+#include "osd/writer.hpp"
 #include "translate/wfb_control.hpp"
 #include <atomic>
 #include <functional>
@@ -17,17 +17,17 @@
 namespace fpvd::dynlink {
 
 class DynamicLinkController {
-public:
+  public:
     explicit DynamicLinkController(Endpoints ep = {});
     ~DynamicLinkController();
     DynamicLinkController(const DynamicLinkController&) = delete;
     DynamicLinkController& operator=(const DynamicLinkController&) = delete;
 
     void start(const DlRuntimeConfig& snap);
-    void stop();                                  // idempotent; joins the thread
+    void stop(); // idempotent; joins the thread
     bool running() const { return running_.load(); }
-    void setConfig(const DlRuntimeConfig& snap);  // hot reload (stub for now; Task 17 fills it)
-    DlStatus status() const;                       // snapshot of published status
+    void setConfig(const DlRuntimeConfig& snap); // hot reload (stub for now; Task 17 fills it)
+    DlStatus status() const;                     // snapshot of published status
 
     // Set once before start(): supplies the BF OSD code (0/1/2) for the status
     // line. Invoked on the control thread; must be set while stopped.
@@ -46,9 +46,7 @@ public:
     // Probe rung selector: the observe-only probe rides one rung above the video
     // MCS, clamped to the hardware ceiling. Static + header-inline so it is unit
     // testable without constructing the controller (which binds sockets/threads).
-    static int probeRungFor(int mcs, int ceiling) {
-        return mcs + 1 < ceiling ? mcs + 1 : ceiling;
-    }
+    static int probeRungFor(int mcs, int ceiling) { return mcs + 1 < ceiling ? mcs + 1 : ceiling; }
 
     // OSD status-write throttle gate. The GS sends decisions ~10 Hz, but the OSD
     // is a human-readable display that only needs refreshing at
@@ -60,9 +58,9 @@ public:
         return lastMs == 0 || nowMs - lastMs >= intervalMs;
     }
 
-private:
-    void run(int evfd);                            // the poll(2) loop (Tasks 14-17); evfd passed from start()
-    void stopLocked();                             // assumes lifetimeMu_ is already held
+  private:
+    void run(int evfd); // the poll(2) loop (Tasks 14-17); evfd passed from start()
+    void stopLocked();  // assumes lifetimeMu_ is already held
     void publishStatus(const DlStatus&);
 
     // Decision dispatch helpers (run on the control thread only — no locking).
@@ -70,14 +68,14 @@ private:
     Decision dispatchTxSafe(const DlRuntimeConfig& cfg);
 
     Endpoints ep_;
-    WaybeamClient wb_;            // transport for enc_; built from ep_ in the ctor
+    WaybeamClient wb_; // transport for enc_; built from ep_ in the ctor
     std::thread thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> stopFlag_{false};
-    std::atomic<int> eventFd_{-1};                 // reload/stop wake
-    std::mutex lifetimeMu_;                          // serializes start/stop/setConfig lifecycle transitions
+    std::atomic<int> eventFd_{-1}; // reload/stop wake
+    std::mutex lifetimeMu_;        // serializes start/stop/setConfig lifecycle transitions
     mutable std::mutex cfgMu_;
-    std::shared_ptr<const DlRuntimeConfig> cfg_;   // guarded by cfgMu_
+    std::shared_ptr<const DlRuntimeConfig> cfg_; // guarded by cfgMu_
     mutable std::mutex statusMu_;
     DlStatus status_{};
 
@@ -86,13 +84,13 @@ private:
     // control thread), so they need no locking. Held by unique_ptr/optional
     // because their ctors take args and they are (re)constructed per start().
     std::unique_ptr<WfbControlClient> wfb_;
-    std::unique_ptr<WfbControlClient> probeWfb_;   // probe tx retune (nullptr if disabled)
-    int lastProbeMcs_{-1};                          // last rung pushed to the probe
-    std::optional<EncoderClient>      enc_;
-    std::optional<RadioTxpower>       radio_;
-    osd::OsdWriter*                   osd_{nullptr};   // non-owning; set via setOsdWriter()
-    std::optional<Watchdog>           watchdog_;
-    Dedup                             dedup_;
+    std::unique_ptr<WfbControlClient> probeWfb_; // probe tx retune (nullptr if disabled)
+    int lastProbeMcs_{-1};                       // last rung pushed to the probe
+    std::optional<EncoderClient> enc_;
+    std::optional<RadioTxpower> radio_;
+    osd::OsdWriter* osd_{nullptr}; // non-owning; set via setOsdWriter()
+    std::optional<Watchdog> watchdog_;
+    Dedup dedup_;
 
     // Per-backend prev-state (diff baselines). lastTx_ is diffed against new
     // decisions inside dispatchTxApply. lastEnc_ tracks bitrate for direction
@@ -108,11 +106,11 @@ private:
     Decision lastTx_{};
     Decision lastRadio_{};
     Decision lastEnc_{};
-    Decision lastApplied_{};   // for OSD display only
+    Decision lastApplied_{}; // for OSD display only
     uint64_t lastDecisionMs_{0};
-    uint64_t lastOsdWriteMs_{0};   // throttle baseline for osdWriteDue (0 = never written)
-    std::function<int()> bfCodeProvider_;   // 0 if unset
-    std::function<uint64_t()> idrCountProvider_;   // 0 if unset
+    uint64_t lastOsdWriteMs_{0};          // throttle baseline for osdWriteDue (0 = never written)
+    std::function<int()> bfCodeProvider_; // 0 if unset
+    std::function<uint64_t()> idrCountProvider_; // 0 if unset
 };
 
 } // namespace fpvd::dynlink

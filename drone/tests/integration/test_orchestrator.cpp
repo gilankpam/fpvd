@@ -27,8 +27,8 @@ TEST_CASE("orchestrator: starts processes in topological order") {
 
 TEST_CASE("orchestrator: stop order is reverse of start") {
     fpvd::Orchestrator orch;
-    orch.add({"a", {"/bin/sh","-c","sleep 5"}, {}, fpvd::RestartPolicy::Never, {}});
-    orch.add({"b", {"/bin/sh","-c","sleep 5"}, {}, fpvd::RestartPolicy::Never, {"a"}});
+    orch.add({"a", {"/bin/sh", "-c", "sleep 5"}, {}, fpvd::RestartPolicy::Never, {}});
+    orch.add({"b", {"/bin/sh", "-c", "sleep 5"}, {}, fpvd::RestartPolicy::Never, {"a"}});
     auto stop = orch.stopOrder();
     REQUIRE(stop.size() == 2);
     CHECK(stop[0] == "b");
@@ -58,10 +58,10 @@ TEST_CASE("orchestrator: restart bounces one process, leaves others running") {
     std::this_thread::sleep_for(100ms);
 
     CHECK(orch.get("a")->state() == fpvd::ProcState::Running);
-    CHECK(orch.get("a")->pid() != aBefore);     // new process
-    CHECK(orch.get("b")->pid() == bBefore);     // untouched
+    CHECK(orch.get("a")->pid() != aBefore); // new process
+    CHECK(orch.get("b")->pid() == bBefore); // untouched
 
-    orch.restart("does-not-exist");             // no-op, must not throw
+    orch.restart("does-not-exist"); // no-op, must not throw
 
     orch.stopAll();
 }
@@ -76,13 +76,13 @@ TEST_CASE("orchestrator: restart honors the settle delay and still bounces") {
     REQUIRE(before > 0);
 
     auto t0 = std::chrono::steady_clock::now();
-    orch.restart("a", std::chrono::milliseconds{300});   // settle 300ms
+    orch.restart("a", std::chrono::milliseconds{300}); // settle 300ms
     auto elapsed = std::chrono::steady_clock::now() - t0;
     std::this_thread::sleep_for(100ms);
 
     CHECK(orch.get("a")->state() == fpvd::ProcState::Running);
-    CHECK(orch.get("a")->pid() != before);               // still bounced
-    CHECK(elapsed >= std::chrono::milliseconds{250});     // settle was applied
+    CHECK(orch.get("a")->pid() != before);            // still bounced
+    CHECK(elapsed >= std::chrono::milliseconds{250}); // settle was applied
 
     orch.stopAll();
 }

@@ -1,21 +1,21 @@
-#include "doctest.h"
 #include "daemon.hpp"
+#include "doctest.h"
 #include "status.hpp"
 #include "translate/wfb.hpp"
 #include "translate/wfb_cmd.h"
-#include <httplib.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <unistd.h>
 #include <algorithm>
+#include <arpa/inet.h>
 #include <atomic>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <httplib.h>
 #include <mutex>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 #include <thread>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -25,11 +25,9 @@ TEST_CASE("daemon: defaultsJson returns the code defaults") {
     auto tmp = fs::temp_directory_path() / "fpvd-defaults-json";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
     d.bootstrap(/*startProcesses=*/false);
 
@@ -46,13 +44,11 @@ TEST_CASE("daemon: bootstraps from defaults file when no overlay") {
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
 
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
-    d.bootstrap(/*startProcesses=*/false);  // no real children in tests
+    d.bootstrap(/*startProcesses=*/false); // no real children in tests
 
     CHECK(d.effective().video.bitrate == 8192);
     CHECK(d.version() == 0);
@@ -64,11 +60,9 @@ TEST_CASE("daemon: PATCH then apply updates effective and overlay file") {
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
 
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
@@ -76,7 +70,7 @@ TEST_CASE("daemon: PATCH then apply updates effective and overlay file") {
     auto patchRes = d.patchPending(patch);
     REQUIRE(patchRes.ok);
 
-    auto applyRes = d.apply(false);  // don't actually restart processes
+    auto applyRes = d.apply(false); // don't actually restart processes
     REQUIRE(applyRes.ok);
     CHECK(d.effective().video.bitrate == 12345);
     CHECK(d.version() == 1);
@@ -86,7 +80,7 @@ TEST_CASE("daemon: PATCH then apply updates effective and overlay file") {
     nlohmann::json saved;
     f >> saved;
     CHECK(saved["video"]["bitrate"] == 12345);
-    CHECK(saved.contains("link"));        // full config, not a sparse overlay
+    CHECK(saved.contains("link")); // full config, not a sparse overlay
     CHECK(saved.contains("dynamicLink"));
 
     // /etc/waybeam.json rewritten.
@@ -103,34 +97,33 @@ TEST_CASE("daemon: PATCH video.sensorBin applies end-to-end (overlay + waybeam +
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
 
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
     CHECK(d.effective().video.sensorBin == "");
 
     REQUIRE(d.patchPending({{"video", {{"sensorBin", "2x2"}}}}).ok);
-    auto ar = d.apply(false);  // don't actually restart processes
+    auto ar = d.apply(false); // don't actually restart processes
     REQUIRE(ar.ok);
     CHECK(d.effective().video.sensorBin == "2x2");
 
     // Full config persisted: the changed field is present in the full tree.
     std::ifstream f(paths.configPath);
-    nlohmann::json saved; f >> saved;
+    nlohmann::json saved;
+    f >> saved;
     CHECK(saved["video"]["sensorBin"] == "2x2");
-    CHECK(saved.contains("link"));   // full config, not a sparse overlay
+    CHECK(saved.contains("link")); // full config, not a sparse overlay
 
     // waybeam.json carries the value under isp.sensorBin.
     std::ifstream wf(paths.waybeamJsonPath);
-    nlohmann::json wj; wf >> wj;
+    nlohmann::json wj;
+    wf >> wj;
     CHECK(wj["isp"]["sensorBin"] == "2x2");
 
     // It is a restart-class encoder change.
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder")
-          != ar.restarted.end());
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder") != ar.restarted.end());
 
     fs::remove_all(tmp);
 }
@@ -139,12 +132,11 @@ TEST_CASE("apply persists the FULL config, not a sparse overlay") {
     auto tmp = fs::temp_directory_path() / "fpvd-fullcfg";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
-    fpvd::Daemon d(paths); d.bootstrap(false);
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
+    fpvd::Daemon d(paths);
+    d.bootstrap(false);
     auto ar = d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})"));
     REQUIRE(ar.ok);
     auto r = d.apply(false);
@@ -163,14 +155,11 @@ TEST_CASE("daemon: reset clears overlay") {
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
     // Pre-existing overlay.
-    std::ofstream(tmp / "etc" / "fpvd" / "config.json")
-        << R"({"video":{"bitrate":11111}})";
+    std::ofstream(tmp / "etc" / "fpvd" / "config.json") << R"({"video":{"bitrate":11111}})";
 
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
     CHECK(d.effective().video.bitrate == 11111);
@@ -186,11 +175,9 @@ TEST_CASE("daemon: dl_applier never in orchestrator (DynamicLinkController is in
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-seed";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
@@ -199,8 +186,7 @@ TEST_CASE("daemon: dl_applier never in orchestrator (DynamicLinkController is in
     CHECK(std::find(names.begin(), names.end(), "dl_applier") == names.end());
 
     // Enable + apply — dl_applier still NOT in orchestrator.
-    auto pr = d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":true}})"));
+    auto pr = d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})"));
     CHECK(pr.ok);
     auto ar = d.apply(/*reallyRestart=*/false);
     CHECK(ar.ok);
@@ -211,15 +197,14 @@ TEST_CASE("daemon: dl_applier never in orchestrator (DynamicLinkController is in
     fs::remove_all(tmp);
 }
 
-TEST_CASE("daemon: dynamicLink in restarted-list when healthTimeoutMs changes while DL is enabled") {
+TEST_CASE(
+    "daemon: dynamicLink in restarted-list when healthTimeoutMs changes while DL is enabled") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-restarted";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
@@ -228,35 +213,30 @@ TEST_CASE("daemon: dynamicLink in restarted-list when healthTimeoutMs changes wh
     REQUIRE(d.apply(/*reallyRestart=*/false).ok);
 
     // Now change a DL knob: dynamicLink should appear in restarted.
-    d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"healthTimeoutMs":5000}})"));
+    d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"healthTimeoutMs":5000}})"));
     auto ar = d.apply(/*reallyRestart=*/false);
     REQUIRE(ar.ok);
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink")
-          != ar.restarted.end());
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink") != ar.restarted.end());
 
     fs::remove_all(tmp);
 }
 
-TEST_CASE("daemon: dynamicLink NOT in restarted-list when healthTimeoutMs changes while DL is disabled") {
+TEST_CASE(
+    "daemon: dynamicLink NOT in restarted-list when healthTimeoutMs changes while DL is disabled") {
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-not-restarted";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
     // DL stays disabled. Change a DL knob: dynamicLink should NOT be reported.
-    d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"healthTimeoutMs":5000}})"));
+    d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"healthTimeoutMs":5000}})"));
     auto ar = d.apply(/*reallyRestart=*/false);
     REQUIRE(ar.ok);
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink")
-          == ar.restarted.end());
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink") == ar.restarted.end());
 
     fs::remove_all(tmp);
 }
@@ -265,11 +245,9 @@ TEST_CASE("daemon: dynamicLink IN restarted-list when DL is being disabled (tran
     auto tmp = fs::temp_directory_path() / "fpvd-daemon-dl-disable-restart";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
@@ -281,8 +259,7 @@ TEST_CASE("daemon: dynamicLink IN restarted-list when DL is being disabled (tran
     d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":false}})"));
     auto ar = d.apply(/*reallyRestart=*/false);
     REQUIRE(ar.ok);
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink")
-          != ar.restarted.end());
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "dynamicLink") != ar.restarted.end());
 
     fs::remove_all(tmp);
 }
@@ -292,18 +269,18 @@ TEST_CASE("daemon: apply reports beamforming when its config changes") {
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
 
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
     // beamforming requires link.stbc=false; the code default is stbc=true, so
     // clear it explicitly in the same patch.
-    nlohmann::json patch = {{"link", {{"stbc", false}, {"beamforming",
-        {{"enabled", true}, {"remoteMac", "00:c0:ca:dd:ee:ff"}}}}}};
+    nlohmann::json patch = {
+        {"link",
+         {{"stbc", false},
+          {"beamforming", {{"enabled", true}, {"remoteMac", "00:c0:ca:dd:ee:ff"}}}}}};
     auto pr = d.patchPending(patch);
     REQUIRE(pr.ok);
 
@@ -318,11 +295,9 @@ TEST_CASE("status: includes beamforming block") {
     auto tmp = fs::temp_directory_path() / "fpvd-test-bf-status";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
@@ -341,16 +316,12 @@ TEST_CASE("daemon: txpower change takes hot path (tuneRadio, no rebuild)") {
     ::setenv("FPVD_TEST_RECORD", rec.string().c_str(), 1);
 
     fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string(),
-        "tests/fixtures/fake_radio_tune.sh"
-    };
+        (tmp / "etc" / "fpvd" / "config.json").string(), "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string(), "tests/fixtures/fake_radio_tune.sh"};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"link":{"txPowerDbm":5}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"link":{"txPowerDbm":5}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
 
@@ -366,23 +337,19 @@ TEST_CASE("daemon: txpower is rejected while DL is enabled (curve owns power)") 
     auto tmp = fs::temp_directory_path() / "fpvd-dl-txpower";
     fs::remove_all(tmp);
     fs::create_directories(tmp / "etc" / "fpvd");
-    fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string()
-    };
+    fpvd::DaemonPaths paths{(tmp / "etc" / "fpvd" / "config.json").string(),
+                            "tests/fixtures/fake_radio_up_ok.sh",
+                            (tmp / "etc" / "waybeam.json").string()};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
     // Enable DL and commit so effective.dynamicLink.enabled = true.
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/false).ok);
 
     // A txpower change is rejected under DL — the per-MCS power curve owns
     // tx power and would silently override a manual value.
-    auto pr = d.patchPending(nlohmann::json::parse(
-        R"({"link":{"txPowerDbm":20}})"));
+    auto pr = d.patchPending(nlohmann::json::parse(R"({"link":{"txPowerDbm":20}})"));
     CHECK_FALSE(pr.ok);
 
     fs::remove_all(tmp);
@@ -396,18 +363,14 @@ TEST_CASE("daemon: width change defers channel retune via tune script") {
     ::setenv("FPVD_TEST_RECORD", rec.string().c_str(), 1);
 
     fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string(),
-        "tests/fixtures/fake_radio_tune.sh"
-    };
+        (tmp / "etc" / "fpvd" / "config.json").string(), "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string(), "tests/fixtures/fake_radio_tune.sh"};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"link":{"width":40}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"link":{"width":40}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
-    REQUIRE(ar.ok);   // returns immediately; channel retune is deferred
+    REQUIRE(ar.ok); // returns immediately; channel retune is deferred
 
     // The detached worker sleeps 200ms, runs the channel tune, then attempts a
     // video setRadio to 127.0.0.1:8000 which is not listening (~500ms timeout).
@@ -453,7 +416,7 @@ static fpvd::DaemonPaths makeRoutingPaths(const fs::path& tmp, uint16_t listenPo
     paths.idrPort = 0;
     paths.dlEndpoints.gsTunnelPort = 0;
     paths.osdMsgPath = (tmp / "MSPOSD.msg").string();
-    paths.waybeamRestartSettleMs = 0;  // keep the waybeam-restart tests fast
+    paths.waybeamRestartSettleMs = 0; // keep the waybeam-restart tests fast
     return paths;
 }
 
@@ -464,8 +427,7 @@ TEST_CASE("apply: dynamicLink knob change hot-reloads, no orchestrator rebuild")
     d.bootstrap(false);
 
     // Enable DL and apply for real so the controller is running.
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     REQUIRE(d.dynamicLinkStatus().running);
 
@@ -473,8 +435,8 @@ TEST_CASE("apply: dynamicLink knob change hot-reloads, no orchestrator rebuild")
     auto namesBefore = d.orchestrator().names();
 
     // Change a dynamicLink knob (healthTimeoutMs) — a pure dynamicLink change.
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"healthTimeoutMs":5000}})")).ok);
+    REQUIRE(
+        d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"healthTimeoutMs":5000}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
 
@@ -500,16 +462,14 @@ TEST_CASE("apply: enabled false->true starts controller; true->false stops it") 
     // false -> true: starts the controller, no full rebuild. The only orchestrator
     // delta is the targeted probe pair add (probe-tx + probe-feed) — every other
     // supervised process keeps its identity (no stopAll/startAll).
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     CHECK(d.dynamicLinkStatus().running);
     {
         auto namesAfter = d.orchestrator().names();
         std::vector<std::string> added;
         for (auto& n : namesAfter)
-            if (std::find(namesBefore.begin(), namesBefore.end(), n) ==
-                namesBefore.end())
+            if (std::find(namesBefore.begin(), namesBefore.end(), n) == namesBefore.end())
                 added.push_back(n);
         std::sort(added.begin(), added.end());
         CHECK(added == std::vector<std::string>{"probe-feed", "probe-tx"});
@@ -517,11 +477,10 @@ TEST_CASE("apply: enabled false->true starts controller; true->false stops it") 
 
     // true -> false: stops the controller AND removes the probe pair — names back
     // to the pre-toggle set (still no rebuild).
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":false}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":false}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     CHECK_FALSE(d.dynamicLinkStatus().running);
-    CHECK(d.orchestrator().names() == namesBefore);  // probe removed, no rebuild
+    CHECK(d.orchestrator().names() == namesBefore); // probe removed, no rebuild
 
     fs::remove_all(tmp);
 }
@@ -548,7 +507,7 @@ TEST_CASE("apply: DL disable restates swfec fec as (overheadPct,deadlineMs), not
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = htons(static_cast<uint16_t>(fpvd::kVideoControlPort));
     REQUIRE(::bind(srv, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0);
-    timeval tv{0, 100000};   // 100 ms poll so the stop flag is honored
+    timeval tv{0, 100000}; // 100 ms poll so the stop flag is honored
     ::setsockopt(srv, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     std::mutex mu;
@@ -559,15 +518,16 @@ TEST_CASE("apply: DL disable restates swfec fec as (overheadPct,deadlineMs), not
             fpvd::WfbCmdReq req{};
             sockaddr_in from{};
             socklen_t flen = sizeof(from);
-            ssize_t n = ::recvfrom(srv, &req, sizeof(req), 0,
-                                   reinterpret_cast<sockaddr*>(&from), &flen);
-            if (n <= 0) continue;   // timeout — re-check the stop flag
+            ssize_t n =
+                ::recvfrom(srv, &req, sizeof(req), 0, reinterpret_cast<sockaddr*>(&from), &flen);
+            if (n <= 0)
+                continue; // timeout — re-check the stop flag
             if (req.cmd_id == fpvd::kWfbCmdSetFec) {
                 std::lock_guard<std::mutex> lk(mu);
                 fecCalls.emplace_back(req.u.set_fec.k, req.u.set_fec.n);
             }
             fpvd::WfbCmdResp resp{};
-            resp.req_id = req.req_id;   // echo as-is (already network order)
+            resp.req_id = req.req_id; // echo as-is (already network order)
             resp.rc = htonl(0);
             ::sendto(srv, &resp, offsetof(fpvd::WfbCmdResp, u), 0,
                      reinterpret_cast<sockaddr*>(&from), flen);
@@ -579,15 +539,16 @@ TEST_CASE("apply: DL disable restates swfec fec as (overheadPct,deadlineMs), not
     REQUIRE(d.effective().link.fec.mode == "swfec");
 
     // DL on (hot), then forget anything recorded so far.
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     REQUIRE(d.dynamicLinkStatus().running);
-    { std::lock_guard<std::mutex> lk(mu); fecCalls.clear(); }
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        fecCalls.clear();
+    }
 
     // DL off — restateStaticLink() must push the static swfec params.
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":false}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":false}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     CHECK_FALSE(d.dynamicLinkStatus().running);
 
@@ -597,8 +558,8 @@ TEST_CASE("apply: DL disable restates swfec fec as (overheadPct,deadlineMs), not
 
     std::lock_guard<std::mutex> lk(mu);
     REQUIRE(fecCalls.size() == 1);
-    CHECK(fecCalls[0] == std::pair<int, int>(77, 44));   // overheadPct, deadlineMs
-    CHECK(fecCalls[0] != std::pair<int, int>(8, 12));    // NOT the rs k/n
+    CHECK(fecCalls[0] == std::pair<int, int>(77, 44)); // overheadPct, deadlineMs
+    CHECK(fecCalls[0] != std::pair<int, int>(8, 12));  // NOT the rs k/n
     fs::remove_all(tmp);
 }
 
@@ -609,8 +570,7 @@ TEST_CASE("apply: restart-class encoder change bounces waybeam + msposd, leaves 
     d.bootstrap(false);
 
     // Enable DL and apply so the controller is running.
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     REQUIRE(d.dynamicLinkStatus().running);
 
@@ -625,17 +585,14 @@ TEST_CASE("apply: restart-class encoder change bounces waybeam + msposd, leaves 
     // rebuild would wipe/replace these; a hot apply preserves them. The restart-
     // class path bounces "waybeam" AND "msposd" (the OSD renderer, which draws
     // onto waybeam's pipeline), but leaves wfb untouched.
-    orch.add({"wfb_video_tx", {"/bin/sh", "-c", "sleep 30"}, {},
-              fpvd::RestartPolicy::Always, {}});
-    orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {},
-              fpvd::RestartPolicy::Always, {}});
-    orch.add({"msposd", {"/bin/sh", "-c", "sleep 30"}, {},
-              fpvd::RestartPolicy::Always, {}});
+    orch.add({"wfb_video_tx", {"/bin/sh", "-c", "sleep 30"}, {}, fpvd::RestartPolicy::Always, {}});
+    orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {}, fpvd::RestartPolicy::Always, {}});
+    orch.add({"msposd", {"/bin/sh", "-c", "sleep 30"}, {}, fpvd::RestartPolicy::Always, {}});
     orch.startAll();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     auto namesBefore = orch.names();
     pid_t wfbPid = orch.get("wfb_video_tx")->pid();
-    pid_t wbPid  = orch.get("waybeam")->pid();
+    pid_t wbPid = orch.get("waybeam")->pid();
     pid_t osdPid = orch.get("msposd")->pid();
     REQUIRE(wfbPid > 0);
     REQUIRE(wbPid > 0);
@@ -643,19 +600,17 @@ TEST_CASE("apply: restart-class encoder change bounces waybeam + msposd, leaves 
 
     // A resolution change is a RESTART-class encoder field, NOT dynamic-link-
     // locked and NOT a dynamicLink input -- it bounces waybeam (+ msposd), no rebuild.
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"video":{"resolution":"1280x720"}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"video":{"resolution":"1280x720"}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder")
-          != ar.restarted.end());
-    CHECK(orch.names() == namesBefore);                    // no full rebuild
-    CHECK(orch.get("waybeam")->pid() != wbPid);            // waybeam bounced
-    CHECK(orch.get("msposd")->pid() != osdPid);            // OSD renderer bounced too
-    CHECK(orch.get("wfb_video_tx")->pid() == wfbPid);      // wfb untouched
-    CHECK(d.dynamicLinkStatus().running);                  // controller untouched
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder") != ar.restarted.end());
+    CHECK(orch.names() == namesBefore);               // no full rebuild
+    CHECK(orch.get("waybeam")->pid() != wbPid);       // waybeam bounced
+    CHECK(orch.get("msposd")->pid() != osdPid);       // OSD renderer bounced too
+    CHECK(orch.get("wfb_video_tx")->pid() == wfbPid); // wfb untouched
+    CHECK(d.dynamicLinkStatus().running);             // controller untouched
 
     orch.stopAll();
     fs::remove_all(tmp);
@@ -679,9 +634,18 @@ struct FakeWbDaemon {
         th = std::thread([&] { srv.listen_after_bind(); });
         srv.wait_until_ready();
     }
-    ~FakeWbDaemon() { srv.stop(); th.join(); }
-    size_t count() { std::lock_guard<std::mutex> lk(mu); return hits.size(); }
-    std::string last() { std::lock_guard<std::mutex> lk(mu); return hits.back(); }
+    ~FakeWbDaemon() {
+        srv.stop();
+        th.join();
+    }
+    size_t count() {
+        std::lock_guard<std::mutex> lk(mu);
+        return hits.size();
+    }
+    std::string last() {
+        std::lock_guard<std::mutex> lk(mu);
+        return hits.back();
+    }
 };
 } // namespace
 
@@ -689,14 +653,13 @@ TEST_CASE("apply: LIVE encoder change pushes /api/v1/set, no rebuild") {
     FakeWbDaemon wb;
     auto tmp = fs::temp_directory_path() / "fpvd-enc-live";
     auto paths = makeRoutingPaths(tmp, 46810);
-    paths.dlEndpoints.encPort = static_cast<uint16_t>(wb.port);  // point at fake waybeam
+    paths.dlEndpoints.encPort = static_cast<uint16_t>(wb.port); // point at fake waybeam
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
     // Seed a fake "waybeam" so we can prove the LIVE path does NOT bounce it.
     auto& orch = d.orchestrator();
-    orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {},
-              fpvd::RestartPolicy::Always, {}});
+    orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {}, fpvd::RestartPolicy::Always, {}});
     orch.startAll();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     auto namesBefore = orch.names();
@@ -704,15 +667,14 @@ TEST_CASE("apply: LIVE encoder change pushes /api/v1/set, no rebuild") {
     REQUIRE(wbPid > 0);
 
     // DL disabled -> bitrate is fpvd-owned and LIVE.
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"video":{"bitrate":4096}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"video":{"bitrate":4096}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
 
     REQUIRE(wb.count() == 1);
     CHECK(wb.last().find("video0.bitrate=4096") != std::string::npos);
-    CHECK(orch.names() == namesBefore);                 // no rebuild
-    CHECK(orch.get("waybeam")->pid() == wbPid);         // LIVE push does not bounce waybeam
+    CHECK(orch.names() == namesBefore);         // no rebuild
+    CHECK(orch.get("waybeam")->pid() == wbPid); // LIVE push does not bounce waybeam
     CHECK(d.effective().video.bitrate == 4096);
 
     orch.stopAll();
@@ -727,18 +689,17 @@ TEST_CASE("apply: RESTART encoder change rewrites file, issues no /set") {
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"video":{"resolution":"1280x720"}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"video":{"resolution":"1280x720"}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
 
     // Restart-class path uses the file + waybeam bounce, never /api/v1/set.
     CHECK(wb.count() == 0);
     std::ifstream wf(paths.waybeamJsonPath);
-    nlohmann::json wj; wf >> wj;
+    nlohmann::json wj;
+    wf >> wj;
     CHECK(wj["video0"]["size"] == "1280x720");
-    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder")
-          != ar.restarted.end());
+    CHECK(std::find(ar.restarted.begin(), ar.restarted.end(), "encoder") != ar.restarted.end());
 
     fs::remove_all(tmp);
 }
@@ -753,32 +714,32 @@ TEST_CASE("apply: mixed LIVE+RESTART encoder change bounces only waybeam, no /se
 
     // Seed fakes so the waybeam-only bounce is observable.
     auto& orch = d.orchestrator();
-    orch.add({"wfb_video_tx", {"/bin/sh", "-c", "sleep 30"}, {},
-              fpvd::RestartPolicy::Always, {}});
-    orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {},
-              fpvd::RestartPolicy::Always, {}});
+    orch.add({"wfb_video_tx", {"/bin/sh", "-c", "sleep 30"}, {}, fpvd::RestartPolicy::Always, {}});
+    orch.add({"waybeam", {"/bin/sh", "-c", "sleep 30"}, {}, fpvd::RestartPolicy::Always, {}});
     orch.startAll();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     pid_t wfbPid = orch.get("wfb_video_tx")->pid();
-    pid_t wbPid  = orch.get("waybeam")->pid();
+    pid_t wbPid = orch.get("waybeam")->pid();
     REQUIRE(wfbPid > 0);
     REQUIRE(wbPid > 0);
 
     // resolution (RESTART) + gopSize (LIVE) in one apply, DL off. RESTART wins:
     // the whole file is rewritten and only waybeam is bounced; no /set is issued.
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"video":{"resolution":"1280x720","gopSize":2.0}})")).ok);
+    REQUIRE(d.patchPending(
+                 nlohmann::json::parse(R"({"video":{"resolution":"1280x720","gopSize":2.0}})"))
+                .ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    CHECK(wb.count() == 0);                                 // no /api/v1/set
+    CHECK(wb.count() == 0); // no /api/v1/set
     std::ifstream wf(paths.waybeamJsonPath);
-    nlohmann::json wj; wf >> wj;
-    CHECK(wj["video0"]["size"] == "1280x720");             // RESTART field in file
-    CHECK(wj["video0"]["gopSize"] == 2.0);                 // LIVE field also in file
-    CHECK(orch.get("waybeam")->pid() != wbPid);            // waybeam bounced
-    CHECK(orch.get("wfb_video_tx")->pid() == wfbPid);      // wfb untouched
+    nlohmann::json wj;
+    wf >> wj;
+    CHECK(wj["video0"]["size"] == "1280x720");        // RESTART field in file
+    CHECK(wj["video0"]["gopSize"] == 2.0);            // LIVE field also in file
+    CHECK(orch.get("waybeam")->pid() != wbPid);       // waybeam bounced
+    CHECK(orch.get("wfb_video_tx")->pid() == wfbPid); // wfb untouched
 
     orch.stopAll();
     fs::remove_all(tmp);
@@ -793,12 +754,11 @@ TEST_CASE("apply: failed /api/v1/set fails the apply with effective unchanged") 
     d.bootstrap(false);
     int before = d.effective().video.bitrate;
 
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"video":{"bitrate":4096}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"video":{"bitrate":4096}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     CHECK_FALSE(ar.ok);
-    CHECK(d.effective().video.bitrate == before);   // not committed
-    CHECK(d.version() == 0);                         // no version bump
+    CHECK(d.effective().video.bitrate == before); // not committed
+    CHECK(d.version() == 0);                      // no version bump
 
     fs::remove_all(tmp);
 }
@@ -811,21 +771,18 @@ TEST_CASE("apply: disabling dynamic-link restates the static encoder bitrate") {
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     size_t before = wb.count();
 
     // Disabling DL must push the configured encoder values back (the controller
     // left waybeam at its last adaptive bitrate).
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":false}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":false}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
 
-    REQUIRE(wb.count() > before);                       // a restate /set was issued
-    const std::string want =
-        "video0.bitrate=" + std::to_string(d.effective().video.bitrate);
-    CHECK(wb.last().find(want) != std::string::npos);   // == the configured value
+    REQUIRE(wb.count() > before); // a restate /set was issued
+    const std::string want = "video0.bitrate=" + std::to_string(d.effective().video.bitrate);
+    CHECK(wb.last().find(want) != std::string::npos); // == the configured value
 
     fs::remove_all(tmp);
 }
@@ -842,16 +799,14 @@ TEST_CASE("daemon: probe stream seeded only when dynamicLink is enabled") {
 
     // Enabling dynamicLink adds the probe pair WITHOUT a full rebuild: the video
     // tx keeps its identity (no stopAll/startAll).
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})")).ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
-    CHECK(d.orchestrator().get("probe-tx")   != nullptr);
+    CHECK(d.orchestrator().get("probe-tx") != nullptr);
     CHECK(d.orchestrator().get("probe-feed") != nullptr);
 
     // Disabling removes them again.
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":false}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":false}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     CHECK(d.orchestrator().get("probe-tx") == nullptr);
 
@@ -866,10 +821,9 @@ TEST_CASE("status: probe summary reflects dynamicLink + running tx") {
 
     auto j0 = fpvd::buildStatus(d);
     REQUIRE(j0.contains("probe"));
-    CHECK(j0["probe"]["enabled"] == false);   // dynamicLink off
+    CHECK(j0["probe"]["enabled"] == false); // dynamicLink off
 
-    REQUIRE(d.patchPending(nlohmann::json::parse(
-        R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})")).ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     auto j1 = fpvd::buildStatus(d);
     CHECK(j1["probe"]["enabled"] == true);
@@ -893,15 +847,11 @@ TEST_CASE("apply: hot-path reconcileBeamforming fires when beamforming enabled")
     // patch below is beamforming-only: a videoRadiotap (stbc) change in the same
     // apply would push a setRadio to the video control port, which has no
     // listener in this test and would fail the apply.
-    std::ofstream(tmp / "etc" / "fpvd" / "config.json")
-        << R"({"link":{"stbc":false}})";
+    std::ofstream(tmp / "etc" / "fpvd" / "config.json") << R"({"link":{"stbc":false}})";
 
     fpvd::DaemonPaths paths{
-        (tmp / "etc" / "fpvd" / "config.json").string(),
-        "tests/fixtures/fake_radio_up_ok.sh",
-        (tmp / "etc" / "waybeam.json").string(),
-        "tests/fixtures/fake_radio_tune.sh"
-    };
+        (tmp / "etc" / "fpvd" / "config.json").string(), "tests/fixtures/fake_radio_up_ok.sh",
+        (tmp / "etc" / "waybeam.json").string(), "tests/fixtures/fake_radio_tune.sh"};
     fpvd::Daemon d(paths);
     d.bootstrap(false);
 
@@ -936,12 +886,11 @@ TEST_CASE("apply: writes the system-stats OSD line when dynamic-link is off") {
     REQUIRE(ar.ok);
 
     std::ifstream f(paths.osdMsgPath);
-    std::string content((std::istreambuf_iterator<char>(f)),
-                        std::istreambuf_iterator<char>());
-    CHECK(content.find("&B") != std::string::npos);   // video bitrate+fps
-    CHECK(content.find("&T") != std::string::npos);   // board temp
-    CHECK(content.find("&W") != std::string::npos);   // wifi-module temp
-    CHECK(content.find("&C") != std::string::npos);   // cpu %
+    std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    CHECK(content.find("&B") != std::string::npos); // video bitrate+fps
+    CHECK(content.find("&T") != std::string::npos); // board temp
+    CHECK(content.find("&W") != std::string::npos); // wifi-module temp
+    CHECK(content.find("&C") != std::string::npos); // cpu %
 
     fs::remove_all(tmp);
 }

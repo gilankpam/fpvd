@@ -33,8 +33,7 @@ TEST_CASE("radio: tuneRadio passes action and env to script") {
     c.link.width = 40;
     c.link.txPowerDbm = 5;
     c.link.mtu = 1400;
-    auto r = fpvd::tuneRadio("tests/fixtures/fake_radio_tune.sh", "txpower",
-                             c, "wlan0", "8812eu");
+    auto r = fpvd::tuneRadio("tests/fixtures/fake_radio_tune.sh", "txpower", c, "wlan0", "8812eu");
     REQUIRE(r.ok);
 
     std::ifstream f(rec);
@@ -48,8 +47,8 @@ TEST_CASE("radio: tuneRadio passes action and env to script") {
 
 TEST_CASE("radio: tuneRadio surfaces non-zero exit + stderr") {
     fpvd::Config c{};
-    auto r = fpvd::tuneRadio("tests/fixtures/fake_radio_up_fail.sh", "channel",
-                             c, "wlan0", "8812eu");
+    auto r =
+        fpvd::tuneRadio("tests/fixtures/fake_radio_up_fail.sh", "channel", c, "wlan0", "8812eu");
     CHECK_FALSE(r.ok);
     CHECK(r.exitCode == 3);
     CHECK(r.stderrText.find("missing modules") != std::string::npos);

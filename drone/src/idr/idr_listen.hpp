@@ -16,16 +16,16 @@ namespace fpvd::idr {
  * port == 0 disables the listener (fd() returns -1, drain() returns 0).
  */
 class IdrListener {
-public:
-    IdrListener(const std::string& bindAddr, uint16_t port);  // port==0 disables
+  public:
+    IdrListener(const std::string& bindAddr, uint16_t port); // port==0 disables
     ~IdrListener();
     IdrListener(const IdrListener&) = delete;
     IdrListener& operator=(const IdrListener&) = delete;
 
-    int    fd()    const { return fd_; }  // -1 if disabled
-    size_t drain();                       // recvfrom until EAGAIN; returns count
+    int fd() const { return fd_; } // -1 if disabled
+    size_t drain();                // recvfrom until EAGAIN; returns count
 
-private:
+  private:
     int fd_{-1};
 };
 

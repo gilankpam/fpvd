@@ -12,8 +12,7 @@ struct StoreError : public std::runtime_error {
 
 // Deep-merge two JSON values. Objects are merged key-by-key recursively;
 // arrays are replaced wholesale; scalars in `overlay` win.
-nlohmann::json deepMergeJson(const nlohmann::json& base,
-                              const nlohmann::json& overlay);
+nlohmann::json deepMergeJson(const nlohmann::json& base, const nlohmann::json& overlay);
 
 // Load the effective configuration by merging the on-disk full config at
 // `configPath` onto the code defaults (nlohmann::json(Config{})): a present

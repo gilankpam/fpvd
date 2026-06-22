@@ -1,7 +1,7 @@
 #include "doctest.h"
 #include "supervise/process.hpp"
-#include <thread>
 #include <chrono>
+#include <thread>
 
 using namespace std::chrono_literals;
 
@@ -26,7 +26,7 @@ TEST_CASE("process: SIGTERM stops a sleeper") {
     p.start();
     std::this_thread::sleep_for(100ms);
     CHECK(p.state() == fpvd::ProcState::Running);
-    p.stop(2s);  // SIGTERM then SIGKILL after 2s
+    p.stop(2s); // SIGTERM then SIGKILL after 2s
     REQUIRE(p.waitFor(3s));
     CHECK(p.state() == fpvd::ProcState::Exited);
 }
@@ -35,7 +35,7 @@ TEST_CASE("process: SIGKILL fallback when child ignores SIGTERM") {
     fpvd::Process p({"/bin/sh", "-c", "trap '' TERM; sleep 30"});
     p.start();
     std::this_thread::sleep_for(100ms);
-    p.stop(500ms);  // expect SIGKILL after 500ms
+    p.stop(500ms); // expect SIGKILL after 500ms
     REQUIRE(p.waitFor(2s));
     CHECK(p.state() == fpvd::ProcState::Exited);
 }

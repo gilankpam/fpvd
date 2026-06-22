@@ -1,4 +1,5 @@
 import json
+
 from fpvdgs.dynlink.flightlog import FlightLog, FlightLogConfig
 
 
@@ -26,30 +27,35 @@ def test_write_recovers_when_open_failed_at_startup(tmp_path):
     # fails (_fh=None) and writes silently no-op for the whole flight. Once the
     # mount is up, write() must lazily re-open and resume logging.
     fl = FlightLog(FlightLogConfig(dir=str(tmp_path), sync_interval=2))
-    fl._fh.close()                       # simulate "open failed at startup"
+    fl._fh.close()  # simulate "open failed at startup"
     fl._fh = None
-    fl.write({"mcs": 1})                 # retry throttle not reached -> still down
+    fl.write({"mcs": 1})  # retry throttle not reached -> still down
     assert fl._fh is None
-    fl.write({"mcs": 2})                 # throttle reached -> re-open + write
+    fl.write({"mcs": 2})  # throttle reached -> re-open + write
     assert fl._fh is not None
     fl.close()
-    recs = [json.loads(line) for f in sorted(tmp_path.glob("*.jsonl"))
-            for line in f.read_text().splitlines() if line.strip()]
-    assert {"mcs": 2} in recs            # logging resumed once the mount was up
+    recs = [
+        json.loads(line)
+        for f in sorted(tmp_path.glob("*.jsonl"))
+        for line in f.read_text().splitlines()
+        if line.strip()
+    ]
+    assert {"mcs": 2} in recs  # logging resumed once the mount was up
 
 
 def test_write_after_close_is_safe(tmp_path):
     fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
     fl.close()
-    fl.write({"ts": 1.0})        # no crash
+    fl.write({"ts": 1.0})  # no crash
 
 
 def test_config_defaults_dvr_dir():
     from fpvdgs.dynlink.flightlog import FlightLogConfig
+
     c = FlightLogConfig()
     assert c.dir == "/media/dvr/log/dynamic-link/"
     assert c.max_mb == 8.0
-    assert not hasattr(c, "max_files")   # count-based pruning removed; all flights kept
+    assert not hasattr(c, "max_files")  # count-based pruning removed; all flights kept
 
 
 def test_roll_starts_new_file_and_both_persist(tmp_path):
@@ -59,7 +65,7 @@ def test_roll_starts_new_file_and_both_persist(tmp_path):
     fl.write({"ts": 9.0, "mcs": 2})
     fl.close()
     files = sorted(tmp_path.glob("*.jsonl"))
-    assert len(files) == 2                      # rolled into a second file
+    assert len(files) == 2  # rolled into a second file
     newest = max(files, key=lambda p: p.stat().st_mtime)
     assert '"mcs":2' in newest.read_text()
 
@@ -83,9 +89,9 @@ def test_filename_increments_across_restart(tmp_path):
     fl2.write({"ts": 2.0, "mcs": 2})
     fl2.close()
     files = sorted(tmp_path.glob("*.jsonl"))
-    assert len(files) == 2                      # the restart did not clobber flight 1
+    assert len(files) == 2  # the restart did not clobber flight 1
     seqs = sorted(int(p.stem) for p in files)
-    assert seqs[1] == seqs[0] + 1               # strictly incremental by name
+    assert seqs[1] == seqs[0] + 1  # strictly incremental by name
 
 
 def test_roll_increments_by_name(tmp_path):
@@ -122,6 +128,7 @@ def test_fsyncs_on_roll(tmp_path, monkeypatch):
     # roll() ends a flight; it must fsync the completed file to the card
     # BEFORE closing, so the just-finished flight survives a reboot.
     import fpvdgs.dynlink.flightlog as mod
+
     calls = []
     monkeypatch.setattr(mod.os, "fsync", lambda fd: calls.append(fd))
     fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
@@ -134,7 +141,7 @@ def test_fsyncs_on_roll(tmp_path, monkeypatch):
 def test_begin_flight_keeps_fresh_empty_file(tmp_path):
     fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
     path1 = fl._path
-    fl.begin_flight()                  # nothing written yet -> keep the same file
+    fl.begin_flight()  # nothing written yet -> keep the same file
     assert fl._path == path1
     fl.close()
     assert len(list(tmp_path.glob("*.jsonl"))) == 1
@@ -143,7 +150,7 @@ def test_begin_flight_keeps_fresh_empty_file(tmp_path):
 def test_begin_flight_rolls_when_file_has_records(tmp_path):
     fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
     fl.write({"ts": 1.0})
-    fl.begin_flight()                  # has records -> start a new flight file
+    fl.begin_flight()  # has records -> start a new flight file
     fl.write({"ts": 2.0})
     fl.close()
     assert len(list(tmp_path.glob("*.jsonl"))) == 2
@@ -161,18 +168,23 @@ def test_begin_flight_reopens_when_fh_is_none(tmp_path):
     # event then calls begin_flight(), which must (re)open via roll().
     fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))
     fl._fh.close()
-    fl._fh = None                        # simulate "open failed at startup"
+    fl._fh = None  # simulate "open failed at startup"
     fl.begin_flight()
-    assert fl._fh is not None            # reopened
+    assert fl._fh is not None  # reopened
     fl.write({"ts": 1.0})
     fl.close()
-    recs = [json.loads(line) for f in sorted(tmp_path.glob("*.jsonl"))
-            for line in f.read_text().splitlines() if line.strip()]
-    assert {"ts": 1.0} in recs           # logging resumed after the reopen
+    recs = [
+        json.loads(line)
+        for f in sorted(tmp_path.glob("*.jsonl"))
+        for line in f.read_text().splitlines()
+        if line.strip()
+    ]
+    assert {"ts": 1.0} in recs  # logging resumed after the reopen
 
 
 def test_sync_fsyncs_open_file(tmp_path, monkeypatch):
     import fpvdgs.dynlink.flightlog as mod
+
     calls = []
     monkeypatch.setattr(mod.os, "fsync", lambda fd: calls.append(fd))
     fl = FlightLog(FlightLogConfig(dir=str(tmp_path)))

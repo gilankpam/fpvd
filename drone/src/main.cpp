@@ -14,12 +14,12 @@ static std::atomic<bool> g_stop{false};
 static void onSignal(int) { g_stop.store(true); }
 
 int main(int argc, char** argv) {
-    std::string configPath   = "/etc/fpvd/config.json";
-    std::string radioUp      = "/usr/libexec/fpvd/radio-up.sh";
-    std::string radioTune    = "/usr/libexec/fpvd/radio-tune.sh";
-    std::string waybeamPath  = "/etc/waybeam.json";
-    std::string httpHost     = "0.0.0.0";
-    int httpPort             = 8080;
+    std::string configPath = "/etc/fpvd/config.json";
+    std::string radioUp = "/usr/libexec/fpvd/radio-up.sh";
+    std::string radioTune = "/usr/libexec/fpvd/radio-tune.sh";
+    std::string waybeamPath = "/etc/waybeam.json";
+    std::string httpHost = "0.0.0.0";
+    int httpPort = 8080;
     std::string logPath;
 
     for (int i = 1; i < argc; ++i) {
@@ -27,15 +27,20 @@ int main(int argc, char** argv) {
         if (a == "--dump-config") {
             std::cout << nlohmann::json(fpvd::Config{}).dump(2) << "\n";
             return 0;
-        }
-        else if (a == "--config" && i + 1 < argc)
+        } else if (a == "--config" && i + 1 < argc)
             configPath = argv[++i];
-        else if (a == "--radio-up" && i + 1 < argc) radioUp = argv[++i];
-        else if (a == "--radio-tune" && i + 1 < argc) radioTune = argv[++i];
-        else if (a == "--waybeam-json" && i + 1 < argc) waybeamPath = argv[++i];
-        else if (a == "--host" && i + 1 < argc) httpHost = argv[++i];
-        else if (a == "--port" && i + 1 < argc) httpPort = std::stoi(argv[++i]);
-        else if (a == "--log" && i + 1 < argc) logPath = argv[++i];
+        else if (a == "--radio-up" && i + 1 < argc)
+            radioUp = argv[++i];
+        else if (a == "--radio-tune" && i + 1 < argc)
+            radioTune = argv[++i];
+        else if (a == "--waybeam-json" && i + 1 < argc)
+            waybeamPath = argv[++i];
+        else if (a == "--host" && i + 1 < argc)
+            httpHost = argv[++i];
+        else if (a == "--port" && i + 1 < argc)
+            httpPort = std::stoi(argv[++i]);
+        else if (a == "--log" && i + 1 < argc)
+            logPath = argv[++i];
         else if (a == "-h" || a == "--help") {
             std::cerr << "Usage: fpvd [--config PATH] "
                          "[--radio-up PATH] [--radio-tune PATH] [--waybeam-json PATH] "
@@ -45,7 +50,7 @@ int main(int argc, char** argv) {
     }
 
     std::signal(SIGTERM, onSignal);
-    std::signal(SIGINT,  onSignal);
+    std::signal(SIGINT, onSignal);
     std::signal(SIGPIPE, SIG_IGN);
 
     if (!logPath.empty()) {
@@ -55,8 +60,8 @@ int main(int argc, char** argv) {
             ::dup2(fd, 2);
             ::close(fd);
         } else {
-            std::cerr << "fpvd: failed to open log " << logPath
-                      << ": " << std::strerror(errno) << "\n";
+            std::cerr << "fpvd: failed to open log " << logPath << ": " << std::strerror(errno)
+                      << "\n";
         }
     }
 

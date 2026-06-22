@@ -32,16 +32,25 @@ struct FakeWb {
         th = std::thread([&] { srv.listen_after_bind(); });
         srv.wait_until_ready();
     }
-    ~FakeWb() { srv.stop(); th.join(); }
-    size_t count() { std::lock_guard<std::mutex> lk(mu); return hits.size(); }
-    std::string last() { std::lock_guard<std::mutex> lk(mu); return hits.back(); }
+    ~FakeWb() {
+        srv.stop();
+        th.join();
+    }
+    size_t count() {
+        std::lock_guard<std::mutex> lk(mu);
+        return hits.size();
+    }
+    std::string last() {
+        std::lock_guard<std::mutex> lk(mu);
+        return hits.back();
+    }
 };
 
 TEST_CASE("WaybeamClient::setFields builds /api/v1/set and returns true on 2xx") {
     FakeWb f;
     WaybeamClient c("127.0.0.1", static_cast<uint16_t>(f.port));
-    std::map<std::string, std::string> fields{
-        {"video0.bitrate", "6000"}, {"fpv.roi_enabled", "true"}};
+    std::map<std::string, std::string> fields{{"video0.bitrate", "6000"},
+                                              {"fpv.roi_enabled", "true"}};
     CHECK(c.setFields(fields));
     REQUIRE(f.count() == 1);
     CHECK(f.last().find("video0.bitrate=6000") != std::string::npos);
@@ -66,7 +75,7 @@ TEST_CASE("WaybeamClient::setFields empty map is a no-op success") {
 TEST_CASE("WaybeamClient returns false when connection refused") {
     httplib::Server dead;
     int dead_port = dead.bind_to_any_port("127.0.0.1");
-    dead.stop();  // refuse connections
+    dead.stop(); // refuse connections
     WaybeamClient c("127.0.0.1", static_cast<uint16_t>(dead_port));
     CHECK_FALSE(c.setFields({{"video0.bitrate", "6000"}}));
     CHECK_FALSE(c.get("/request/idr"));

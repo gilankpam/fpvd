@@ -5,13 +5,14 @@ Newline-delimited JSON, one record per line. First record on connect
 is a 'settings' dump; subsequent records are 'rx', 'tx', or
 'new_session' at `log_interval` cadence (we require 100 ms → 10 Hz).
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Callable, Any
+from typing import Any, AsyncIterator, Callable
 from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ class SessionInfo:
     geometry. interleave_depth is a legacy v2 field; v3 feeds omit it
     (defaults to 1).
     """
+
     fec_type: str
     fec_k: int
     fec_n: int
@@ -80,6 +82,7 @@ class SessionInfo:
 @dataclass
 class RxEvent:
     """One 'rx' record — a 100 ms stats window from wfb_rx."""
+
     timestamp: float
     id: str
     # `packets` is {key: [window_count, cumulative_count]}; we keep window only.
@@ -99,6 +102,7 @@ class TxEvent:
 @dataclass
 class SessionEvent:
     """Emitted on-change and once per window (wfb_rx `SESSION`)."""
+
     timestamp: float
     id: str
     session: SessionInfo
@@ -265,7 +269,10 @@ class StatsClient:
             except OSError as e:
                 log.warning(
                     "stats_client: connect %s:%d failed: %s (retry in %.1fs)",
-                    self._host, self._port, e, backoff,
+                    self._host,
+                    self._port,
+                    e,
+                    backoff,
                 )
                 await self._sleep_or_stop(backoff)
                 backoff = min(backoff * 2, self._reconnect_max_s)

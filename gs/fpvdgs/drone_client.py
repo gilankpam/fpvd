@@ -12,11 +12,13 @@ class DroneUnreachable(Exception):
 class DroneRejected(Exception):
     """The drone returned a 4xx — a validation/permission rejection, NOT a
     connectivity failure. Carries the status code and parsed error body."""
+
     def __init__(self, code: int, body):
         self.code = code
         self.body = body
-        self.message = (body.get("message") if isinstance(body, dict) else None) \
-            or f"drone rejected ({code})"
+        self.message = (
+            body.get("message") if isinstance(body, dict) else None
+        ) or f"drone rejected ({code})"
         super().__init__(f"{code}: {self.message}")
 
 

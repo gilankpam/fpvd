@@ -28,9 +28,8 @@ static const std::vector<std::vector<std::string>> kLockedPaths = {
 // children recurse; leaf values (numbers, strings, bools, null, arrays)
 // terminate the path. An empty-object child still counts: the path leads
 // to that key, even if it's wiping the subtree.
-static void collectWrittenPaths(const nlohmann::json& body,
-                                 std::vector<std::string>& prefix,
-                                 std::vector<std::vector<std::string>>& out) {
+static void collectWrittenPaths(const nlohmann::json& body, std::vector<std::string>& prefix,
+                                std::vector<std::vector<std::string>>& out) {
     if (!body.is_object()) {
         out.push_back(prefix);
         return;
@@ -49,7 +48,8 @@ static void collectWrittenPaths(const nlohmann::json& body,
 static std::string joinDotted(const std::vector<std::string>& p) {
     std::string out;
     for (size_t i = 0; i < p.size(); ++i) {
-        if (i) out.push_back('.');
+        if (i)
+            out.push_back('.');
         out += p[i];
     }
     return out;
@@ -58,9 +58,11 @@ static std::string joinDotted(const std::vector<std::string>& p) {
 // True iff `path` starts with `prefix` (component-wise).
 static bool isUnderPrefix(const std::vector<std::string>& path,
                           const std::vector<std::string>& prefix) {
-    if (path.size() < prefix.size()) return false;
+    if (path.size() < prefix.size())
+        return false;
     for (size_t i = 0; i < prefix.size(); ++i) {
-        if (path[i] != prefix[i]) return false;
+        if (path[i] != prefix[i])
+            return false;
     }
     return true;
 }
@@ -72,11 +74,13 @@ static bool isAncestorOf(const std::vector<std::string>& path,
     return isUnderPrefix(prefix, path);
 }
 
-LockResult checkDynamicLinkLock(const nlohmann::json& patchBody,
-                                const Config& mergedPending) {
-    if (!mergedPending.dynamicLink.enabled) return {true, {}};
-    if (!patchBody.is_object()) return {true, {}};
-    if (patchBody.empty())      return {true, {}};  // empty object touches no paths
+LockResult checkDynamicLinkLock(const nlohmann::json& patchBody, const Config& mergedPending) {
+    if (!mergedPending.dynamicLink.enabled)
+        return {true, {}};
+    if (!patchBody.is_object())
+        return {true, {}};
+    if (patchBody.empty())
+        return {true, {}}; // empty object touches no paths
 
     std::vector<std::vector<std::string>> written;
     std::vector<std::string> prefix;

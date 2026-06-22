@@ -10,9 +10,9 @@ namespace fpvd {
 // across threads. Shared by the dynamic-link EncoderClient and the daemon's
 // config-apply path.
 class WaybeamClient {
-public:
-    WaybeamClient(std::string host, uint16_t port,
-                  int connectTimeoutMs = 300, int readTimeoutMs = 500);
+  public:
+    WaybeamClient(std::string host, uint16_t port, int connectTimeoutMs = 300,
+                  int readTimeoutMs = 500);
 
     // GET /api/v1/set?k1=v1&k2=v2 … (keys/values percent-encoded). true on 2xx.
     // An empty map is a no-op that returns true.
@@ -21,11 +21,11 @@ public:
     // GET an already-formed path (e.g. "/request/idr"). true on 2xx.
     bool get(const std::string& path);
 
-private:
+  private:
     std::string host_;
-    uint16_t    port_;
-    int         connectTimeoutMs_;
-    int         readTimeoutMs_;
+    uint16_t port_;
+    int connectTimeoutMs_;
+    int readTimeoutMs_;
 };
 
 } // namespace fpvd

@@ -28,9 +28,8 @@ fs::path setupIwStub(const fs::path& tmp, int exitCode = 0) {
       << "echo \"iw $*\" >> \"" << rec.string() << "\"\n"
       << "exit " << exitCode << "\n";
     s.close();
-    fs::permissions(p, fs::perms::owner_all | fs::perms::group_read |
-                          fs::perms::group_exec | fs::perms::others_read |
-                          fs::perms::others_exec);
+    fs::permissions(p, fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
+                           fs::perms::others_read | fs::perms::others_exec);
     std::string path = tmp.string() + ":" + (std::getenv("PATH") ? std::getenv("PATH") : "");
     ::setenv("PATH", path.c_str(), 1);
     return rec;
@@ -39,17 +38,23 @@ fs::path setupIwStub(const fs::path& tmp, int exitCode = 0) {
 std::string readAllText(const fs::path& p) {
     std::ifstream f(p);
     std::string out, line;
-    while (std::getline(f, line)) { out += line; out += "\n"; }
+    while (std::getline(f, line)) {
+        out += line;
+        out += "\n";
+    }
     return out;
 }
 
 // Count lines in a file (number of iw invocations recorded).
 int countLines(const fs::path& p) {
     std::ifstream f(p);
-    if (!f) return 0;
+    if (!f)
+        return 0;
     int n = 0;
     std::string line;
-    while (std::getline(f, line)) if (!line.empty()) ++n;
+    while (std::getline(f, line))
+        if (!line.empty())
+            ++n;
     return n;
 }
 

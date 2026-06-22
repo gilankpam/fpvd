@@ -4,7 +4,7 @@
 
 TEST_CASE("http: serves a registered GET endpoint") {
     fpvd::HttpServer srv;
-    srv.get("/ping", [](const httplib::Request&, httplib::Response& res){
+    srv.get("/ping", [](const httplib::Request&, httplib::Response& res) {
         res.set_content("pong", "text/plain");
     });
     srv.listenInBackground("127.0.0.1", 18080);

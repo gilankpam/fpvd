@@ -21,3 +21,12 @@ include = ["fpvdgs*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+# `ruff format` owns code line length; E501 then only fires on long
+# comments/docstrings (e.g. wire-format layouts) the formatter won't wrap.
+ignore = ["E501"]

@@ -9,36 +9,44 @@ using namespace fpvd::osd;
 using fpvd::dynlink::Decision;
 
 static std::string slurp(const fs::path& p) {
-    std::ifstream f(p); std::stringstream ss; ss << f.rdbuf(); return ss.str();
+    std::ifstream f(p);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
 }
 
 TEST_CASE("osd: writeStatus renders the BF token by code") {
     auto msg = fs::temp_directory_path() / "fpvd-osd-bf.msg";
     fs::remove(msg);
-    Decision d{}; d.mcs = 4; d.bitrateKbps = 9000; d.k = 8; d.n = 12;
+    Decision d{};
+    d.mcs = 4;
+    d.bitrateKbps = 9000;
+    d.k = 8;
+    d.n = 12;
     d.txPowerDbm = 22;
 
     OsdWriter off(msg.string(), /*enabled=*/true);
     off.writeStatus(d, /*bfCode=*/0, /*idrCount=*/0);
-    CHECK(slurp(msg).find(" B") == std::string::npos);   // no token when off
-    CHECK(slurp(msg).find(" R") == std::string::npos);   // no dead RSSI field
+    CHECK(slurp(msg).find(" B") == std::string::npos); // no token when off
+    CHECK(slurp(msg).find(" R") == std::string::npos); // no dead RSSI field
 
     OsdWriter armed(msg.string(), true);
     armed.writeStatus(d, /*bfCode=*/1, /*idrCount=*/0);
-    CHECK(slurp(msg).find(" B-") != std::string::npos);  // armed, no report
+    CHECK(slurp(msg).find(" B-") != std::string::npos); // armed, no report
 
     OsdWriter working(msg.string(), true);
     working.writeStatus(d, /*bfCode=*/2, /*idrCount=*/0);
-    CHECK(slurp(msg).find(" B+") != std::string::npos);  // working
+    CHECK(slurp(msg).find(" B+") != std::string::npos); // working
     fs::remove(msg);
 }
 
 TEST_CASE("osd: provider code reaches the rendered line") {
     auto msg = fs::temp_directory_path() / "fpvd-osd-prov.msg";
     fs::remove(msg);
-    Decision d{}; d.mcs = 3;
+    Decision d{};
+    d.mcs = 3;
     OsdWriter w(msg.string(), true);
-    int code = 2;                                  // stand-in for bfCodeProvider_()
+    int code = 2; // stand-in for bfCodeProvider_()
     w.writeStatus(d, code, /*idrCount=*/0);
     CHECK(slurp(msg).find(" B+") != std::string::npos);
     fs::remove(msg);

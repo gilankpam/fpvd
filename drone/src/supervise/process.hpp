@@ -11,9 +11,8 @@ namespace fpvd {
 enum class ProcState { Stopped, Starting, Running, Exited, Failed };
 
 class Process {
-public:
-    explicit Process(std::vector<std::string> argv,
-                     std::map<std::string, std::string> env = {});
+  public:
+    explicit Process(std::vector<std::string> argv, std::map<std::string, std::string> env = {});
 
     // Spawn the child. Sets state to Running on success.
     void start();
@@ -35,7 +34,7 @@ public:
     std::optional<int> lastExitCode() const { return lastExitCode_; }
     const std::vector<std::string>& argv() const { return argv_; }
 
-private:
+  private:
     std::vector<std::string> argv_;
     std::map<std::string, std::string> env_;
     pid_t pid_{-1};

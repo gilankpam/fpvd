@@ -12,8 +12,7 @@ import os
 import threading
 
 from .config_defaults import default_config
-from .schema import (DRONE_KEYS, DYNAMIC_LINK_KEYS, LEARNED_PRIOR_KEYS,
-                     SELECTOR_KEYS, SMOOTHING_KEYS)
+from .schema import DRONE_KEYS, DYNAMIC_LINK_KEYS, LEARNED_PRIOR_KEYS, SELECTOR_KEYS, SMOOTHING_KEYS
 
 log = logging.getLogger("fpvdgs.config")
 
@@ -41,8 +40,11 @@ def _warn_unknown(loaded: dict, defaults: dict) -> dict:
     # validate_effective and bricks boot.
     dl = pruned.get("dynamicLink")
     if isinstance(dl, dict):
-        for block, known in (("selector", SELECTOR_KEYS), ("smoothing", SMOOTHING_KEYS),
-                             ("learnedPrior", LEARNED_PRIOR_KEYS)):
+        for block, known in (
+            ("selector", SELECTOR_KEYS),
+            ("smoothing", SMOOTHING_KEYS),
+            ("learnedPrior", LEARNED_PRIOR_KEYS),
+        ):
             sub = dl.get(block)
             if isinstance(sub, dict):
                 for key in sorted(set(sub) - known):
@@ -63,8 +65,7 @@ def deep_merge(base: dict, overlay: dict) -> dict:
 
 
 class ConfigStore:
-    def __init__(self, defaults: dict, loaded: dict | None = None,
-                 config_path: str | None = None):
+    def __init__(self, defaults: dict, loaded: dict | None = None, config_path: str | None = None):
         self._defaults = copy.deepcopy(defaults)
         self._config = deep_merge(self._defaults, loaded or {})
         self._pending = copy.deepcopy(self._config)

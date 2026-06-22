@@ -1,26 +1,52 @@
 """Validation rules. `link` is a normal mutable block in /config."""
 
-LINK_KEYS = {"channel", "width", "txPowerDbm", "region", "linkId",
-             "beamforming", "wlans"}
-CONFIG_TOP_KEYS = {"link", "wfb", "drone", "dynamicLink", "pixelpilot",
-                   "idrForward", "connectionMonitor"}
-DYNAMIC_LINK_KEYS = {"enabled", "maxMcs", "radioProfile", "dronePort",
-                     "selector", "smoothing", "flightlog", "rssiNorm",
-                     "learnedPrior"}
-DRONE_KEYS = {"host", "apiPort"}   # the drone's address; reused by HTTP/IDR/DL
-SELECTOR_KEYS = {"probeViableThreshold", "probeFreshnessMs",
-                 "promoteDebounceWindows", "videoDemotePer",
-                 "emergencyFecPressure", "holdModesDownMs", "minBetweenChangesMs",
-                 "starvationWindows",
-                 "snrPromoteMarginDb", "snrDemoteMarginDb"}
-SMOOTHING_KEYS = {"ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst",
-                  "starvationThresholdPps"}
-LEARNED_PRIOR_KEYS = {"settleTicks", "viableLoss", "alphaTighten",
-                      "alphaRelax", "minSamples", "recencyDecay"}
-VALID_WIDTHS = {10, 20, 40}              # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
+LINK_KEYS = {"channel", "width", "txPowerDbm", "region", "linkId", "beamforming", "wlans"}
+CONFIG_TOP_KEYS = {
+    "link",
+    "wfb",
+    "drone",
+    "dynamicLink",
+    "pixelpilot",
+    "idrForward",
+    "connectionMonitor",
+}
+DYNAMIC_LINK_KEYS = {
+    "enabled",
+    "maxMcs",
+    "radioProfile",
+    "dronePort",
+    "selector",
+    "smoothing",
+    "flightlog",
+    "rssiNorm",
+    "learnedPrior",
+}
+DRONE_KEYS = {"host", "apiPort"}  # the drone's address; reused by HTTP/IDR/DL
+SELECTOR_KEYS = {
+    "probeViableThreshold",
+    "probeFreshnessMs",
+    "promoteDebounceWindows",
+    "videoDemotePer",
+    "emergencyFecPressure",
+    "holdModesDownMs",
+    "minBetweenChangesMs",
+    "starvationWindows",
+    "snrPromoteMarginDb",
+    "snrDemoteMarginDb",
+}
+SMOOTHING_KEYS = {"ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst", "starvationThresholdPps"}
+LEARNED_PRIOR_KEYS = {
+    "settleTicks",
+    "viableLoss",
+    "alphaTighten",
+    "alphaRelax",
+    "minSamples",
+    "recencyDecay",
+}
+VALID_WIDTHS = {10, 20, 40}  # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
-_bf_capable = None   # callable(cfg) -> bool; None => unknown => allow
+_bf_capable = None  # callable(cfg) -> bool; None => unknown => allow
 
 
 def set_bf_capable(fn) -> None:
@@ -79,7 +105,8 @@ def validate_effective(cfg: dict) -> None:
         if not _bf_capable(cfg):
             raise SchemaError(
                 "beamforming requires a card with a bf_monitor_conf node "
-                "(GS driver lacks CONFIG_BEAMFORMING_MONITOR)")
+                "(GS driver lacks CONFIG_BEAMFORMING_MONITOR)"
+            )
     dl = cfg.get("dynamicLink")
     if dl is not None:
         _validate_dynamic_link(dl)
@@ -138,13 +165,17 @@ def _validate_dynamic_link(dl: dict) -> None:
     sel = dl.get("selector")
     if sel is not None:
         _validate_block_keys("dynamicLink.selector", sel, SELECTOR_KEYS)
-        for k in ("probeViableThreshold", "videoDemotePer",
-                  "emergencyFecPressure"):
+        for k in ("probeViableThreshold", "videoDemotePer", "emergencyFecPressure"):
             _validate_prob(f"dynamicLink.selector.{k}", sel.get(k))
         for k in ("promoteDebounceWindows", "starvationWindows"):
             _validate_pos_int(f"dynamicLink.selector.{k}", sel.get(k))
-        for k in ("probeFreshnessMs", "holdModesDownMs", "minBetweenChangesMs",
-                  "snrPromoteMarginDb", "snrDemoteMarginDb"):
+        for k in (
+            "probeFreshnessMs",
+            "holdModesDownMs",
+            "minBetweenChangesMs",
+            "snrPromoteMarginDb",
+            "snrDemoteMarginDb",
+        ):
             _validate_non_neg_num(f"dynamicLink.selector.{k}", sel.get(k))
         # Invariant: the proactive-demote margin must exceed the promote margin or
         # the SNR-knee gates collapse to a single oscillating edge (no dead-band).
@@ -152,15 +183,18 @@ def _validate_dynamic_link(dl: dict) -> None:
         pm = sel.get("snrPromoteMarginDb", 1.0)
         dm = sel.get("snrDemoteMarginDb", 1.5)
         if dm <= pm:
-            raise SchemaError("dynamicLink.selector.snrDemoteMarginDb must be > "
-                              "snrPromoteMarginDb (hysteresis dead-band)")
+            raise SchemaError(
+                "dynamicLink.selector.snrDemoteMarginDb must be > "
+                "snrPromoteMarginDb (hysteresis dead-band)"
+            )
     sm = dl.get("smoothing")
     if sm is not None:
         _validate_block_keys("dynamicLink.smoothing", sm, SMOOTHING_KEYS)
         for k in ("ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst"):
             _validate_alpha(f"dynamicLink.smoothing.{k}", sm.get(k))
-        _validate_non_neg_num("dynamicLink.smoothing.starvationThresholdPps",
-                              sm.get("starvationThresholdPps"))
+        _validate_non_neg_num(
+            "dynamicLink.smoothing.starvationThresholdPps", sm.get("starvationThresholdPps")
+        )
     lp = dl.get("learnedPrior")
     if lp is not None:
         _validate_block_keys("dynamicLink.learnedPrior", lp, LEARNED_PRIOR_KEYS)
@@ -186,14 +220,16 @@ def _validate_block_keys(name: str, blk: dict, known: set) -> None:
 
 
 def _validate_prob(name: str, v) -> None:
-    if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))
-                          or not 0.0 <= v <= 1.0):
+    if v is not None and (
+        isinstance(v, bool) or not isinstance(v, (int, float)) or not 0.0 <= v <= 1.0
+    ):
         raise SchemaError(f"{name} must be a number in 0..1")
 
 
 def _validate_alpha(name: str, v) -> None:
-    if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))
-                          or not 0.0 < v <= 1.0):
+    if v is not None and (
+        isinstance(v, bool) or not isinstance(v, (int, float)) or not 0.0 < v <= 1.0
+    ):
         raise SchemaError(f"{name} must be a number in (0,1]")
 
 
@@ -203,8 +239,7 @@ def _validate_pos_int(name: str, v) -> None:
 
 
 def _validate_non_neg_num(name: str, v) -> None:
-    if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))
-                          or v < 0):
+    if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0):
         raise SchemaError(f"{name} must be a non-negative number")
 
 
@@ -258,10 +293,9 @@ def _validate_pixelpilot(pp: dict) -> None:
             raise SchemaError(f"pixelpilot.dvr.{key} must be a bool")
     env = pp.get("env", {})
     if not isinstance(env, dict) or not all(
-            isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
+        isinstance(k, str) and isinstance(v, str) for k, v in env.items()
+    ):
         raise SchemaError("pixelpilot.env must be a map of string to string")
     extra = pp.get("extraArgs", [])
     if not isinstance(extra, list) or not all(isinstance(a, str) for a in extra):
         raise SchemaError("pixelpilot.extraArgs must be a list of strings")
-
-

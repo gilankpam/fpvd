@@ -1,5 +1,5 @@
-#include "doctest.h"
 #include "config/schema.hpp"
+#include "doctest.h"
 #include <nlohmann/json.hpp>
 
 using fpvd::Config;
@@ -114,7 +114,7 @@ TEST_CASE("schema: dynamicLink round-trips through json") {
     // a stray mavlinkEnable in input is silently ignored (NLOHMANN_WITH_DEFAULT behaviour)
     nlohmann::json jStray = j;
     jStray["dynamicLink"]["mavlinkEnable"] = true;
-    fpvd::Config c3 = jStray.get<fpvd::Config>();  // must not throw
+    fpvd::Config c3 = jStray.get<fpvd::Config>(); // must not throw
     nlohmann::json jOut3 = c3;
     CHECK(jOut3.at("dynamicLink").contains("mavlinkEnable") == false);
 }
@@ -191,7 +191,7 @@ TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") 
                       "mode":"mirror","maxSeconds":300,"maxMB":500},
         "services": {}
     })");
-    fpvd::Config c = j.get<fpvd::Config>();  // must not throw
+    fpvd::Config c = j.get<fpvd::Config>(); // must not throw
     CHECK(c.dynamicLink.enabled == false);
     CHECK(c.dynamicLink.healthTimeoutMs == 10000);
 }

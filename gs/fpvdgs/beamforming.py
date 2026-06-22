@@ -29,7 +29,7 @@ class BeamformingController:
         self._armed = False
         self._iface = ""
         self._peer = ""
-        self._state = "disabled"   # disabled | unsupported | active | error
+        self._state = "disabled"  # disabled | unsupported | active | error
         self._reason = ""
 
     def supported(self, iface: str) -> bool:
@@ -64,7 +64,7 @@ class BeamformingController:
             return self.status()
 
         if self._armed and self._iface == iface and self._peer == peer_mac:
-            return self.status()   # idempotent: no rewrite
+            return self.status()  # idempotent: no rewrite
 
         if self._write_conf(iface, f"1 {peer_mac} 0 0"):
             self._armed, self._iface, self._peer = True, iface, peer_mac

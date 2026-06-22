@@ -13,12 +13,11 @@ already in the desired state; complements a nudge from /gs/apply.
 
 import threading
 
-from .drone_client import DroneUnreachable, DroneRejected
+from .drone_client import DroneRejected, DroneUnreachable
 
 
 class BeamformingArmer:
-    def __init__(self, beamforming, drone, wlans_resolver, config_provider,
-                 interval: float = 5.0):
+    def __init__(self, beamforming, drone, wlans_resolver, config_provider, interval: float = 5.0):
         # beamforming: BeamformingController; drone: DroneClient
         # wlans_resolver(cfg) -> list[str]; config_provider() -> effective cfg
         self._bf = beamforming
@@ -47,7 +46,7 @@ class BeamformingArmer:
             try:
                 self.tick()
             except Exception:
-                pass   # the reconcile loop must never die
+                pass  # the reconcile loop must never die
             self._stop.wait(self._interval)
 
     def tick(self):
@@ -76,8 +75,7 @@ class BeamformingArmer:
         if not self._drone.healthz():
             return
         try:
-            mac = (self._drone.get_status()
-                   .get("beamforming", {}).get("localMac", ""))
+            mac = self._drone.get_status().get("beamforming", {}).get("localMac", "")
         except (DroneUnreachable, DroneRejected):
             return
         if mac:

@@ -17,19 +17,26 @@ def render_pixelpilot_argv(effective: dict) -> list[str]:
     dvr_template = dvr.get("template", "record_%Y-%m-%d_%H-%M-%S.mp4")
     argv = [
         pp.get("bin", "/usr/bin/pixelpilot"),
-        "--config", pp.get("configPath", "/etc/pixelpilot.yaml"),
-        "--osd", "--osd-custom-message",
-        "--osd-config", pp.get("osdConfigPath", "/etc/pixelpilot/osd.json"),
-        "--codec", pp.get("codec", "h265"),
-        "--screen-mode", pp.get("screenMode", "1920x1080@60"),
+        "--config",
+        pp.get("configPath", "/etc/pixelpilot.yaml"),
+        "--osd",
+        "--osd-custom-message",
+        "--osd-config",
+        pp.get("osdConfigPath", "/etc/pixelpilot/osd.json"),
+        "--codec",
+        pp.get("codec", "h265"),
+        "--screen-mode",
+        pp.get("screenMode", "1920x1080@60"),
     ]
     if dvr.get("fmp4", True):
         argv.append("--dvr-fmp4")
     if dvr.get("sequencedFiles", True):
         argv.append("--dvr-sequenced-files")
     argv += [
-        "--dvr-template", os.path.join(dvr_dir, dvr_template),
-        "-p", str(pp.get("rtpPort", 5600)),
+        "--dvr-template",
+        os.path.join(dvr_dir, dvr_template),
+        "-p",
+        str(pp.get("rtpPort", 5600)),
     ]
     argv += pp.get("extraArgs", [])
     return argv

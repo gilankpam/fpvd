@@ -1,6 +1,7 @@
 """GS-side probe measurement: spawn a single FEC-off wfb_rx on the fixed probe
 radio_port, parse its stdout for per-MCS PER/RSSI. Threaded asyncio, mirroring
 DynamicLinkController. Observe-only; independent of the wfb-ng runner."""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,13 +18,14 @@ WFB_RX = "/usr/bin/wfb_rx"
 
 async def _default_spawn(cmd):
     return await asyncio.create_subprocess_exec(
-        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+    )
 
 
 class ProbeController:
     def __init__(self, snapshot, *, spawn=None, ewma_alpha: float = 0.25):
         self._snap = dict(snapshot)
-        self._spawn = spawn or _default_spawn   # cmd(list[str]) -> proc (await or sync in tests)
+        self._spawn = spawn or _default_spawn  # cmd(list[str]) -> proc (await or sync in tests)
         # Measurement tuning comes from the snapshot (frozen constants from
         # config_build.PROBE_*); the kwarg is a fallback for tests that supply
         # a bare snapshot without ewmaAlpha.
@@ -33,10 +35,10 @@ class ProbeController:
         self._lifecycle = threading.RLock()
         self._thread = None
         self._loop = None
-        self._stop_event = None                 # asyncio.Event, created in-loop
+        self._stop_event = None  # asyncio.Event, created in-loop
         self._started = threading.Event()
         self._agg = McsAggregator(alpha=self._alpha, blackout_windows=self._blackout)
-        self._last_update = {}   # mcs(int) -> monotonic seconds of last sample
+        self._last_update = {}  # mcs(int) -> monotonic seconds of last sample
         self._status = {"running": False, "streams": 0}
 
     # ---- thread-safe public API -----------------------------------------
@@ -46,8 +48,9 @@ class ProbeController:
                 if self._thread and self._thread.is_alive():
                     return
                 self._started.clear()
-                self._thread = threading.Thread(target=self._thread_main,
-                                                name="probe-controller", daemon=True)
+                self._thread = threading.Thread(
+                    target=self._thread_main, name="probe-controller", daemon=True
+                )
                 self._thread.start()
             self._started.wait(timeout=5.0)
 
@@ -76,8 +79,7 @@ class ProbeController:
                 self._snap = dict(snapshot)
                 self._alpha = float(snapshot.get("ewmaAlpha", self._alpha))
                 self._blackout = int(snapshot.get("blackoutWindows", self._blackout))
-                self._agg = McsAggregator(alpha=self._alpha,
-                                          blackout_windows=self._blackout)
+                self._agg = McsAggregator(alpha=self._alpha, blackout_windows=self._blackout)
                 self._last_update = {}
             # Restart unconditionally if it was running (mirrors the sibling
             # DynamicLinkController). A disabled snapshot just re-runs _run,
@@ -123,14 +125,27 @@ class ProbeController:
                 with self._lock:
                     self._loop = None
                     self._status.update(running=False, streams=0)
-                self._started.set()   # unblock start() even on early failure
+                self._started.set()  # unblock start() even on early failure
 
     def _build_cmd(self, port: int, sink: int) -> list[str]:
         # wfb_rx (rx.cpp getopt "K:fa:c:u:U:p:l:i:e:R:s:") — -l is the log_interval.
         snap = self._snap
-        return [WFB_RX, "-K", str(snap["key"]), "-i", str(snap["linkId"]),
-                "-p", str(port), "-c", "127.0.0.1", "-u", str(sink),
-                "-l", str(snap.get("rxL", 50)), *list(snap["wlans"])]
+        return [
+            WFB_RX,
+            "-K",
+            str(snap["key"]),
+            "-i",
+            str(snap["linkId"]),
+            "-p",
+            str(port),
+            "-c",
+            "127.0.0.1",
+            "-u",
+            str(sink),
+            "-l",
+            str(snap.get("rxL", 50)),
+            *list(snap["wlans"]),
+        ]
 
     async def _read_stream(self, proc):
         cur_mcs = None
@@ -157,7 +172,7 @@ class ProbeController:
         snap = self._snap
         procs, tasks = [], []
         try:
-            cmd = self._build_cmd(int(snap["port"]), 7000)   # 7000 = throwaway sink
+            cmd = self._build_cmd(int(snap["port"]), 7000)  # 7000 = throwaway sink
             res = self._spawn(cmd)
             proc = await res if asyncio.iscoroutine(res) else res
             procs.append(proc)

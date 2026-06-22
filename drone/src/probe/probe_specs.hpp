@@ -10,10 +10,8 @@ namespace fpvd {
 // MCS retune) + one feeder, mirroring the video PHY (width/stbc/ldpc, long GI),
 // FEC off (k=1 n=1). `mcs` is the initial rung; it is clamped to kProbeMcsCeiling.
 // Lifecycle is owned by the caller (seed when dynamicLink is enabled).
-std::vector<SupervisedSpec> buildProbeSpecs(const Config& c,
-                                            const std::string& iface,
-                                            const std::string& key,
-                                            const std::string& feederPath,
+std::vector<SupervisedSpec> buildProbeSpecs(const Config& c, const std::string& iface,
+                                            const std::string& key, const std::string& feederPath,
                                             int mcs);
 
 } // namespace fpvd

@@ -15,7 +15,7 @@ TEST_CASE("txpowerDbmForMcs returns the bl-m8812eu2 level-4 curve") {
 }
 
 TEST_CASE("txpowerDbmForMcs clamps out-of-range mcs") {
-    CHECK(txpowerDbmForMcs(-1) == 29);  // clamps to MCS0
-    CHECK(txpowerDbmForMcs(8)  == 19);  // clamps to MCS7
+    CHECK(txpowerDbmForMcs(-1) == 29); // clamps to MCS0
+    CHECK(txpowerDbmForMcs(8) == 19);  // clamps to MCS7
     CHECK(txpowerDbmForMcs(99) == 19);
 }

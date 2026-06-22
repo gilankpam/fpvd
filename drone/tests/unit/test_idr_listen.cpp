@@ -32,18 +32,18 @@ TEST_CASE("idr listener: bind, drain, three datagrams") {
 
     struct sockaddr_in dst{};
     dst.sin_family = AF_INET;
-    dst.sin_port   = htons(PORT);
+    dst.sin_port = htons(PORT);
     inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
 
     const char msg[] = "abc\n";
     for (int i = 0; i < 3; i++) {
-        ssize_t r = sendto(s, msg, sizeof(msg) - 1, 0,
-                           reinterpret_cast<struct sockaddr *>(&dst), sizeof(dst));
+        ssize_t r = sendto(s, msg, sizeof(msg) - 1, 0, reinterpret_cast<struct sockaddr*>(&dst),
+                           sizeof(dst));
         CHECK(r == static_cast<ssize_t>(sizeof(msg) - 1));
     }
 
     /* Wait for data to arrive. */
-    struct pollfd pf{ l.fd(), POLLIN, 0 };
+    struct pollfd pf{l.fd(), POLLIN, 0};
     CHECK(poll(&pf, 1, 500) > 0);
 
     /* Drain should consume all 3. */

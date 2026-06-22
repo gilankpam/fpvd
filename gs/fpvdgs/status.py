@@ -23,21 +23,25 @@ def parse_iw_info(text: str) -> dict:
 
 def iw_info(wlan: str) -> dict:
     try:
-        out = subprocess.run(["iw", "dev", wlan, "info"],
-                             capture_output=True, text=True, timeout=3)
+        out = subprocess.run(["iw", "dev", wlan, "info"], capture_output=True, text=True, timeout=3)
         return parse_iw_info(out.stdout)
     except (OSError, subprocess.SubprocessError):
         return {}
 
 
-def build_status(version: str, runner_state: dict, wlans: dict,
-                 link_info: dict, link_stats: dict | None = None,
-                 uptime_ms: int | None = None,
-                 dynamic_link: dict | None = None,
-                 pixelpilot: dict | None = None,
-                 probe: dict | None = None,
-                 beamforming: dict | None = None,
-                 connection: dict | None = None) -> dict:
+def build_status(
+    version: str,
+    runner_state: dict,
+    wlans: dict,
+    link_info: dict,
+    link_stats: dict | None = None,
+    uptime_ms: int | None = None,
+    dynamic_link: dict | None = None,
+    pixelpilot: dict | None = None,
+    probe: dict | None = None,
+    beamforming: dict | None = None,
+    connection: dict | None = None,
+) -> dict:
     radio = []
     for wlan, info in wlans.items():
         radio.append({"wlan": wlan, **info})

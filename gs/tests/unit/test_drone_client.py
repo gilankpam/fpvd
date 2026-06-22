@@ -42,9 +42,15 @@ def test_default_timeout_is_10s():
 
 def test_4xx_raises_drone_rejected_with_code_and_body(fake_drone):
     from fpvdgs.drone_client import DroneRejected
-    fake_drone["reject"] = (400, {"error": "validation",
-                                  "message": "requires link.stbc=false",
-                                  "details": [{"path": "link.beamforming"}]})
+
+    fake_drone["reject"] = (
+        400,
+        {
+            "error": "validation",
+            "message": "requires link.stbc=false",
+            "details": [{"path": "link.beamforming"}],
+        },
+    )
     c = DroneClient(fake_drone["endpoint"])
     with pytest.raises(DroneRejected) as ei:
         c.patch_config({"link": {"beamforming": {"enabled": True}}})
@@ -54,7 +60,7 @@ def test_4xx_raises_drone_rejected_with_code_and_body(fake_drone):
 
 
 def test_5xx_still_raises_unreachable(fake_drone):
-    fake_drone["fail"] = True   # fixture returns 500 on apply
+    fake_drone["fail"] = True  # fixture returns 500 on apply
     c = DroneClient(fake_drone["endpoint"])
     with pytest.raises(DroneUnreachable):
         c.apply()

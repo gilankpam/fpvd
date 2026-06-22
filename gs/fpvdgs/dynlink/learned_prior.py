@@ -7,6 +7,7 @@ The prior is an accelerant, never the authority — the live probe still gates
 promotes; this only warm-starts the cold MCS and predictively demotes ahead
 of a fade. Keyed (and persisted) per radioProfile.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,7 +18,7 @@ from dataclasses import dataclass
 
 log = logging.getLogger("fpvdgs.dynlink")
 
-MAX_MCS = 7   # rung ceiling (matches SelectorConfig.max_mcs default and the drone)
+MAX_MCS = 7  # rung ceiling (matches SelectorConfig.max_mcs default and the drone)
 
 
 def lsq_slope(samples) -> float:
@@ -37,12 +38,12 @@ def lsq_slope(samples) -> float:
 @dataclass
 class LearnedPriorConfig:
     # Learning (knee model)
-    settle_ticks: int = 5           # rung must be unchanged this many ticks to learn
-    viable_loss: float = 0.05       # residual_loss_w below this = "clean"
-    alpha_tighten: float = 0.25     # dirty -> raise knee (fast, pessimistic)
-    alpha_relax: float = 0.05       # clean -> lower knee (slow)
-    min_samples: float = 8.0        # confidence gate (decayed count)
-    recency_decay: float = 0.9995   # per-settled-observation count decay
+    settle_ticks: int = 5  # rung must be unchanged this many ticks to learn
+    viable_loss: float = 0.05  # residual_loss_w below this = "clean"
+    alpha_tighten: float = 0.25  # dirty -> raise knee (fast, pessimistic)
+    alpha_relax: float = 0.05  # clean -> lower knee (slow)
+    min_samples: float = 8.0  # confidence gate (decayed count)
+    recency_decay: float = 0.9995  # per-settled-observation count decay
     # Predictive machinery (unchanged from the prior design)
     predictive_horizon_ticks: int = 3
     predictive_slope_window_ticks: int = 10
@@ -85,8 +86,7 @@ class KneeModel:
         eff: list[float | None] = [None] * (MAX_MCS + 1)
         run: float | None = None
         for K in range(MAX_MCS + 1):
-            if (self._knee[K] is not None
-                    and self._count[K] >= self.cfg.min_samples):
+            if self._knee[K] is not None and self._count[K] >= self.cfg.min_samples:
                 run = self._knee[K] if run is None else max(run, self._knee[K])
                 eff[K] = run
         return eff
@@ -123,18 +123,25 @@ class KneeModel:
         return [None if k is None else round(k, 1) for k in self._knee]
 
     def to_dict(self) -> dict:
-        return {"schema": self.SCHEMA_VERSION,
-                "knees": list(self._knee), "counts": list(self._count)}
+        return {
+            "schema": self.SCHEMA_VERSION,
+            "knees": list(self._knee),
+            "counts": list(self._count),
+        }
 
     def load_dict(self, doc: dict) -> bool:
         if not isinstance(doc, dict):
-            return False          # tolerant boundary: never boot-brick on a malformed file
+            return False  # tolerant boundary: never boot-brick on a malformed file
         if doc.get("schema") != self.SCHEMA_VERSION:
             return False
         knees = doc.get("knees")
         counts = doc.get("counts")
-        if (isinstance(knees, list) and len(knees) == MAX_MCS + 1
-                and isinstance(counts, list) and len(counts) == MAX_MCS + 1):
+        if (
+            isinstance(knees, list)
+            and len(knees) == MAX_MCS + 1
+            and isinstance(counts, list)
+            and len(counts) == MAX_MCS + 1
+        ):
             self._knee = [None if k is None else float(k) for k in knees]
             self._count = [float(c) for c in counts]
             return True
@@ -161,9 +168,11 @@ class LearnedPrior:
         clean = bool(operating_clean)
         learned = False
         if rssi is not None:
-            self._model.observe(m, float(rssi), clean); learned = True
+            self._model.observe(m, float(rssi), clean)
+            learned = True
         if snr is not None:
-            self._snr_model.observe(m, float(snr), clean); learned = True
+            self._snr_model.observe(m, float(snr), clean)
+            learned = True
         if learned:
             self._since_flush += 1
             if self._since_flush >= self.cfg.flush_interval_observations:
@@ -227,9 +236,7 @@ class LearnedPrior:
             log.info("learned_prior: %s snr ignored (schema/shape) — retraining", self._path())
 
     def flush(self) -> None:
-        doc = {"key": self.key,
-               "rssi": self._model.to_dict(),
-               "snr": self._snr_model.to_dict()}
+        doc = {"key": self.key, "rssi": self._model.to_dict(), "snr": self._snr_model.to_dict()}
         try:
             os.makedirs(self.cfg.persist_dir, exist_ok=True)
             tmp = self._path() + ".tmp"

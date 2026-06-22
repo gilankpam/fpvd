@@ -7,12 +7,12 @@ namespace fpvd::dynlink {
 struct RoiCurve {
     uint16_t thresholdKbps;
     uint16_t lowAnchorKbps;
-    int8_t   floor;
-    uint8_t  step;
+    int8_t floor;
+    uint8_t step;
 };
 
 class EncoderClient {
-public:
+  public:
     // Transport is injected (non-owning); the referenced WaybeamClient must
     // outlive this EncoderClient.
     EncoderClient(WaybeamClient& client, RoiCurve roi);
@@ -26,14 +26,14 @@ public:
 
     void setRoiCurve(RoiCurve roi) { roi_ = roi; }
 
-private:
+  private:
     WaybeamClient* client_;
-    RoiCurve       roi_;
+    RoiCurve roi_;
 
-    bool     lastValid_{false};
+    bool lastValid_{false};
     uint16_t lastBitrate_{0};
-    int8_t   lastRoiQp_{0};
-    uint8_t  lastFps_{0};
+    int8_t lastRoiQp_{0};
+    uint8_t lastFps_{0};
 };
 
 } // namespace fpvd::dynlink

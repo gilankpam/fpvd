@@ -6,6 +6,7 @@ PUBLISHER's thread, so a callback must be quick, non-blocking, and thread-safe
 (marshal real work onto its own loop). The bus caches the latest payload per
 state key (see _STATE_KEY) so a late subscriber can read current state via
 state()."""
+
 from __future__ import annotations
 
 import logging

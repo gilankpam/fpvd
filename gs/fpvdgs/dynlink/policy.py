@@ -9,6 +9,7 @@ locally, so the GS no longer composes any of that. The selector (Phase 2)
 is the only decision: probe-promote + reactive demote, with a learned-prior
 warm-start seed and starvation hysteresis feeding the emergency demote.
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,6 +28,7 @@ log = logging.getLogger(__name__)
 # Config dataclasses for the probe-driven selector + smoothing/learned-prior/flightlog.
 # ------------------------------------------------------------------
 
+
 @dataclass
 class SelectorConfig:
     """Probe-driven promote + reactive demote + timing/cadence.
@@ -39,6 +41,7 @@ class SelectorConfig:
     or a Channel-B emergency (fec/starvation). starvation_windows is the
     consecutive-starved-window count before link_starved feeds the emergency demote.
     """
+
     # Probe-driven promote
     probe_viable_threshold: float = 0.99
     probe_freshness_ms: float = 500.0
@@ -79,9 +82,10 @@ class PolicyConfig:
 # Leading selector — dual-gate ProfileSelector (alink_gs port).
 # ------------------------------------------------------------------
 
+
 @dataclass
 class LeadingState:
-    current_mcs: int                  # currently selected MCS
+    current_mcs: int  # currently selected MCS
     # Initialise the timing anchors well in the past so the first
     # decision after boot doesn't get gated by min_between_changes_ms
     # / hold_modes_down_ms. In production ts_ms is a wall-clock value
@@ -128,10 +132,7 @@ class LeadingSelector:
     # ---- helpers ----
 
     def _emergency_active(self, fec_pressure: float, link_starved: bool) -> bool:
-        return (
-            fec_pressure >= self.cfg.emergency_fec_pressure
-            or link_starved
-        )
+        return fec_pressure >= self.cfg.emergency_fec_pressure or link_starved
 
     # ---- main entry ----
 
@@ -197,18 +198,13 @@ class LeadingSelector:
 
         # --- Rate limit (promotes only; emergencies above bypass it) ---
         within_hold = (ts_ms - st.last_change_time_ms) < self.cfg.hold_modes_down_ms
-        within_rate = (
-            (ts_ms - st.last_change_time_ms) < self.cfg.min_between_changes_ms
-        )
+        within_rate = (ts_ms - st.last_change_time_ms) < self.cfg.min_between_changes_ms
 
         # --- Promote: clean+fresh current+1 for promote_debounce_windows ---
         # The debounce counter accumulates even while the rate limit
         # blocks a commit, so the climb fires as soon as both gates open.
         target = st.current_mcs + 1
-        rung = (
-            (probe or {}).get("mcs", {}).get(str(target))
-            if target <= self._cap_mcs else None
-        )
+        rung = (probe or {}).get("mcs", {}).get(str(target)) if target <= self._cap_mcs else None
         fresh = (
             rung is not None
             and rung.get("ageMs") is not None
@@ -229,8 +225,12 @@ class LeadingSelector:
             # != bad, so the probe may explore the frontier; otherwise the top
             # rung, whose knee can only be learned BY operating there, is forever
             # unreachable (the maxMcs-never-reached deadlock).
-            if (self._promote_clean >= self.cfg.promote_debounce_windows
-                    and not within_hold and not within_rate and not promote_blocked):
+            if (
+                self._promote_clean >= self.cfg.promote_debounce_windows
+                and not within_hold
+                and not within_rate
+                and not promote_blocked
+            ):
                 commit(target, f"probe_promote mcs{target} per={rung['per']:.4f}")
         else:
             self._promote_clean = 0
@@ -246,6 +246,7 @@ class LeadingSelector:
 # ------------------------------------------------------------------
 # Top-level policy: runs the selector, emits a {mcs}-only Decision.
 # ------------------------------------------------------------------
+
 
 class Policy:
     """Runs the probe-driven dual-gate selector and emits the
@@ -291,7 +292,8 @@ class Policy:
         # dynamicLink.radioProfile; GS-local, the live probe stays authoritative.
         self.learned_prior = LearnedPrior(profile_name, cfg.learned_prior)
         self._rssi_window: deque[float] = deque(
-            maxlen=cfg.learned_prior.predictive_slope_window_ticks)
+            maxlen=cfg.learned_prior.predictive_slope_window_ticks
+        )
         self._predict_demote_count = 0
         self._snr_demote_count = 0
         self.flightlog = FlightLog(cfg.flightlog)
@@ -306,16 +308,12 @@ class Policy:
             self._starvation_count += 1
         else:
             self._starvation_count = 0
-        sustained_starved = (
-            self._starvation_count >= self.cfg.selector.starvation_windows
-        )
+        sustained_starved = self._starvation_count >= self.cfg.selector.starvation_windows
 
         # Reactive loss demote: single-window. residual_loss_w is raw, but the
         # reactive demote is an SNR-jump that lands on the right rung in one move
         # (nothing to cascade), so react on the first breaching window.
-        sustained_loss = (
-            signals.residual_loss_w >= self.cfg.selector.video_demote_per
-        )
+        sustained_loss = signals.residual_loss_w >= self.cfg.selector.video_demote_per
 
         # Warm-start seed (one-shot). Uses the learned per-card curve ONLY —
         # there is no RSSI hand-table fallback. Under per-MCS dynamic TX power
@@ -347,8 +345,10 @@ class Policy:
             if pc is not None and pc < cur:
                 if projected_drop >= self.cfg.learned_prior.predictive_min_drop_db:
                     self._predict_demote_count += 1
-                    if (self._predict_demote_count
-                            >= self.cfg.learned_prior.predictive_debounce_windows):
+                    if (
+                        self._predict_demote_count
+                        >= self.cfg.learned_prior.predictive_debounce_windows
+                    ):
                         self.leading.state.current_mcs = max(pc, 0)
                         self.leading._promote_clean = 0
                         predict_reason = f"predict_demote mcs{cur}->{pc}"
@@ -376,10 +376,9 @@ class Policy:
         # climbed onto is not yanked back before its knee can warm.
         snr_demote_reason = ""
         cur_snr = self.leading.state.current_mcs
-        if (loss_demote_target is not None
-                and self.learned_prior.snr_rung_unviable(
-                    cur_snr, signals.snr,
-                    margin=self.cfg.selector.snr_demote_margin_db)):
+        if loss_demote_target is not None and self.learned_prior.snr_rung_unviable(
+            cur_snr, signals.snr, margin=self.cfg.selector.snr_demote_margin_db
+        ):
             self._snr_demote_count += 1
             if self._snr_demote_count >= self.cfg.selector.snr_demote_debounce:
                 self.leading.state.current_mcs = loss_demote_target
@@ -393,8 +392,8 @@ class Policy:
         # (unlearned) target is explorable — see select()'s frontier note.
         promote_target = self.leading.state.current_mcs + 1
         promote_blocked = self.learned_prior.snr_rung_unviable(
-            promote_target, signals.snr,
-            margin=self.cfg.selector.snr_promote_margin_db)
+            promote_target, signals.snr, margin=self.cfg.selector.snr_promote_margin_db
+        )
 
         probe_snap = self._probe_status() if self._probe_status else None
         new_mcs, _changed = self.leading.select(
@@ -431,37 +430,44 @@ class Policy:
         )
         # Compact per-rung probe view (per + ageMs only) so the record stays
         # small at 10 Hz against the flight-log size cap.
-        probe_log = (None if probe_snap is None else {
-            m: {"per": v.get("per"), "ageMs": v.get("ageMs")}
-            for m, v in (probe_snap.get("mcs") or {}).items()
-        })
-        self.flightlog.write({
-            "ts": signals.timestamp,
-            "rssi": signals.rssi,
-            "rssi_raw": signals.rssi_raw,
-            "snr": signals.snr_w,
-            "snr_norm": signals.snr,
-            "snr_ceiling": loss_demote_target,
-            "promote_blocked": promote_blocked,
-            "snr_knees": self.learned_prior.snr_knees_snapshot(),
-            "evm": signals.evm_w,
-            "evm_lo": signals.evm_lo_w,
-            "evm_min": signals.evm_min_w,
-            "mcs": new_mcs,
-            "reason": reason,
-            "residual_loss_w": signals.residual_loss_w,
-            "fec_work": signals.fec_work,
-            "link_starved": sustained_starved,
-            "ceiling": (self.learned_prior.ceiling(signals.rssi)
-                        if signals.rssi is not None else None),
-            "probe": probe_log,
-            "pc": pc,
-            "knees": self.learned_prior.knees_snapshot(),
-            "prior_learn": prior_learn,
-            "slope": slope,
-            "predict_gated": predict_gated,
-            "promote_clean": self.leading._promote_clean,
-        })
+        probe_log = (
+            None
+            if probe_snap is None
+            else {
+                m: {"per": v.get("per"), "ageMs": v.get("ageMs")}
+                for m, v in (probe_snap.get("mcs") or {}).items()
+            }
+        )
+        self.flightlog.write(
+            {
+                "ts": signals.timestamp,
+                "rssi": signals.rssi,
+                "rssi_raw": signals.rssi_raw,
+                "snr": signals.snr_w,
+                "snr_norm": signals.snr,
+                "snr_ceiling": loss_demote_target,
+                "promote_blocked": promote_blocked,
+                "snr_knees": self.learned_prior.snr_knees_snapshot(),
+                "evm": signals.evm_w,
+                "evm_lo": signals.evm_lo_w,
+                "evm_min": signals.evm_min_w,
+                "mcs": new_mcs,
+                "reason": reason,
+                "residual_loss_w": signals.residual_loss_w,
+                "fec_work": signals.fec_work,
+                "link_starved": sustained_starved,
+                "ceiling": (
+                    self.learned_prior.ceiling(signals.rssi) if signals.rssi is not None else None
+                ),
+                "probe": probe_log,
+                "pc": pc,
+                "knees": self.learned_prior.knees_snapshot(),
+                "prior_learn": prior_learn,
+                "slope": slope,
+                "predict_gated": predict_gated,
+                "promote_clean": self.leading._promote_clean,
+            }
+        )
         return Decision(
             timestamp=signals.timestamp,
             mcs=new_mcs,
