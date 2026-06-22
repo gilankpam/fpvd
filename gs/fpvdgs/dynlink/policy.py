@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from .decision import Decision
 from .flightlog import FlightLog, FlightLogConfig
-from .learned_prior import LearnedPrior, LearnedPriorConfig, lsq_slope
+from .learned_prior import UNBOUND_KEY, LearnedPrior, LearnedPriorConfig, lsq_slope
 from .signals import Signals
 
 log = logging.getLogger(__name__)
@@ -255,7 +255,7 @@ class Policy:
     def __init__(
         self,
         cfg: PolicyConfig,
-        profile_name: str = "unbound",
+        profile_name: str = UNBOUND_KEY,
         *,
         probe_status=None,
     ) -> None:

@@ -20,6 +20,11 @@ log = logging.getLogger("fpvdgs.dynlink")
 
 MAX_MCS = 7  # rung ceiling (matches SelectorConfig.max_mcs default and the drone)
 
+# Pre-bind sentinel key: until the drone's adapter id binds the real key at the
+# connect event, the prior runs in-memory only (no load, no flush) so a cold
+# start never leaves a stray <UNBOUND_KEY>.json on disk.
+UNBOUND_KEY = "unbound"
+
 
 def lsq_slope(samples) -> float:
     """Least-squares gradient (dBm per tick) over an evenly-spaced sample
@@ -156,6 +161,9 @@ class LearnedPrior:
     def __init__(self, key: str, cfg: LearnedPriorConfig) -> None:
         self.key = key
         self.cfg = cfg
+        # The pre-bind sentinel is in-memory only — its learning (under identity
+        # RSSI, before the drone curve binds) is discarded at the connect rekey.
+        self._ephemeral = key == UNBOUND_KEY
         self._model = KneeModel(cfg)
         self._snr_model = KneeModel(cfg)
         self._since_flush = 0
@@ -218,6 +226,8 @@ class LearnedPrior:
         return os.path.join(self.cfg.persist_dir, f"{safe}.json")
 
     def _load(self) -> None:
+        if self._ephemeral:
+            return  # sentinel: never read a (stale) unbound.json
         try:
             with open(self._path()) as f:
                 doc = json.load(f)
@@ -236,6 +246,8 @@ class LearnedPrior:
             log.info("learned_prior: %s snr ignored (schema/shape) — retraining", self._path())
 
     def flush(self) -> None:
+        if self._ephemeral:
+            return  # sentinel: in-memory only, never write unbound.json
         doc = {"key": self.key, "rssi": self._model.to_dict(), "snr": self._snr_model.to_dict()}
         try:
             os.makedirs(self.cfg.persist_dir, exist_ok=True)

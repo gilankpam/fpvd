@@ -218,3 +218,46 @@ def test_snr_rung_unviable_margin_threads_through(tmp_path):
     assert p.snr_rung_unviable(4, 26.6) is True  # strict (default margin 0)
     assert p.snr_rung_unviable(4, 26.6, margin=1.0) is False
     assert p.snr_rung_unviable(4, 25.0, margin=1.0) is True  # clearly below
+
+
+def test_unbound_sentinel_prior_does_not_flush(tmp_path):
+    # The pre-bind "unbound" sentinel prior must never write to disk — avoids
+    # the stray unbound.json on cold start (before the drone adapter binds).
+    import os
+
+    from fpvdgs.dynlink.learned_prior import UNBOUND_KEY
+
+    cfg = LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=1)
+    p = LearnedPrior(UNBOUND_KEY, cfg)
+    _settle(p, 4, -60.0, True)
+    p.flush()
+    assert not os.path.exists(os.path.join(str(tmp_path), f"{UNBOUND_KEY}.json"))
+
+
+def test_unbound_sentinel_prior_ignores_existing_file(tmp_path):
+    # A stale unbound.json must NOT be loaded by the ephemeral sentinel prior.
+    import os
+
+    from fpvdgs.dynlink.learned_prior import UNBOUND_KEY
+
+    doc = {
+        "key": UNBOUND_KEY,
+        "rssi": {"schema": 2, "knees": [-40.0] * 8, "counts": [99.0] * 8},
+        "snr": {"schema": 2, "knees": [None] * 8, "counts": [0.0] * 8},
+    }
+    with open(os.path.join(str(tmp_path), f"{UNBOUND_KEY}.json"), "w") as f:
+        json.dump(doc, f)
+    cfg = LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=1)
+    p = LearnedPrior(UNBOUND_KEY, cfg)
+    assert p.ceiling(-30.0) is None  # did not load the stale confident knees
+
+
+def test_real_key_prior_still_flushes(tmp_path):
+    # Regression: a real adapter-id key persists as before.
+    import os
+
+    cfg = LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=1)
+    p = LearnedPrior("bl-m8812eu2", cfg)
+    _settle(p, 4, -60.0, True)
+    p.flush()
+    assert os.path.exists(os.path.join(str(tmp_path), "bl-m8812eu2.json"))
