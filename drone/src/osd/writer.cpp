@@ -1,19 +1,62 @@
-/* writer.cpp — msposd status-line writer (ported from dl_osd.c, lifted out of
- * dynlink and made thread-safe for the shared daemon-owned instance). */
+/* writer.cpp — msposd glyph-column writer. Composes a multi-line message; each
+ * line carries its own &L color directive + an icon glyph + value. */
 #include "osd/writer.hpp"
 
+#include "osd/osd_constants.hpp"
+
 #include <cstdio>
+#include <string>
+#include <vector>
 
 namespace fpvd::osd {
 
-/* msposd directive prefix: `&L50` is color 5 (yellow) + zone 0 (TopLeft);
- * `&F30` sets font size 30. Without these directives msposd falls back to its
- * boot-default &F38 &L43 (huge font, "TopMoving" marquee-scroll). */
-static constexpr const char* kOsdPrefix = "&L50&F30 ";
+namespace {
 
-/* BF OSD token: 0 off (nothing), 1 armed-no-report, 2 working. ASCII so the
- * msposd font always renders it. */
-static const char* bfToken(int bfCode) { return bfCode == 2 ? " B+" : bfCode == 1 ? " B-" : ""; }
+/* "&L{color}{zone}&F{size} {glyph}{value}" — one OSD line. */
+std::string osdLine(int color, const char* glyph, const std::string& value) {
+    char head[32];
+    std::snprintf(head, sizeof(head), "&L%d%d&F%d ", color, kOsdZone, kOsdFontSize);
+    return std::string(head) + glyph + value;
+}
+
+int colorForMcs(unsigned mcs) {
+    if (mcs == 0)
+        return kColRed; // failsafe rung
+    if (mcs >= kMcsGood)
+        return kColGreen;
+    return kColYellow;
+}
+
+const char* signalGlyph(unsigned mcs) {
+    if (mcs >= kMcsGood)
+        return kGlyphSignal3;
+    if (mcs >= 2)
+        return kGlyphSignal2;
+    return kGlyphSignal1;
+}
+
+/* Beamforming line (or empty string to omit). bfCode: 0 off, 1 armed, 2 active. */
+std::string bfLine(int bfCode) {
+    if (bfCode == 2)
+        return osdLine(kColCyan, kGlyphAntenna, "");
+    if (bfCode == 1)
+        return osdLine(kColWhite, kGlyphAntenna, "");
+    return {};
+}
+
+std::string join(const std::vector<std::string>& lines) {
+    std::string out;
+    for (const auto& l : lines) {
+        if (l.empty())
+            continue; // skip omitted lines (e.g. BF off)
+        if (!out.empty())
+            out += '\n';
+        out += l;
+    }
+    return out;
+}
+
+} // namespace
 
 OsdWriter::OsdWriter(std::string msgPath, bool enabled)
     : msgPath_(std::move(msgPath)), enabled_(enabled) {}
@@ -22,34 +65,29 @@ void OsdWriter::setEnabled(bool e) {
     std::lock_guard<std::mutex> lk(mu_);
     const bool wasEnabled = enabled_;
     enabled_ = e;
-    /* On an on->off toggle, actively clear the overlay. msposd holds + re-
-     * renders the last bytes we wrote, and every write path no-ops while
-     * disabled, so flipping the flag alone leaves a stale line on screen
-     * forever. Unset both lines and flush an empty file so msposd clears it. */
+    /* On on->off, actively clear: msposd holds + re-renders the last bytes, so
+     * flipping the flag alone leaves a stale overlay forever. */
     if (wasEnabled && !e) {
-        statusLine_[0] = '\0';
-        eventLine_[0] = '\0';
+        statusLines_.clear();
+        eventLine_.clear();
         flushLocked();
     }
 }
 
 void OsdWriter::flushLocked() {
-    /* Write atomically: path.tmp -> rename(path). Avoids msposd reading a
-     * half-written buffer. */
+    /* Atomic write: path.tmp -> rename(path), so msposd never reads a partial file. */
     std::string tmpPath = msgPath_ + ".tmp";
     FILE* fd = std::fopen(tmpPath.c_str(), "w");
-    if (!fd) {
+    if (!fd)
         return;
-    }
-    if (eventLine_[0])
-        std::fprintf(fd, "%s\n", eventLine_);
-    if (statusLine_[0])
-        std::fprintf(fd, "%s\n", statusLine_);
+    if (!eventLine_.empty())
+        std::fprintf(fd, "%s\n", eventLine_.c_str());
+    if (!statusLines_.empty())
+        std::fprintf(fd, "%s\n", statusLines_.c_str());
     std::fflush(fd);
     std::fclose(fd);
-    if (std::rename(tmpPath.c_str(), msgPath_.c_str()) < 0) {
+    if (std::rename(tmpPath.c_str(), msgPath_.c_str()) < 0)
         std::remove(tmpPath.c_str());
-    }
 }
 
 void OsdWriter::writeStatus(const dynlink::Decision& d, int bfCode, uint64_t idrCount) {
@@ -57,18 +95,28 @@ void OsdWriter::writeStatus(const dynlink::Decision& d, int bfCode, uint64_t idr
     if (!enabled_)
         return;
 
-    /* &T/&W/&B/&C are msposd placeholders (board temp, wifi-module temp,
-     * video bitrate+fps, cpu%); msposd substitutes at render time. */
-    std::snprintf(statusLine_, sizeof(statusLine_),
-                  "%sMCS%u %uM (%u,%u) TX%d I%u%s | &B T&T W&W CPU&C", kOsdPrefix,
-                  static_cast<unsigned>(d.mcs), static_cast<unsigned>((d.bitrateKbps + 500) / 1000),
-                  static_cast<unsigned>(d.k), static_cast<unsigned>(d.n),
-                  static_cast<int>(d.txPowerDbm), static_cast<unsigned>(idrCount), bfToken(bfCode));
+    const unsigned mcs = d.mcs;
+    const int mcsColor = colorForMcs(mcs);
+    const unsigned mbps = (static_cast<unsigned>(d.bitrateKbps) + 500u) / 1000u;
 
-    /* Fresh status = the link recovered (or never tripped). Clear any stale
-     * event line so a past WATCHDOG/REJECT toast doesn't sit on the OSD forever
-     * — msposd keeps rendering the last bytes we wrote, so we actively unset. */
-    eventLine_[0] = '\0';
+    std::vector<std::string> lines;
+    lines.push_back(osdLine(mcsColor, signalGlyph(mcs), "MCS" + std::to_string(mcs)));
+    lines.push_back(osdLine(mcsColor, kGlyphSpeed, std::to_string(mbps) + "Mbps"));
+    lines.push_back(osdLine(kColWhite, kGlyphShield,
+                            std::to_string(static_cast<unsigned>(d.k)) + "/" +
+                                std::to_string(static_cast<unsigned>(d.n))));
+    lines.push_back(
+        osdLine(kColWhite, kGlyphFlash, std::to_string(static_cast<int>(d.txPowerDbm)) + "dBm"));
+    lines.push_back(bfLine(bfCode));
+    lines.push_back(osdLine(kColWhite, kGlyphRefresh, std::to_string(idrCount)));
+    /* msposd substitutes &B (bitrate+fps), &T/&W (temps), &C (cpu%) at render. */
+    lines.push_back(osdLine(kColWhite, kGlyphFilm, "&B"));
+    lines.push_back(osdLine(kColWhite, kGlyphThermo, std::string("&T") + kUnitDegC));
+    lines.push_back(osdLine(kColWhite, kGlyphWifi, std::string("&W") + kUnitDegC));
+    lines.push_back(osdLine(kColWhite, kGlyphCpu, "&C"));
+
+    statusLines_ = join(lines);
+    eventLine_.clear(); // fresh status = recovered; drop any stale toast
     flushLocked();
 }
 
@@ -77,11 +125,15 @@ void OsdWriter::writeBaseLine(int bfCode) {
     if (!enabled_)
         return;
 
-    /* Placeholders-only line for when the dynamic link isn't feeding the OSD.
-     * msposd holds + re-renders it, substituting the &-placeholders live. */
-    std::snprintf(statusLine_, sizeof(statusLine_), "%s&B  T&T  W&W  CPU&C%s", kOsdPrefix,
-                  bfToken(bfCode));
-    eventLine_[0] = '\0';
+    std::vector<std::string> lines;
+    lines.push_back(bfLine(bfCode));
+    lines.push_back(osdLine(kColWhite, kGlyphFilm, "&B"));
+    lines.push_back(osdLine(kColWhite, kGlyphThermo, std::string("&T") + kUnitDegC));
+    lines.push_back(osdLine(kColWhite, kGlyphWifi, std::string("&W") + kUnitDegC));
+    lines.push_back(osdLine(kColWhite, kGlyphCpu, "&C"));
+
+    statusLines_ = join(lines);
+    eventLine_.clear();
     flushLocked();
 }
 
@@ -89,7 +141,7 @@ void OsdWriter::writeEvent(const std::string& text) {
     std::lock_guard<std::mutex> lk(mu_);
     if (!enabled_)
         return;
-    std::snprintf(eventLine_, sizeof(eventLine_), "%s%s", kOsdPrefix, text.c_str());
+    eventLine_ = osdLine(kColRed, "", text); // red toast, glyph-less
     flushLocked();
 }
 
