@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gs-tests:
+    name: GS tests (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pytest
+      - run: python -m pytest tests/ -q
+
+  gs-lint:
+    name: GS lint (ruff)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Pinned for parity with the locally-formatted baseline.
+      - run: pip install ruff==0.8.4
+      - run: ruff check fpvdgs tests
+      - run: ruff format --check fpvdgs tests
+
+  drone-build-test:
+    name: Drone build + tests (doctest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y cmake g++
+      - name: Configure
+        run: cmake -S drone -B drone/build -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build drone/build -j
+      # Run from drone/ — a test fixture path is relative to drone/ (NOT ctest).
+      - name: Test
+        working-directory: drone
+        run: ./build/fpvd_tests
+
+  drone-lint:
+    name: Drone lint (clang-format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Pinned for parity with the locally-formatted baseline.
+      - run: pip install clang-format==19.1.4
+      - name: Check formatting
+        run: |
+          find drone/src drone/tests \( -name '*.cpp' -o -name '*.hpp' \) -print0 \
+            | xargs -0 clang-format --dry-run --Werror
