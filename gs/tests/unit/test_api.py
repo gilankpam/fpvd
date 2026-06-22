@@ -416,6 +416,26 @@ def test_disable_dynamiclink_stops_probe(tmp_path):
     assert probe.started is False and runner.restarts == 0
 
 
+def test_width_only_change_does_not_bounce_probe(tmp_path):
+    """Regression guard: a width-only change rebuilds the DL controller (so it
+    re-keys the learned prior) but must NOT call probe.set_config — the probe
+    snapshot is width-agnostic and bouncing it would interrupt the uplink."""
+    api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path)
+    # Enable DL first so the controller is running.
+    store.patch({"dynamicLink": {"enabled": True}})
+    api.handle("POST", "/gs/apply", {}, b"")
+    # Clear both controllers' recorded calls before the width change.
+    ctrl.calls.clear()
+    probe.cfgs.clear()
+    # Apply a width-only change (link.width 20 -> 10; dynamicLink unchanged).
+    store.patch({"link": {"width": 10}})
+    api.handle("POST", "/gs/apply", {}, b"")
+    # Controller must have been reconfigured (prior re-key + selector reset).
+    assert any(c[0] == "set_config" for c in ctrl.calls)
+    # Probe must NOT have been reconfigured.
+    assert probe.cfgs == []
+
+
 class FakeRelay:
     def __init__(self):
         self.events = []
