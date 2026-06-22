@@ -12,11 +12,19 @@ namespace fpvd::osd {
 
 namespace {
 
-/* "&L{color}{zone}&F{size} {glyph}{value}" — one OSD line. */
+/* "&L{color}{zone}&F{size} {glyph} {value}" — one OSD line. One space between the
+ * glyph and its value so the numbers sit off the icon (and, with the monospaced
+ * Nerd Font, align in a column). Skipped when either side is empty: the BF line is
+ * glyph-only, the event line is glyph-less. */
 std::string osdLine(int color, const char* glyph, const std::string& value) {
     char head[32];
     std::snprintf(head, sizeof(head), "&L%d%d&F%d ", color, kOsdZone, kOsdFontSize);
-    return std::string(head) + glyph + value;
+    std::string line(head);
+    line += glyph;
+    if (glyph[0] != '\0' && !value.empty())
+        line += ' ';
+    line += value;
+    return line;
 }
 
 int colorForMcs(unsigned mcs) {

@@ -44,23 +44,23 @@ TEST_CASE("osd: status renders a per-line glyph column") {
 
     // Signal line: green (mcs>=kMcsGood) + signal-3 glyph + "MCS5".
     CHECK(buf.find("&L30&F30") != std::string::npos);
-    CHECK(buf.find(std::string(kGlyphSignal3) + "MCS5") != std::string::npos);
+    CHECK(buf.find(std::string(kGlyphSignal3) + " MCS5") != std::string::npos);
     // Cap line: green, speedometer, "18Mbps".
-    CHECK(buf.find(std::string(kGlyphSpeed) + "18Mbps") != std::string::npos);
+    CHECK(buf.find(std::string(kGlyphSpeed) + " 18Mbps") != std::string::npos);
     // FEC line: white, shield, "12/8".
     CHECK(buf.find("&L00&F30") != std::string::npos);
-    CHECK(buf.find(std::string(kGlyphShield) + "12/8") != std::string::npos);
+    CHECK(buf.find(std::string(kGlyphShield) + " 12/8") != std::string::npos);
     // TX line: flash, "19dBm".
-    CHECK(buf.find(std::string(kGlyphFlash) + "19dBm") != std::string::npos);
+    CHECK(buf.find(std::string(kGlyphFlash) + " 19dBm") != std::string::npos);
     // Beamforming working: cyan antenna.
     CHECK(buf.find("&L70&F30 " + std::string(kGlyphAntenna)) != std::string::npos);
     // IDR line: refresh, "3".
-    CHECK(buf.find(std::string(kGlyphRefresh) + "3") != std::string::npos);
+    CHECK(buf.find(std::string(kGlyphRefresh) + " 3") != std::string::npos);
     // msposd placeholders carried on their own lines.
-    CHECK(buf.find(std::string(kGlyphFilm) + "&B") != std::string::npos);
-    CHECK(buf.find(std::string(kGlyphThermo) + "&T°C") != std::string::npos);
-    CHECK(buf.find(std::string(kGlyphWifi) + "&W°C") != std::string::npos);
-    CHECK(buf.find(std::string(kGlyphCpu) + "&C") != std::string::npos);
+    CHECK(buf.find(std::string(kGlyphFilm) + " &B") != std::string::npos);
+    CHECK(buf.find(std::string(kGlyphThermo) + " &T°C") != std::string::npos);
+    CHECK(buf.find(std::string(kGlyphWifi) + " &W°C") != std::string::npos);
+    CHECK(buf.find(std::string(kGlyphCpu) + " &C") != std::string::npos);
 
     std::remove(path.c_str());
 }
@@ -75,7 +75,7 @@ TEST_CASE("osd: MCS tier drives signal/cap color and signal glyph") {
     osd.writeStatus(d, 0, 0);
     {
         std::string b = readFile(path);
-        CHECK(b.find("&L20&F30 " + std::string(kGlyphSignal1) + "MCS0") != std::string::npos);
+        CHECK(b.find("&L20&F30 " + std::string(kGlyphSignal1) + " MCS0") != std::string::npos);
         CHECK(b.find("&L20&F30 " + std::string(kGlyphSpeed)) != std::string::npos); // cap red too
     }
 
@@ -83,14 +83,14 @@ TEST_CASE("osd: MCS tier drives signal/cap color and signal glyph") {
     osd.writeStatus(d, 0, 0);
     {
         std::string b = readFile(path);
-        CHECK(b.find("&L50&F30 " + std::string(kGlyphSignal2) + "MCS2") != std::string::npos);
+        CHECK(b.find("&L50&F30 " + std::string(kGlyphSignal2) + " MCS2") != std::string::npos);
     }
 
     d.mcs = 4; // good -> green, signal-3
     osd.writeStatus(d, 0, 0);
     {
         std::string b = readFile(path);
-        CHECK(b.find("&L30&F30 " + std::string(kGlyphSignal3) + "MCS4") != std::string::npos);
+        CHECK(b.find("&L30&F30 " + std::string(kGlyphSignal3) + " MCS4") != std::string::npos);
     }
     std::remove(path.c_str());
 }
@@ -120,8 +120,8 @@ TEST_CASE("osd: writeBaseLine renders the system subset, no link lines") {
 
     osd.writeBaseLine(/*bfCode=*/2);
     std::string b = readFile(path);
-    CHECK(b.find(std::string(kGlyphFilm) + "&B") != std::string::npos);
-    CHECK(b.find(std::string(kGlyphCpu) + "&C") != std::string::npos);
+    CHECK(b.find(std::string(kGlyphFilm) + " &B") != std::string::npos);
+    CHECK(b.find(std::string(kGlyphCpu) + " &C") != std::string::npos);
     CHECK(b.find("&L70&F30 " + std::string(kGlyphAntenna)) != std::string::npos); // BF active
     CHECK(b.find("MCS") == std::string::npos);       // no link decision data
     CHECK(b.find(kGlyphSpeed) == std::string::npos); // no cap line
