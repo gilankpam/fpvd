@@ -30,18 +30,21 @@ inline constexpr unsigned kMcsGood = 4u;
 // the codepoint. drone/tools/osd_glyphs_verify.py asserts each resolves in the
 // shipped font (keep the two lists in sync). msposd decodes UTF-8 (incl. 4-byte)
 // and rasterizes whatever glyph the font holds.
-inline constexpr const char* kGlyphSignal1 = u8"\U000F091F"; // signal-cellular-1
-inline constexpr const char* kGlyphSignal2 = u8"\U000F0920"; // signal-cellular-2
-inline constexpr const char* kGlyphSignal3 = u8"\U000F0921"; // signal-cellular-3
-inline constexpr const char* kGlyphSpeed = u8"\U000F04C5";   // speedometer (cap)
-inline constexpr const char* kGlyphShield = u8"\U000F0498";  // shield (fec)
-inline constexpr const char* kGlyphFlash = u8"\U000F0241";   // flash (tx power)
-inline constexpr const char* kGlyphAntenna = u8"\U000F0E11"; // antenna (beamforming)
-inline constexpr const char* kGlyphRefresh = u8"\U000F0450"; // refresh (idr)
-inline constexpr const char* kGlyphFilm = u8"\U000F024A";    // filmstrip (video)
-inline constexpr const char* kGlyphThermo = u8"\U000F050F";  // thermometer (board temp)
-inline constexpr const char* kGlyphWifi = u8"\U000F05A9";    // wifi (wifi temp)
-inline constexpr const char* kGlyphCpu = u8"\U000F035B";     // memory (cpu)
+// Codepoints map to these exact Material-Design-Icon glyphs in the shipped font;
+// the comment names ARE the contract that drone/tools/osd_glyphs_verify.py checks
+// (it asserts each codepoint resolves to this glyph name, not merely *some* glyph).
+inline constexpr const char* kGlyphSignal1 = u8"\U000F08BC"; // md-signal_cellular_1
+inline constexpr const char* kGlyphSignal2 = u8"\U000F08BD"; // md-signal_cellular_2
+inline constexpr const char* kGlyphSignal3 = u8"\U000F08BE"; // md-signal_cellular_3
+inline constexpr const char* kGlyphSpeed = u8"\U000F04C5";   // md-speedometer (cap)
+inline constexpr const char* kGlyphShield = u8"\U000F0498";  // md-shield (fec)
+inline constexpr const char* kGlyphFlash = u8"\U000F0241";   // md-flash (tx power)
+inline constexpr const char* kGlyphAntenna = u8"\U000F1119"; // md-antenna (beamforming)
+inline constexpr const char* kGlyphRefresh = u8"\U000F0450"; // md-refresh (idr)
+inline constexpr const char* kGlyphFilm = u8"\U000F0230";    // md-filmstrip (video)
+inline constexpr const char* kGlyphThermo = u8"\U000F050F";  // md-thermometer (board temp)
+inline constexpr const char* kGlyphWifi = u8"\U000F05A9";    // md-wifi (wifi temp)
+inline constexpr const char* kGlyphCpu = u8"\U000F035B";     // md-memory (cpu)
 
 // Unit suffix: degree sign + C (U+00B0 is in UbuntuMono's Latin-1 set).
 inline constexpr const char* kUnitDegC = u8"°C";

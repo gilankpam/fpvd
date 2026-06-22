@@ -1,53 +1,78 @@
 #!/usr/bin/env python3
-"""Verify every OSD glyph codepoint resolves in the shipped Nerd Font.
+"""Verify the OSD glyph codepoints resolve to the INTENDED glyphs in the shipped font.
 
 Usage:
-  python3 drone/tools/osd_glyphs_verify.py deploy/drone/assets/UbuntuMono-Regular.ttf
+  python3 drone/tools/osd_glyphs_verify.py [path/to/font.ttf]
+  (defaults to deploy/drone/assets/UbuntuMono-Regular.ttf)
 
-Exits non-zero and lists misses if any codepoint maps to .notdef / is absent.
-Keep CODEPOINTS in sync with drone/src/osd/osd_constants.hpp.
+This is stronger than a presence check: a codepoint can resolve to *some* glyph
+(so it looks "present") while being the wrong picture (e.g. a handbag instead of
+an antenna). We parse each kGlyph* codepoint straight out of osd_constants.hpp
+and assert the font maps it to the Material-Design-Icon name written in that
+line's trailing comment. The comment name IS the contract.
+
 Requires: pip install fonttools
 """
 
+import re
 import sys
+from pathlib import Path
+
 from fontTools.ttLib import TTFont
 
-CODEPOINTS = {
-    "kGlyphSignal1": 0xF091F,
-    "kGlyphSignal2": 0xF0920,
-    "kGlyphSignal3": 0xF0921,
-    "kGlyphSpeed": 0xF04C5,
-    "kGlyphShield": 0xF0498,
-    "kGlyphFlash": 0xF0241,
-    "kGlyphAntenna": 0xF0E11,
-    "kGlyphRefresh": 0xF0450,
-    "kGlyphFilm": 0xF024A,
-    "kGlyphThermo": 0xF050F,
-    "kGlyphWifi": 0xF05A9,
-    "kGlyphCpu": 0xF035B,
-    "degree(U+00B0)": 0x00B0,
-}
+REPO = Path(__file__).resolve().parents[2]
+HEADER = REPO / "drone/src/osd/osd_constants.hpp"
+DEFAULT_FONT = REPO / "deploy/drone/assets/UbuntuMono-Regular.ttf"
+
+# Matches: kGlyphX = u8"\U000Fxxxx"; // <expected-glyph-name> ...
+LINE_RE = re.compile(
+    r'(kGlyph\w+)\s*=\s*u8"\\U([0-9A-Fa-f]{8})";\s*//\s*([A-Za-z0-9_-]+)'
+)
+
+
+def parse_header():
+    """Return [(const, codepoint, expected_glyph_name), ...] from osd_constants.hpp."""
+    out = []
+    for line in HEADER.read_text(encoding="utf-8").splitlines():
+        m = LINE_RE.search(line)
+        if m:
+            out.append((m.group(1), int(m.group(2), 16), m.group(3)))
+    return out
 
 
 def main():
-    if len(sys.argv) != 2:
-        print(__doc__)
+    font_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_FONT
+    entries = parse_header()
+    if not entries:
+        print(f"ERROR: no kGlyph* constants parsed from {HEADER}")
         return 2
-    cmap = TTFont(sys.argv[1]).getBestCmap()
-    misses = []
-    for name, cp in CODEPOINTS.items():
-        g = cmap.get(cp)
-        if not g or g == ".notdef":
-            misses.append((name, cp))
-    if misses:
-        print(
-            "MISSING glyphs (fix codepoint via https://www.nerdfonts.com/cheat-sheet,"
-        )
-        print("update BOTH this file and drone/src/osd/osd_constants.hpp):")
-        for name, cp in misses:
-            print(f"  {name}: U+{cp:05X}")
+    cmap = TTFont(str(font_path)).getBestCmap()
+
+    bad = [
+        (const, cp, expected, cmap.get(cp) or "(absent)")
+        for const, cp, expected in entries
+        if cmap.get(cp) != expected
+    ]
+
+    if bad:
+        print(f"MISMATCH against {font_path}:")
+        for const, cp, expected, actual in bad:
+            print(
+                f"  {const}: U+{cp:05X} expected '{expected}' but font has '{actual}'"
+            )
+        byname = {n: c for c, n in cmap.items()}
+        print("\nCorrect codepoints for the expected names present in this font:")
+        for const, cp, expected, _actual in bad:
+            fix = byname.get(expected)
+            print(
+                f"  {const} -> {expected}: "
+                + (f"U+{fix:05X}" if fix else "(name absent)")
+            )
         return 1
-    print(f"OK: all {len(CODEPOINTS)} codepoints present in {sys.argv[1]}")
+
+    print(
+        f"OK: all {len(entries)} glyph codepoints resolve to their intended names in {font_path}"
+    )
     return 0
 
 
