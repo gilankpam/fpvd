@@ -72,6 +72,12 @@ copy "$STRIPPED"                   /usr/bin/fpvd.new
 copy "$CPP/scripts/radio-up.sh"   /usr/libexec/fpvd/radio-up.sh
 copy "$CPP/scripts/radio-tune.sh" /usr/libexec/fpvd/radio-tune.sh
 copy "$PROBE_FEEDER"              /usr/libexec/fpvd/probe-feeder.new   # staged: live feeders hold the old inode (ETXTBSY); mv on switchover
+# OSD glyph font: drop-in replacement for msposd's UbuntuMono at its fixed path.
+# Staged as .new, mv'd into place in the switchover so the msposd restart loads
+# the new glyphs. (If Task 1 found /usr/share/fonts read-only, change this target
+# to the writable path recorded there.)
+remote 'mkdir -p /usr/share/fonts/truetype'
+copy "$REPO/deploy/drone/assets/UbuntuMono-Regular.ttf" /usr/share/fonts/truetype/UbuntuMono-Regular.ttf.new
 # Note: there is no defaults.json file to push. The daemon uses code-baked
 # defaults + a single /etc/fpvd/config.json. A seed step below materialises
 # /etc/fpvd/config.json on first install (without clobbering operator edits).
@@ -125,6 +131,7 @@ if [ "$MODE" = install ]; then
         rm -f /etc/init.d/S95waybeam /etc/init.d/S98wifibroadcast /etc/init.d/S99dynamic-link-applier
         mv -f /usr/bin/fpvd.new /usr/bin/fpvd
         mv -f /usr/libexec/fpvd/probe-feeder.new /usr/libexec/fpvd/probe-feeder
+        mv -f /usr/share/fonts/truetype/UbuntuMono-Regular.ttf.new /usr/share/fonts/truetype/UbuntuMono-Regular.ttf
         # Seed /etc/fpvd/config.json from code defaults on first install only;
         # never clobber an existing operator config.
         [ -f /etc/fpvd/config.json ] || { /usr/bin/fpvd --dump-config > /etc/fpvd/config.json.tmp && mv /etc/fpvd/config.json.tmp /etc/fpvd/config.json; }
@@ -138,6 +145,7 @@ else
         sleep 2
         mv -f /usr/bin/fpvd.new /usr/bin/fpvd
         mv -f /usr/libexec/fpvd/probe-feeder.new /usr/libexec/fpvd/probe-feeder
+        mv -f /usr/share/fonts/truetype/UbuntuMono-Regular.ttf.new /usr/share/fonts/truetype/UbuntuMono-Regular.ttf
         # Seed /etc/fpvd/config.json from code defaults if absent (e.g. first
         # deploy after the defaults.json model was removed).
         [ -f /etc/fpvd/config.json ] || { /usr/bin/fpvd --dump-config > /etc/fpvd/config.json.tmp && mv /etc/fpvd/config.json.tmp /etc/fpvd/config.json; }

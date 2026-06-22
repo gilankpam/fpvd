@@ -1,9 +1,8 @@
 #pragma once
 /* writer.hpp — msposd status-line writer (the drone's /tmp/MSPOSD.msg source).
- * Moved out of dynlink: the OSD message file is a drone-wide artifact rendered
- * whether or not the dynamic link is enabled, so the daemon owns one always-on
- * writer that both the controller (rich status line) and the daemon (system-
- * stats base line) write through. */
+ * The daemon owns one always-on writer; both the controller (rich status column)
+ * and the daemon (system-stats base column) write through it. msposd renders the
+ * lines onto the video, coloring per line and substituting &-placeholders. */
 #include "dynlink/wire.hpp" // fpvd::dynlink::Decision
 #include <cstdint>
 #include <mutex>
@@ -15,36 +14,33 @@ class OsdWriter {
   public:
     OsdWriter(std::string msgPath, bool enabled);
 
-    /* Rich status line for the last applied dynamic-link decision. idrCount is
-     * the always-on relay's received-burst count; bfCode is 0/1/2. */
+    /* Rich glyph column for the last applied dynamic-link decision. idrCount is
+     * the always-on relay's received count; bfCode is 0 off / 1 armed / 2 active. */
     void writeStatus(const dynlink::Decision& d, int bfCode, uint64_t idrCount);
 
-    /* System-stats base line (placeholders only) shown when the dynamic link
+    /* System-stats subset (video/temps/cpu + BF) shown when the dynamic link
      * isn't feeding the OSD. bfCode is 0/1/2. */
     void writeBaseLine(int bfCode);
 
-    /* Transient event line rendered above the status line. msposd renders both
-     * if present. */
+    /* Transient red event line rendered above the column. */
     void writeEvent(const std::string& text);
 
     /* Convenience event: WATCHDOG safe_defaults. */
     void eventWatchdog();
 
-    /* Enable/disable all OSD writes at runtime (gates the status AND base line).
-     * The daemon owns this flag from the top-level `osd.enabled` config. */
+    /* Enable/disable all OSD writes at runtime; on on->off this clears the file. */
     void setEnabled(bool e);
 
   private:
-    /* Write eventLine_ (if set) + statusLine_ atomically to msgPath_. Assumes
-     * mu_ is held. With both lines unset this truncates the file to empty,
-     * which clears the msposd overlay (see setEnabled's on->off path). */
+    /* Write eventLine_ (if set) + statusLines_ atomically to msgPath_. Assumes
+     * mu_ is held. Both empty -> truncates the file, clearing the overlay. */
     void flushLocked();
 
     std::mutex mu_;
     std::string msgPath_;
     bool enabled_;
-    char statusLine_[128]{};
-    char eventLine_[128]{};
+    std::string statusLines_; // '\n'-joined column, no leading/trailing newline
+    std::string eventLine_;   // optional red toast, rendered above the column
 };
 
 } // namespace fpvd::osd
