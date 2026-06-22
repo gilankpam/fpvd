@@ -255,7 +255,7 @@ class Policy:
     def __init__(
         self,
         cfg: PolicyConfig,
-        profile_name: str = "m8812eu2",
+        profile_name: str = "unbound",
         *,
         probe_status=None,
     ) -> None:
@@ -481,6 +481,15 @@ class Policy:
                 "mcs": new_mcs,
             },
         )
+
+    def bind_learned_prior(self, adapter_id: str) -> None:
+        """(Re)key the learned prior to the drone-reported adapter id. Called
+        at the connect edge before warm-start, so the session learns/persists
+        under the correct per-card file. No-op when the key is unchanged."""
+        if self.learned_prior.key == adapter_id:
+            return
+        self.profile_name = adapter_id
+        self.learned_prior = LearnedPrior(adapter_id, self.cfg.learned_prior)
 
     def reset_for_new_session(self) -> None:
         """Reset volatile selector + hysteresis state to boot (incl. the RSSI
