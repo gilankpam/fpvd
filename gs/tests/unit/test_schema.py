@@ -60,7 +60,6 @@ def _eff(**dl):
         "dynamicLink": {
             "enabled": False,
             "maxMcs": 5,
-            "radioProfile": "m8812eu2",
             "dronePort": 9999,
         },
     }
@@ -79,15 +78,6 @@ def test_effective_accepts_valid_dynamiclink():
 def test_effective_rejects_bad_max_mcs():
     with pytest.raises(SchemaError):
         schema.validate_effective(_eff(maxMcs=9))
-
-
-def test_effective_rejects_empty_radio_profile():
-    with pytest.raises(SchemaError):
-        schema.validate_effective(_eff(radioProfile=""))
-
-
-def test_effective_accepts_known_radio_profile():
-    schema.validate_effective(_eff(radioProfile="m8812eu2"))  # no raise
 
 
 def test_effective_accepts_snr_margins():
@@ -246,7 +236,7 @@ def test_enable_bf_on_capable_card_ok():
 
 
 def _dl(**over):
-    base = {"enabled": True, "maxMcs": 5, "radioProfile": "m8812eu2", "dronePort": 9999}
+    base = {"enabled": True, "maxMcs": 5, "dronePort": 9999}
     base.update(over)
     return {"link": {"channel": 132, "region": "US", "width": 20}, "dynamicLink": base}
 
@@ -257,7 +247,6 @@ def test_validate_effective_accepts_flat_dynamic_link():
             selector={"probeViableThreshold": 0.9},
             smoothing={"ewmaAlphaRssi": 0.3},
             flightlog={"enabled": True},
-            rssiNorm={"enabled": True},
         )
     )  # no raise
 

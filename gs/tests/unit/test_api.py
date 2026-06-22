@@ -162,7 +162,6 @@ def _api_with_dynlink(tmp_path):
         "dynamicLink": {
             "enabled": False,
             "maxMcs": 5,
-            "radioProfile": "m8812eu2",
             "dronePort": 9999,
         },
     }
@@ -365,7 +364,6 @@ def _api_with_dl_and_probe(tmp_path):
         "dynamicLink": {
             "enabled": False,
             "maxMcs": 5,
-            "radioProfile": "m8812eu2",
             "dronePort": 9999,
         },
     }

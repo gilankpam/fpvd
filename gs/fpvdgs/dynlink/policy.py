@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from .decision import Decision
 from .flightlog import FlightLog, FlightLogConfig
-from .learned_prior import LearnedPrior, LearnedPriorConfig, lsq_slope
+from .learned_prior import UNBOUND_KEY, LearnedPrior, LearnedPriorConfig, lsq_slope
 from .signals import Signals
 
 log = logging.getLogger(__name__)
@@ -255,7 +255,7 @@ class Policy:
     def __init__(
         self,
         cfg: PolicyConfig,
-        profile_name: str = "m8812eu2",
+        profile_name: str = UNBOUND_KEY,
         *,
         probe_status=None,
     ) -> None:
@@ -288,8 +288,8 @@ class Policy:
         # been unchanged for settle_ticks (loss from the last change drained).
         self._ticks_at_mcs = 0
         self._last_ingest_mcs: int | None = None
-        # Learned per-card prior (always-on), keyed by the operator-set
-        # dynamicLink.radioProfile; GS-local, the live probe stays authoritative.
+        # Learned per-card prior (always-on), keyed by the drone-reported
+        # adapter id (radio.adapterId); GS-local, the live probe stays authoritative.
         self.learned_prior = LearnedPrior(profile_name, cfg.learned_prior)
         self._rssi_window: deque[float] = deque(
             maxlen=cfg.learned_prior.predictive_slope_window_ticks
@@ -481,6 +481,15 @@ class Policy:
                 "mcs": new_mcs,
             },
         )
+
+    def bind_learned_prior(self, adapter_id: str) -> None:
+        """(Re)key the learned prior to the drone-reported adapter id. Called
+        at the connect edge before warm-start, so the session learns/persists
+        under the correct per-card file. No-op when the key is unchanged."""
+        if self.learned_prior.key == adapter_id:
+            return
+        self.profile_name = adapter_id
+        self.learned_prior = LearnedPrior(adapter_id, self.cfg.learned_prior)
 
     def reset_for_new_session(self) -> None:
         """Reset volatile selector + hysteresis state to boot (incl. the RSSI

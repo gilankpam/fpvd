@@ -632,7 +632,6 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
 "dynamicLink": {
   "enabled": false,            // boolean — arm the in-process control loop
   "maxMcs": 5,                 // integer, 0..7 — operator MCS ceiling
-  "radioProfile": "m8812eu2",  // string — keys the learned-prior persistence file
   "dronePort": 9999,           // integer, 1..65535 — drone DL UDP port (host comes from drone.host)
 
   // Selector: probe-driven promote + reactive demote + timing/cadence
@@ -656,8 +655,7 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
     "starvationThresholdPps": 50.0   // number >= 0 — pps below which link is considered starved
   },
 
-  "flightlog": { "enabled": true },  // bool — write per-tick JSONL flight logs
-  "rssiNorm":  { "enabled": true }   // bool — EIRP-normalize RSSI by per-MCS TX power
+  "flightlog": { "enabled": true }   // bool — write per-tick JSONL flight logs
 }
 ```
 
@@ -665,12 +663,10 @@ The controller is an in-process thread that subscribes to wfb-ng's link stats at
 |-------|------|---------|--------------|
 | `enabled` | boolean | `false` | — |
 | `maxMcs` | integer | `5` | 0 – 7 |
-| `radioProfile` | string | `"m8812eu2"` | any non-empty string |
 | `dronePort` | integer | `9999` | 1 – 65535 (drone UDP host comes from `drone.host`) |
 | `selector.*` | — | see above | see [Tuning reference](gs-dynamic-link-tuning.md) |
 | `smoothing.*` | — | see above | see [Tuning reference](gs-dynamic-link-tuning.md) |
 | `flightlog.enabled` | boolean | `true` | — |
-| `rssiNorm.enabled` | boolean | `true` | — |
 
 All other knobs — learned-prior internals, probe measurement constants, rssi-norm EIRP curve, flightlog storage settings, and the `videoStreamId` constant — are **frozen code constants** not exposed in config. See [`docs/gs-dynamic-link-tuning.md`](gs-dynamic-link-tuning.md) for the full inventory with source file references.
 

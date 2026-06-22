@@ -9,7 +9,7 @@ from fpvdgs.dynlink.signals import Signals
 
 
 def _profile():
-    return "m8812eu2"  # Policy takes the radioProfile string (learned-prior key)
+    return "m8812eu2"  # Policy takes the adapter id string (learned-prior key)
 
 
 def _cfg(tmp_path, **lp):
@@ -267,3 +267,19 @@ def test_snr_knee_proactive_demote_still_fires_clearly_below(tmp_path):
     assert dec.mcs < 5  # proactive SNR-demote fired
     p.close()
     p.close()
+
+
+def test_bind_learned_prior_rekeys(tmp_path):
+    from fpvdgs.dynlink.policy import Policy
+
+    cfg = _cfg(tmp_path)  # existing helper in this file; persist_dir under tmp_path
+    p = Policy(cfg)
+    assert p.learned_prior.key == "unbound"
+    first = p.learned_prior
+    p.bind_learned_prior("bl-m8812eu2")
+    assert p.learned_prior.key == "bl-m8812eu2"
+    assert p.learned_prior is not first
+    # idempotent: same key does not rebuild
+    same = p.learned_prior
+    p.bind_learned_prior("bl-m8812eu2")
+    assert p.learned_prior is same

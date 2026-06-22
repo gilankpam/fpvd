@@ -18,21 +18,22 @@ WINDOW_S = 0.1  # design cadence: log_interval = 100 ms (§3)
 @dataclass(frozen=True)
 class RssiNormConfig:
     """EIRP-normalization of the video-link RSSI by the drone's per-MCS TX
-    power. `tx_power_dbm_by_mcs` MIRRORS the drone's kTxPowerDbmByMcs curve
-    (drone/src/dynlink/txpower_curve.hpp) — both are static calibration
-    constants and MUST stay in sync. When `enabled` is False, normalization
-    is identity (raw RSSI), for rollback / back-compat."""
+    power. The controller binds `tx_power_dbm_by_mcs` (and the derived
+    `p_ref_dbm`) from the drone's /status curve at the connect event — the
+    drone is the single source of truth. `enabled` is internal bind state, not
+    a config knob: it is False (identity / raw RSSI) until a curve is bound,
+    True while a valid drone curve is in effect."""
 
-    enabled: bool = True
-    p_ref_dbm: int = 29
-    tx_power_dbm_by_mcs: tuple[int, ...] = (29, 28, 25, 23, 19, 19, 19, 19)
+    enabled: bool = False
+    p_ref_dbm: int = 0
+    tx_power_dbm_by_mcs: tuple[int, ...] = ()
 
 
 def normalize_rssi(rssi_raw: float | None, mcs: int | None, cfg: RssiNormConfig) -> float | None:
     """EIRP-normalize one RSSI reading: rssi_raw + (P_ref − curve[mcs]).
     Clamps mcs into the curve's index range. None-safe (returns rssi_raw
     when disabled, or when rssi_raw / mcs is None)."""
-    if not cfg.enabled or rssi_raw is None or mcs is None:
+    if not cfg.enabled or not cfg.tx_power_dbm_by_mcs or rssi_raw is None or mcs is None:
         return rssi_raw
     n = len(cfg.tx_power_dbm_by_mcs)
     m = max(0, min(n - 1, int(mcs)))
@@ -115,6 +116,15 @@ class SignalAggregator:
 
     def update_session(self, session: SessionInfo) -> None:
         self.signals.session = session
+
+    def reset_smoothed_rssi(self) -> None:
+        """Drop the smoothed RSSI/SNR EWMAs so they restart clean. Called
+        when the TX-power curve is (re)bound from the drone: samples taken
+        under a different (or identity) normalization must not bleed into
+        the freshly-normalized series."""
+        self.signals.rssi = None
+        self.signals.rssi_raw = None
+        self.signals.snr = None
 
     def consume(self, ev: RxEvent) -> Signals:
         s = self.signals

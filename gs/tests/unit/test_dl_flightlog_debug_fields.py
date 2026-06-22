@@ -13,7 +13,7 @@ from fpvdgs.dynlink.signals import Signals
 
 
 def _profile():
-    return "m8812eu2"  # Policy takes the radioProfile string (learned-prior key)
+    return "m8812eu2"  # Policy takes the adapter id string (learned-prior key)
 
 
 def _cfg(tmp_path, **lp):

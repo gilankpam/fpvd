@@ -7,9 +7,8 @@ of every exposed knob and its default; this doc adds semantics, valid ranges, an
 source-file references for both buckets.
 
 Two config blocks carry the tunable knobs: `dynamicLink.selector` (operational)
-and `dynamicLink.smoothing` (advanced). Two single-key blocks expose rollback
-toggles: `dynamicLink.flightlog.enabled` and `dynamicLink.rssiNorm.enabled`.
-Everything else is frozen.
+and `dynamicLink.smoothing` (advanced). One single-key block exposes a rollback
+toggle: `dynamicLink.flightlog.enabled`. Everything else is frozen.
 
 ---
 
@@ -21,7 +20,6 @@ Everything else is frozen.
 |-----|------|---------|-------|---------|
 | `enabled` | bool | `false` | — | Arm the in-process control loop. |
 | `maxMcs` | int | `5` | 0 – 7 | Operator MCS ceiling — the controller never selects above this rung regardless of probe results. Distinct from the internal `SelectorConfig.max_mcs` HW-ceiling fallback (7). |
-| `radioProfile` | string | `"m8812eu2"` | non-empty string | Keys the learned-prior persistence file at `/etc/fpvd/learned/<radioProfile>.json`. No hardware lookup — it is a free identifier. |
 | `dronePort` | int | `9999` | 1 – 65535 | Drone dynamic-link UDP **port**; the host is the shared `drone.host` (see below). Matches `drone/src/dynlink/wire.hpp`. |
 
 > **Drone address.** The GS reaches the drone via one top-level `drone.host` (default `10.5.0.10`), reused by all three components — the HTTP `/air` proxy (`drone.apiPort`, default `8080`), the IDR relay (`idrForward.port`), and the dynamic-link decision UDP (`dynamicLink.dronePort`). Only the host is shared; each service keeps its own port.
@@ -54,12 +52,11 @@ Source: `gs/fpvdgs/dynlink/signals.py` (`SignalAggregator`).
 | `ewmaAlphaBurst` | float | `0.1` | (0, 1] | EWMA decay weight for the burst rate signal. |
 | `starvationThresholdPps` | float | `50.0` | >= 0 | Data fragment rate (packets/sec) below which a window is counted as starved. Well below normal FPV video (~700 – 1500 pps) but above background noise from a stalled stream. |
 
-### `dynamicLink.flightlog` and `dynamicLink.rssiNorm`
+### `dynamicLink.flightlog`
 
 | Key | Type | Default | Purpose |
 |-----|------|---------|---------|
 | `flightlog.enabled` | bool | `true` | Write per-tick JSONL flight logs to the frozen storage path. Disable to stop logging without changing other behavior. |
-| `rssiNorm.enabled` | bool | `true` | EIRP-normalize the RSSI signal by per-MCS TX power (frozen curve). Set `false` to use raw RSSI — rollback/back-compat toggle. |
 
 ---
 
@@ -81,21 +78,23 @@ Source: `gs/fpvdgs/probe/config_build.py`.
 
 ### RSSI normalization curve
 
-Source: `gs/fpvdgs/dynlink/signals.py` (`RssiNormConfig`).
+Source: `gs/fpvdgs/dynlink/signals.py` (`RssiNormConfig`) + `drone/src/dynlink/txpower_curve.hpp`.
 
-The curve **mirrors** `drone/src/dynlink/txpower_curve.hpp` `kTxPowerDbmByMcs` —
-both are static calibration constants for the same card and must stay in sync.
+The curve is supplied by the drone at the connect event (`radio.txPowerCurve` in the
+`DRONE_CONNECTED` payload) and bound by the controller — the drone is the single source
+of truth. Normalization is identity (raw RSSI) until a valid curve arrives.
 
-| Constant | Value | Purpose |
-|----------|-------|---------|
-| `p_ref_dbm` | `29` dBm | Reference TX power at which all RSSI readings are normalized. |
-| `tx_power_dbm_by_mcs` | `(29, 28, 25, 23, 19, 19, 19, 19)` | Per-MCS TX power (dBm) used by the drone applier's anti-overdrive curve. RSSI is adjusted by `p_ref - curve[mcs]` so comparisons across MCS rungs are EIRP-equivalent. |
+| Constant | Meaning |
+|----------|---------|
+| `p_ref_dbm` | Reference TX power (max of the curve). All RSSI readings are normalized to this level. |
+| `tx_power_dbm_by_mcs` | Per-MCS TX power (dBm) from the drone's anti-overdrive curve. RSSI is adjusted by `p_ref - curve[mcs]` so comparisons across MCS rungs are EIRP-equivalent. |
 
 ### Learned-prior internals
 
 The learned RSSI→MCS-ceiling prior is always-on (constructed unconditionally
 whenever dynamic link runs). All internals are frozen; the prior is persisted at
-`/etc/fpvd/learned/<radioProfile>.json` on the GS.
+`/etc/fpvd/learned/<adapterId>.json` on the GS (keyed on the drone-reported
+`radio.adapterId`, e.g. `bl-m8812eu2`).
 
 Source: `gs/fpvdgs/dynlink/learned_prior.py` (`LearnedPriorConfig`).
 

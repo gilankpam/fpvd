@@ -156,7 +156,6 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
                 "dynamicLink": {
                     "enabled": False,
                     "maxMcs": 5,
-                    "radioProfile": "m8812eu2",
                     "dronePort": 9999,
                 },
             }
@@ -234,7 +233,6 @@ def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
                 "dynamicLink": {
                     "enabled": True,
                     "maxMcs": 5,
-                    "radioProfile": "m8812eu2",
                     "dronePort": 9999,
                 },
             }

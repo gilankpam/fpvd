@@ -29,15 +29,6 @@ from .runner_supervisor import ProcessSupervisor, RunnerSupervisor, resolve_wlan
 log = logging.getLogger(__name__)
 
 
-def adapter_matches_profile(adapter_id, radio_profile) -> bool:
-    """Loose match: the drone's radio-up.sh adapter_id (e.g. 'bl-m8812eu2')
-    should contain the configured radioProfile (e.g. 'm8812eu2'). Unknown
-    adapter_id (None / "") → treated as a match (no warning)."""
-    if not adapter_id:
-        return True
-    return str(radio_profile) in str(adapter_id)
-
-
 class App:
     def __init__(
         self,

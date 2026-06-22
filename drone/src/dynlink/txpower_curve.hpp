@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <nlohmann/json.hpp>
 
 namespace fpvd::dynlink {
 
@@ -12,5 +13,9 @@ inline constexpr int8_t kTxPowerDbmByMcs[8] = {29, 28, 25, 23, 19, 19, 19, 19};
 
 // dBm for the given MCS, clamping mcs to [0,7].
 int8_t txpowerDbmForMcs(int mcs);
+
+// The full per-MCS curve as a JSON array (MCS 0..7) for /status — the GS
+// consumes this as the single source of truth for RSSI normalization.
+nlohmann::json txPowerCurveJson();
 
 } // namespace fpvd::dynlink

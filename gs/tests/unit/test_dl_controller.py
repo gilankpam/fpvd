@@ -39,7 +39,6 @@ def _snapshot(drone_port, **over):
     snap = {
         "enabled": True,
         "maxMcs": 5,
-        "radioProfile": "m8812eu2",
         "droneAddr": "127.0.0.1",
         "dronePort": drone_port,
     }
@@ -343,3 +342,180 @@ def test_publish_after_stop_is_safe_noop():
     bus.publish(DRONE_CONNECTED, {"state": "connected", "drone": {}})
     bus.publish(DRONE_DISCONNECTED, {"state": "disconnected", "reason": "tunnel_lost"})
     drone_sock.close()  # reaching here without an exception is the assertion
+
+
+def _make_fake_controller():
+    """Build a __new__-bypassed controller with sensible default fakes."""
+    from fpvdgs.dynlink.controller import DynamicLinkController
+
+    c = DynamicLinkController.__new__(DynamicLinkController)  # bypass thread setup
+
+    class _Agg:
+        def __init__(self):
+            self.rssi_norm = None
+            self.reset_called = False
+
+        def reset_smoothed_rssi(self):
+            self.reset_called = True
+
+    class _Policy:
+        _UNSET = "SENTINEL_UNSET"
+
+        def __init__(self):
+            self.bound = self._UNSET
+
+        def bind_learned_prior(self, a):
+            self.bound = a
+
+    c._aggregator = _Agg()
+    c._policy = _Policy()
+    return c
+
+
+def test_bind_calibration_applies_drone_curve_and_adapter():
+    c = _make_fake_controller()
+
+    c._bind_calibration(
+        {"adapterId": "bl-m8812eu2", "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]}
+    )
+
+    assert c._aggregator.rssi_norm.enabled is True
+    assert c._aggregator.rssi_norm.tx_power_dbm_by_mcs == (29, 28, 25, 23, 19, 19, 19, 19)
+    assert c._aggregator.rssi_norm.p_ref_dbm == 29
+    assert c._aggregator.reset_called is True
+    assert c._policy.bound == "bl-m8812eu2"
+
+
+def test_bind_calibration_missing_curve_disables_normalization():
+    c = _make_fake_controller()
+
+    c._bind_calibration({"adapterId": "bl-m8812eu2", "txPowerCurve": None})
+
+    # Normalization disabled due to missing curve …
+    assert c._aggregator.rssi_norm.enabled is False
+    # … but the adapter id still binds independently.
+    assert c._policy.bound == "bl-m8812eu2"
+
+
+def test_bind_calibration_valid_curve_null_adapter_still_normalizes():
+    c = _make_fake_controller()
+
+    c._bind_calibration({"adapterId": None, "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]})
+
+    # Curve binds normalization even with no adapter id …
+    assert c._aggregator.rssi_norm.enabled is True
+    # … and the policy's bind is NOT called.
+    assert c._policy.bound == c._policy._UNSET
+
+
+def test_valid_curve():
+    from fpvdgs.dynlink.controller import _valid_curve
+
+    # A list/tuple of exactly 8 ints → True
+    assert _valid_curve([29, 28, 25, 23, 19, 19, 19, 19]) is True
+    assert _valid_curve((29, 28, 25, 23, 19, 19, 19, 19)) is True
+    # Bools are ints in Python but must be rejected
+    assert _valid_curve([True] * 8) is False
+    # Wrong length
+    assert _valid_curve([29, 28, 25, 23, 19, 19, 19]) is False
+    # None
+    assert _valid_curve(None) is False
+    # Floats
+    assert _valid_curve([29.0, 28.0, 25.0, 23.0, 19.0, 19.0, 19.0, 19.0]) is False
+
+
+def _seed_controller():
+    """A __new__-built controller wired with fakes for _seed_from_cached_connection."""
+    import threading
+
+    from fpvdgs.dynlink.controller import DynamicLinkController
+
+    c = DynamicLinkController.__new__(DynamicLinkController)
+    c._lock = threading.RLock()
+    c._pending_cal = None
+
+    class _Agg:
+        rssi_norm = "UNTOUCHED"
+
+        def reset_smoothed_rssi(self):
+            self.reset_called = True
+
+    class _FL:
+        began = 0
+
+        def begin_flight(self):
+            self.began += 1
+
+    class _Policy:
+        def __init__(self):
+            self.flightlog = _FL()
+            self.reset_called = 0
+            self.bound = "SENTINEL_UNSET"
+
+        def reset_for_new_session(self):
+            self.reset_called += 1
+
+        def bind_learned_prior(self, a):
+            self.bound = a
+
+    c._aggregator = _Agg()
+    c._policy = _Policy()
+    return c
+
+
+def test_seed_binds_when_drone_already_connected():
+    # DL toggled on while the drone is already connected: the controller must
+    # bind from the bus's cached connection state (no live DRONE_CONNECTED).
+    c = _seed_controller()
+
+    class _Bus:
+        def state(self, key):
+            assert key == "drone"
+            return {
+                "state": "connected",
+                "drone": {
+                    "radio": {
+                        "adapterId": "bl-m8812eu2",
+                        "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19],
+                    }
+                },
+            }
+
+    c._bus = _Bus()
+    c._seed_from_cached_connection()
+    assert c._aggregator.rssi_norm.enabled is True
+    assert c._aggregator.rssi_norm.tx_power_dbm_by_mcs == (29, 28, 25, 23, 19, 19, 19, 19)
+    assert c._policy.bound == "bl-m8812eu2"
+    assert c._policy.reset_called == 1
+    assert c._policy.flightlog.began == 1
+
+
+def test_seed_noop_when_disconnected():
+    c = _seed_controller()
+
+    class _Bus:
+        def state(self, key):
+            return {"state": "disconnected", "reason": "tunnel_lost"}
+
+    c._bus = _Bus()
+    c._seed_from_cached_connection()
+    assert c._aggregator.rssi_norm == "UNTOUCHED"  # never bound
+    assert c._policy.bound == "SENTINEL_UNSET"
+
+
+def test_seed_noop_when_no_cached_state_or_bus():
+    from fpvdgs.dynlink.controller import DynamicLinkController
+
+    c = DynamicLinkController.__new__(DynamicLinkController)
+    c._bus = None
+    c._seed_from_cached_connection()  # no bus → no crash
+
+    c2 = _seed_controller()
+
+    class _Bus:
+        def state(self, key):
+            return None  # never connected yet
+
+    c2._bus = _Bus()
+    c2._seed_from_cached_connection()
+    assert c2._aggregator.rssi_norm == "UNTOUCHED"

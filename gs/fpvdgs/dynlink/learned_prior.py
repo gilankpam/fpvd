@@ -5,7 +5,7 @@ Per-rung RSSI knee: knee[K] = RSSI below which rung K is unviable in steady
 state; recency-weighted; learns only from settled operating-rung samples.
 The prior is an accelerant, never the authority — the live probe still gates
 promotes; this only warm-starts the cold MCS and predictively demotes ahead
-of a fade. Keyed (and persisted) per radioProfile.
+of a fade. Keyed (and persisted) per drone adapter id (radio.adapterId).
 """
 
 from __future__ import annotations
@@ -19,6 +19,11 @@ from dataclasses import dataclass
 log = logging.getLogger("fpvdgs.dynlink")
 
 MAX_MCS = 7  # rung ceiling (matches SelectorConfig.max_mcs default and the drone)
+
+# Pre-bind sentinel key: until the drone's adapter id binds the real key at the
+# connect event, the prior runs in-memory only (no load, no flush) so a cold
+# start never leaves a stray <UNBOUND_KEY>.json on disk.
+UNBOUND_KEY = "unbound"
 
 
 def lsq_slope(samples) -> float:
@@ -149,13 +154,16 @@ class KneeModel:
 
 
 class LearnedPrior:
-    """Facade over KneeModel, keyed + persisted per radioProfile. Keeps the
+    """Facade over KneeModel, keyed + persisted per drone adapter id (radio.adapterId). Keeps the
     interface policy.py depends on; the live probe stays authoritative for
     promotes — this only warm-starts and feeds the down-only predictive demote."""
 
     def __init__(self, key: str, cfg: LearnedPriorConfig) -> None:
         self.key = key
         self.cfg = cfg
+        # The pre-bind sentinel is in-memory only — its learning (under identity
+        # RSSI, before the drone curve binds) is discarded at the connect rekey.
+        self._ephemeral = key == UNBOUND_KEY
         self._model = KneeModel(cfg)
         self._snr_model = KneeModel(cfg)
         self._since_flush = 0
@@ -218,6 +226,8 @@ class LearnedPrior:
         return os.path.join(self.cfg.persist_dir, f"{safe}.json")
 
     def _load(self) -> None:
+        if self._ephemeral:
+            return  # sentinel: never read a (stale) unbound.json
         try:
             with open(self._path()) as f:
                 doc = json.load(f)
@@ -236,6 +246,8 @@ class LearnedPrior:
             log.info("learned_prior: %s snr ignored (schema/shape) — retraining", self._path())
 
     def flush(self) -> None:
+        if self._ephemeral:
+            return  # sentinel: in-memory only, never write unbound.json
         doc = {"key": self.key, "rssi": self._model.to_dict(), "snr": self._snr_model.to_dict()}
         try:
             os.makedirs(self.cfg.persist_dir, exist_ok=True)
