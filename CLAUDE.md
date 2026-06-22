@@ -36,6 +36,26 @@ cd gs && .venv/bin/python -m pytest tests/unit/test_dl_policy.py -q    # one fil
 cd gs && .venv/bin/python -m pytest tests/unit/test_dl_policy.py::test_name -q
 ```
 
+### Lint (CI-gated — run before every commit)
+
+GitHub Actions (`.github/workflows/ci.yml`) blocks merges on these as well as the
+test suites, so **run both linters and fix any findings before committing** — don't
+push and let CI catch it. Tools are pinned (`ruff==0.8.4`, `clang-format==19.1.4`,
+installed in `gs/.venv`); use the same versions locally so formatting matches CI.
+
+```sh
+# Python (gs) — ruff config in gs/pyproject.toml
+cd gs && .venv/bin/ruff check fpvdgs tests        # lint (E/F/I; E501 ignored)
+cd gs && .venv/bin/ruff format fpvdgs tests       # auto-format (drop --check to fix in place)
+
+# C++ (drone) — .clang-format at repo root
+find drone/src drone/tests \( -name '*.cpp' -o -name '*.hpp' \) -print0 \
+  | xargs -0 gs/.venv/bin/clang-format -i          # auto-format in place
+```
+
+CI runs `ruff format --check` and `clang-format --dry-run --Werror` (verify, don't
+mutate); the commands above with `-i` / no `--check` fix the tree to match.
+
 ### Deploy / rollback (live hardware)
 
 ```sh
