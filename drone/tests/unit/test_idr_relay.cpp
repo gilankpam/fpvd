@@ -78,6 +78,20 @@ TEST_CASE("IdrRelay: requestIdr throttles within the window") {
     CHECK(relay.requestIdr(1700) == 0); // window elapsed -> sent
 }
 
+TEST_CASE("IdrRelay: count increments per logical request, not per throttled attempt") {
+    FakeEnc f;
+    fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(f.port));
+    IdrRelay relay(wb, "127.0.0.1", /*port=*/0, /*minIntervalMs=*/500); // no socket
+
+    CHECK(relay.count() == 0);
+    CHECK(relay.requestIdr(1000) == 0); // sent -> counts
+    CHECK(relay.count() == 1);
+    CHECK(relay.requestIdr(1100) == 1); // throttled -> does NOT count
+    CHECK(relay.count() == 1);
+    CHECK(relay.requestIdr(1700) == 0); // window elapsed -> sent -> counts
+    CHECK(relay.count() == 2);
+}
+
 TEST_CASE("IdrRelay: throttle arms on any attempt including failure") {
     // Dead server: bind a free port then stop before listen so connects refuse.
     httplib::Server dead;
@@ -87,8 +101,10 @@ TEST_CASE("IdrRelay: throttle arms on any attempt including failure") {
     fpvd::WaybeamClient wb("127.0.0.1", static_cast<uint16_t>(dead_port));
     IdrRelay relay(wb, "127.0.0.1", /*port=*/0, /*minIntervalMs=*/500);
 
-    (void)relay.requestIdr(1000);       // may fail (-1) but arms throttle
+    (void)relay.requestIdr(1000);       // may fail (-1) but arms throttle + counts
+    CHECK(relay.count() == 1);          // a failed send is still a logical request
     CHECK(relay.requestIdr(1100) == 1); // throttled regardless of prior result
+    CHECK(relay.count() == 1);          // throttled attempt does not count
 }
 
 TEST_CASE("IdrRelay: always-on socket path forwards to the encoder") {
@@ -101,7 +117,7 @@ TEST_CASE("IdrRelay: always-on socket path forwards to the encoder") {
     sendDatagram(PORT);
 
     CHECK(waitFor([&] { return f.count() >= 1; }));
-    CHECK(relay.count() >= 1); // received-burst counter (drives the OSD "I")
+    CHECK(relay.count() >= 1); // logical-request counter (drives the OSD "I")
 
     relay.stop();
 }

@@ -31,9 +31,10 @@ class IdrRelay {
     // Signal + join the poll thread. Idempotent.
     void stop();
 
-    // Count of received IDR bursts forwarded toward the encoder (one per
-    // drain-with-data). This is what the OSD "I" counter renders; it counts
-    // received requests, not post-throttle sends.
+    // Count of logical IDR requests sent toward the encoder (one per
+    // non-throttled `get("/request/idr")` attempt, including transport
+    // failures). This is what the OSD "I" counter renders; throttled bursts
+    // are coalesced and do not bump it.
     uint64_t count() const { return count_.load(std::memory_order_relaxed); }
 
     // Send one throttled IDR request. Public so the throttle is directly unit
