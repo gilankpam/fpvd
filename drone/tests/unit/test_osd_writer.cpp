@@ -28,12 +28,12 @@ TEST_CASE("osd: status includes IDR counter") {
     d.txPowerDbm   = 18;
 
     /* Zero count is rendered as I0. */
-    osd.writeStatus(d, /*rssiDbm=*/-50, 0, /*idrCount=*/0);
+    osd.writeStatus(d, 0, /*idrCount=*/0);
     std::string buf = readFile(path);
     CHECK(buf.find(" I0 |") != std::string::npos);
 
     /* The count is owned by the always-on relay and passed in -> I3. */
-    osd.writeStatus(d, -50, 0, /*idrCount=*/3);
+    osd.writeStatus(d, 0, /*idrCount=*/3);
     buf = readFile(path);
     CHECK(buf.find(" I3 |") != std::string::npos);
 
@@ -51,7 +51,7 @@ TEST_CASE("osd: status line contains expected fields") {
     d.n           = 12;
     d.txPowerDbm  = 20;
 
-    osd.writeStatus(d, -60, 0, /*idrCount=*/0);
+    osd.writeStatus(d, 0, /*idrCount=*/0);
     std::string buf = readFile(path);
 
     /* Prefix present */
@@ -64,8 +64,6 @@ TEST_CASE("osd: status line contains expected fields") {
     CHECK(buf.find("(8,12)") != std::string::npos);
     /* TX power */
     CHECK(buf.find("TX20") != std::string::npos);
-    /* RSSI */
-    CHECK(buf.find("R-60") != std::string::npos);
     /* msposd placeholders present */
     CHECK(buf.find("&B") != std::string::npos);
     CHECK(buf.find("&T") != std::string::npos);
@@ -96,7 +94,7 @@ TEST_CASE("osd: disabled writes nothing (status AND base line)") {
     Decision d{};
     d.mcs = 3; d.bitrateKbps = 3000;
 
-    osd.writeStatus(d, -70, 0, /*idrCount=*/0);
+    osd.writeStatus(d, 0, /*idrCount=*/0);
     osd.writeEvent("test");
     osd.writeBaseLine(0);
 
@@ -161,7 +159,7 @@ TEST_CASE("osd: writeStatus clears stale event line") {
     /* writeStatus should clear the event line. */
     Decision d{};
     d.mcs = 2; d.bitrateKbps = 4000; d.k = 4; d.n = 8;
-    osd.writeStatus(d, -55, 0, /*idrCount=*/0);
+    osd.writeStatus(d, 0, /*idrCount=*/0);
     {
         std::string buf = readFile(path);
         /* Event toast must be gone — writeStatus clears event_line. */

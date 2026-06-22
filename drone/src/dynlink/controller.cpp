@@ -433,7 +433,7 @@ void DynamicLinkController::run(int evfd) {
                         // event line is untouched (it fires on the tick).
                         if (osd_ && osdWriteDue(now, lastOsdWriteMs_,
                                                 ep_.osdUpdateIntervalMs)) {
-                            osd_->writeStatus(lastApplied_, 0,
+                            osd_->writeStatus(lastApplied_,
                                               bfCodeProvider_ ? bfCodeProvider_() : 0,
                                               idrCountProvider_ ? idrCountProvider_() : 0);
                             lastOsdWriteMs_ = now;
