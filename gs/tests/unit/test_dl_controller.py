@@ -344,7 +344,8 @@ def test_publish_after_stop_is_safe_noop():
     drone_sock.close()  # reaching here without an exception is the assertion
 
 
-def test_bind_calibration_applies_drone_curve_and_adapter():
+def _make_fake_controller():
+    """Build a __new__-bypassed controller with sensible default fakes."""
     from fpvdgs.dynlink.controller import DynamicLinkController
 
     c = DynamicLinkController.__new__(DynamicLinkController)  # bypass thread setup
@@ -358,14 +359,23 @@ def test_bind_calibration_applies_drone_curve_and_adapter():
             self.reset_called = True
 
     class _Policy:
+        _UNSET = "SENTINEL_UNSET"
+
         def __init__(self):
-            self.bound = None
+            self.bound = self._UNSET
 
         def bind_learned_prior(self, a):
             self.bound = a
 
     c._aggregator = _Agg()
     c._policy = _Policy()
+    c._rssi_norm_enabled = True  # required by _bind_calibration
+    return c
+
+
+def test_bind_calibration_applies_drone_curve_and_adapter():
+    c = _make_fake_controller()
+    c._rssi_norm_enabled = True
 
     c._bind_calibration(
         {"adapterId": "bl-m8812eu2", "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]}
@@ -379,22 +389,54 @@ def test_bind_calibration_applies_drone_curve_and_adapter():
 
 
 def test_bind_calibration_missing_curve_disables_normalization():
-    from fpvdgs.dynlink.controller import DynamicLinkController
-
-    c = DynamicLinkController.__new__(DynamicLinkController)
-
-    class _Agg:
-        rssi_norm = None
-
-        def reset_smoothed_rssi(self):
-            pass
-
-    class _Policy:
-        def bind_learned_prior(self, a):
-            raise AssertionError("must not rekey without a valid curve")
-
-    c._aggregator = _Agg()
-    c._policy = _Policy()
+    c = _make_fake_controller()
+    c._rssi_norm_enabled = True
 
     c._bind_calibration({"adapterId": "bl-m8812eu2", "txPowerCurve": None})
+
+    # Normalization disabled due to missing curve …
     assert c._aggregator.rssi_norm.enabled is False
+    # … but the adapter id still binds independently.
+    assert c._policy.bound == "bl-m8812eu2"
+
+
+def test_bind_calibration_valid_curve_null_adapter_still_normalizes():
+    c = _make_fake_controller()
+    c._rssi_norm_enabled = True
+
+    c._bind_calibration({"adapterId": None, "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]})
+
+    # Curve binds normalization even with no adapter id …
+    assert c._aggregator.rssi_norm.enabled is True
+    # … and the policy's bind is NOT called.
+    assert c._policy.bound == c._policy._UNSET
+
+
+def test_bind_calibration_respects_rssi_norm_disabled_toggle():
+    c = _make_fake_controller()
+    c._rssi_norm_enabled = False  # operator rollback escape hatch
+
+    c._bind_calibration(
+        {"adapterId": "bl-m8812eu2", "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]}
+    )
+
+    # Toggle overrides the valid curve — normalization stays OFF.
+    assert c._aggregator.rssi_norm.enabled is False
+    # Adapter key still binds independently.
+    assert c._policy.bound == "bl-m8812eu2"
+
+
+def test_valid_curve():
+    from fpvdgs.dynlink.controller import _valid_curve
+
+    # A list/tuple of exactly 8 ints → True
+    assert _valid_curve([29, 28, 25, 23, 19, 19, 19, 19]) is True
+    assert _valid_curve((29, 28, 25, 23, 19, 19, 19, 19)) is True
+    # Bools are ints in Python but must be rejected
+    assert _valid_curve([True] * 8) is False
+    # Wrong length
+    assert _valid_curve([29, 28, 25, 23, 19, 19, 19]) is False
+    # None
+    assert _valid_curve(None) is False
+    # Floats
+    assert _valid_curve([29.0, 28.0, 25.0, 23.0, 19.0, 19.0, 19.0, 19.0]) is False

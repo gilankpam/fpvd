@@ -18,10 +18,11 @@ WINDOW_S = 0.1  # design cadence: log_interval = 100 ms (§3)
 @dataclass(frozen=True)
 class RssiNormConfig:
     """EIRP-normalization of the video-link RSSI by the drone's per-MCS TX
-    power. `tx_power_dbm_by_mcs` MIRRORS the drone's kTxPowerDbmByMcs curve
-    (drone/src/dynlink/txpower_curve.hpp) — both are static calibration
-    constants and MUST stay in sync. When `enabled` is False, normalization
-    is identity (raw RSSI), for rollback / back-compat."""
+    power. At runtime the controller binds `tx_power_dbm_by_mcs` (and the
+    derived `p_ref_dbm`) from the drone's /status curve on the connect event
+    — the drone is the single source of truth. These defaults are only a
+    pre-connect placeholder; `enabled` is the rollback toggle (False ->
+    identity / raw RSSI)."""
 
     enabled: bool = True
     p_ref_dbm: int = 29

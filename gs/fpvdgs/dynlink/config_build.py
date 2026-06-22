@@ -59,7 +59,7 @@ def build_aggregator(block: dict) -> SignalAggregator:
     s = block.get("smoothing", {}) or {}
     rn = block.get("rssiNorm", {}) or {}
     d = SignalAggregator()
-    # rssiNorm curve is frozen — read only `enabled` (the rollback toggle).
+    # rssiNorm curve is bound from the drone at connect — config exposes only the `enabled` rollback toggle.
     rssi_norm = RssiNormConfig(enabled=bool(rn.get("enabled", True)))
     return SignalAggregator(
         ewma_alpha_rssi=float(s.get("ewmaAlphaRssi", d.ewma_alpha_rssi)),

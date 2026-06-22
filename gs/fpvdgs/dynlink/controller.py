@@ -52,6 +52,7 @@ class DynamicLinkController:
         self._policy = None
         self._aggregator = None
         self._pending_cal = None
+        self._rssi_norm_enabled = True  # safe default; overridden in _run
         self._lock = threading.RLock()
         self._lifecycle = threading.RLock()
         self._thread = None
@@ -147,6 +148,7 @@ class DynamicLinkController:
         aggregator = build_aggregator(snap)
         with self._lock:
             self._aggregator = aggregator
+            self._rssi_norm_enabled = bool((snap.get("rssiNorm") or {}).get("enabled", True))
         return_link = ReturnLink(snap["droneAddr"], int(snap["dronePort"]))
         encoder = WireEncoder(seq=1)
 
@@ -227,19 +229,23 @@ class DynamicLinkController:
         agg = self._aggregator
         curve = (radio or {}).get("txPowerCurve")
         adapter = (radio or {}).get("adapterId")
-        if not _valid_curve(curve) or not adapter:
-            if agg is not None:
-                agg.rssi_norm = RssiNormConfig(enabled=False)
-            log.warning("dynlink: drone supplied no txpower curve — RSSI normalization OFF")
-            return
-        curve = tuple(int(v) for v in curve)
+        # Normalization binds on a valid curve, gated by the rssiNorm rollback
+        # toggle, and independently of the adapter id.
         if agg is not None:
-            agg.rssi_norm = RssiNormConfig(
-                enabled=True, p_ref_dbm=max(curve), tx_power_dbm_by_mcs=curve
-            )
-            agg.reset_smoothed_rssi()
-        self._policy.bind_learned_prior(str(adapter))
-        log.info("dynlink: bound drone calibration adapter=%s curve=%s", adapter, curve)
+            if self._rssi_norm_enabled and _valid_curve(curve):
+                c = tuple(int(v) for v in curve)
+                agg.rssi_norm = RssiNormConfig(
+                    enabled=True, p_ref_dbm=max(c), tx_power_dbm_by_mcs=c
+                )
+                agg.reset_smoothed_rssi()
+                log.info("dynlink: bound drone txpower curve=%s", c)
+            else:
+                agg.rssi_norm = RssiNormConfig(enabled=False)
+                if not _valid_curve(curve):
+                    log.warning("dynlink: drone supplied no txpower curve — RSSI normalization OFF")
+        # Learned-prior key binds on a present adapter id, independent of the curve.
+        if adapter:
+            self._policy.bind_learned_prior(str(adapter))
 
     def _disconnected_inloop(self):
         p = self._policy
