@@ -24,6 +24,7 @@ int IdrRelay::requestIdr(uint64_t nowMs) {
     if (everSent_ && (nowMs - lastIdrMs_) < static_cast<uint64_t>(minIntervalMs_)) {
         return 1; // throttled
     }
+    count_.fetch_add(1, std::memory_order_relaxed); // one logical request sent to encoder
     bool ok = enc_->get("/request/idr");
     lastIdrMs_ = nowMs; // arm throttle on ANY attempt (even failure)
     everSent_ = true;
@@ -85,8 +86,7 @@ void IdrRelay::run() {
         if (pfds[0].revents & POLLIN) {
             size_t got = listener_.drain();
             if (got > 0) {
-                count_.fetch_add(1, std::memory_order_relaxed);
-                requestIdr(nowMonotonicMs());
+                requestIdr(nowMonotonicMs()); // bumps count_ only when not throttled
             }
         }
     }
