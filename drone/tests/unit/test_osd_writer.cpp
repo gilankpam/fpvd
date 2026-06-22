@@ -1,12 +1,25 @@
 /* test_osd_writer.cpp — osd::OsdWriter status/base-line writer. */
 #include "doctest.h"
 #include "dynlink/wire.hpp"
+#include "osd/osd_constants.hpp"
 #include "osd/writer.hpp"
 #include <cstdio> // unlink
 #include <fstream>
 #include <sstream>
 using namespace fpvd::osd;
 using fpvd::dynlink::Decision;
+
+TEST_CASE("osd: glyph constants are non-empty multibyte UTF-8") {
+    const char* glyphs[] = {kGlyphSignal1, kGlyphSignal2, kGlyphSignal3, kGlyphSpeed,
+                            kGlyphShield,  kGlyphFlash,   kGlyphAntenna, kGlyphRefresh,
+                            kGlyphFilm,    kGlyphThermo,  kGlyphWifi,    kGlyphCpu};
+    for (const char* g : glyphs) {
+        REQUIRE(g != nullptr);
+        std::string s(g);
+        CHECK(s.size() >= 2);                                  // multibyte (PUA glyph)
+        CHECK((static_cast<unsigned char>(s[0]) & 0x80) != 0); // leading byte has high bit
+    }
+}
 
 static std::string readFile(const std::string& path) {
     std::ifstream f(path);
