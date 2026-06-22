@@ -226,7 +226,7 @@ def test_status_probe_tied_to_dynamiclink(tmp_path, monkeypatch):
     config_json.write_text(
         json.dumps(
             {
-                "link": {"channel": 132, "width": 40, "region": "US", "linkId": 7669206},
+                "link": {"channel": 132, "width": 20, "region": "US", "linkId": 7669206},
                 "wfb": {"profile": "gs", "raw": {}},
                 "drone": {"host": "127.0.0.1", "apiPort": 1},
                 "pixelpilot": {"enabled": False},

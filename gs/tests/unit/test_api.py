@@ -156,7 +156,7 @@ def _api_with_dynlink(tmp_path):
     from fpvdgs.drone_client import DroneClient
 
     defaults = {
-        "link": {"channel": 132, "width": 40, "region": "US"},
+        "link": {"channel": 132, "width": 20, "region": "US"},
         "wfb": {"profile": "gs", "raw": {}},
         "drone": {"endpoint": "http://10.5.0.10:8080"},
         "dynamicLink": {
@@ -354,7 +354,7 @@ def _api_with_dl_and_probe(tmp_path):
     defaults = {
         "link": {
             "channel": 132,
-            "width": 40,
+            "width": 20,
             "region": "US",
             "linkId": 7669206,
             "wlans": ["wlan0"],
