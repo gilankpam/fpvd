@@ -170,3 +170,37 @@ def test_disabled_does_not_start_a_thread():
         assert m.status()["enabled"] is False
     finally:
         m.stop()
+
+
+def test_enter_connected_payload_carries_radio_calibration():
+    from fpvdgs.connection_monitor import ConnectionMonitor
+    from fpvdgs.events import DRONE_CONNECTED, EventBus
+
+    bus = EventBus()
+    seen = []
+    bus.subscribe(DRONE_CONNECTED, lambda p: seen.append(p))
+    m = ConnectionMonitor(bus, drone_client=None)
+
+    snap = {
+        "version": "vX",
+        "radio": {"adapterId": "bl-m8812eu2", "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]},
+    }
+    m._enter_connected(snap, now=1.0)
+
+    assert len(seen) == 1
+    radio = seen[0]["drone"]["radio"]
+    assert radio["adapterId"] == "bl-m8812eu2"
+    assert radio["txPowerCurve"] == [29, 28, 25, 23, 19, 19, 19, 19]
+
+
+def test_enter_connected_without_radio_block_omits_it():
+    from fpvdgs.connection_monitor import ConnectionMonitor
+    from fpvdgs.events import DRONE_CONNECTED, EventBus
+
+    bus = EventBus()
+    seen = []
+    bus.subscribe(DRONE_CONNECTED, lambda p: seen.append(p))
+    m = ConnectionMonitor(bus, drone_client=None)
+
+    m._enter_connected({"version": "vOld"}, now=1.0)
+    assert "radio" not in seen[0]["drone"]

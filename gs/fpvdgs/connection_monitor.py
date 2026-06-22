@@ -214,7 +214,18 @@ class ConnectionMonitor:
             return False
 
     def _enter_connected(self, snap, now):
-        info = {"version": snap.get("version")} if isinstance(snap, dict) else {}
+        info = {}
+        if isinstance(snap, dict):
+            info["version"] = snap.get("version")
+            radio = snap.get("radio")
+            if isinstance(radio, dict):
+                # Forward the drone's calibration: it is the single source of
+                # truth for the TX-power curve + adapter id (used by dynlink
+                # for RSSI normalization and the learned-prior filename).
+                info["radio"] = {
+                    "adapterId": radio.get("adapterId"),
+                    "txPowerCurve": radio.get("txPowerCurve"),
+                }
         with self._lock:
             self._state = "connected"
             self._since = now
