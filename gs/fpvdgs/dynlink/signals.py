@@ -116,6 +116,15 @@ class SignalAggregator:
     def update_session(self, session: SessionInfo) -> None:
         self.signals.session = session
 
+    def reset_smoothed_rssi(self) -> None:
+        """Drop the smoothed RSSI/SNR EWMAs so they restart clean. Called
+        when the TX-power curve is (re)bound from the drone: samples taken
+        under a different (or identity) normalization must not bleed into
+        the freshly-normalized series."""
+        self.signals.rssi = None
+        self.signals.rssi_raw = None
+        self.signals.snr = None
+
     def consume(self, ev: RxEvent) -> Signals:
         s = self.signals
         s.timestamp = ev.timestamp

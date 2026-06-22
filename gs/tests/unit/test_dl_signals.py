@@ -348,3 +348,14 @@ def test_snr_none_before_any_antenna_data():
         RxEvent(timestamp=1.0, id="rx", packets_window={}, rx_ant_stats=[], session=None)
     )
     assert s.snr is None
+
+
+def test_reset_smoothed_rssi_clears_ewmas():
+    agg = SignalAggregator()
+    agg.signals.rssi = -50.0
+    agg.signals.rssi_raw = -48.0
+    agg.signals.snr = 30.0
+    agg.reset_smoothed_rssi()
+    assert agg.signals.rssi is None
+    assert agg.signals.rssi_raw is None
+    assert agg.signals.snr is None
