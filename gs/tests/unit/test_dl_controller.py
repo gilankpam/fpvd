@@ -422,3 +422,100 @@ def test_valid_curve():
     assert _valid_curve(None) is False
     # Floats
     assert _valid_curve([29.0, 28.0, 25.0, 23.0, 19.0, 19.0, 19.0, 19.0]) is False
+
+
+def _seed_controller():
+    """A __new__-built controller wired with fakes for _seed_from_cached_connection."""
+    import threading
+
+    from fpvdgs.dynlink.controller import DynamicLinkController
+
+    c = DynamicLinkController.__new__(DynamicLinkController)
+    c._lock = threading.RLock()
+    c._pending_cal = None
+
+    class _Agg:
+        rssi_norm = "UNTOUCHED"
+
+        def reset_smoothed_rssi(self):
+            self.reset_called = True
+
+    class _FL:
+        began = 0
+
+        def begin_flight(self):
+            self.began += 1
+
+    class _Policy:
+        def __init__(self):
+            self.flightlog = _FL()
+            self.reset_called = 0
+            self.bound = "SENTINEL_UNSET"
+
+        def reset_for_new_session(self):
+            self.reset_called += 1
+
+        def bind_learned_prior(self, a):
+            self.bound = a
+
+    c._aggregator = _Agg()
+    c._policy = _Policy()
+    return c
+
+
+def test_seed_binds_when_drone_already_connected():
+    # DL toggled on while the drone is already connected: the controller must
+    # bind from the bus's cached connection state (no live DRONE_CONNECTED).
+    c = _seed_controller()
+
+    class _Bus:
+        def state(self, key):
+            assert key == "drone"
+            return {
+                "state": "connected",
+                "drone": {
+                    "radio": {
+                        "adapterId": "bl-m8812eu2",
+                        "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19],
+                    }
+                },
+            }
+
+    c._bus = _Bus()
+    c._seed_from_cached_connection()
+    assert c._aggregator.rssi_norm.enabled is True
+    assert c._aggregator.rssi_norm.tx_power_dbm_by_mcs == (29, 28, 25, 23, 19, 19, 19, 19)
+    assert c._policy.bound == "bl-m8812eu2"
+    assert c._policy.reset_called == 1
+    assert c._policy.flightlog.began == 1
+
+
+def test_seed_noop_when_disconnected():
+    c = _seed_controller()
+
+    class _Bus:
+        def state(self, key):
+            return {"state": "disconnected", "reason": "tunnel_lost"}
+
+    c._bus = _Bus()
+    c._seed_from_cached_connection()
+    assert c._aggregator.rssi_norm == "UNTOUCHED"  # never bound
+    assert c._policy.bound == "SENTINEL_UNSET"
+
+
+def test_seed_noop_when_no_cached_state_or_bus():
+    from fpvdgs.dynlink.controller import DynamicLinkController
+
+    c = DynamicLinkController.__new__(DynamicLinkController)
+    c._bus = None
+    c._seed_from_cached_connection()  # no bus → no crash
+
+    c2 = _seed_controller()
+
+    class _Bus:
+        def state(self, key):
+            return None  # never connected yet
+
+    c2._bus = _Bus()
+    c2._seed_from_cached_connection()
+    assert c2._aggregator.rssi_norm == "UNTOUCHED"

@@ -181,6 +181,7 @@ class DynamicLinkController:
         self._stop_event = asyncio.Event()
         self._set(running=True)
         self._started.set()
+        self._seed_from_cached_connection()
 
         try:
             await self._stats_loop(on_event)
@@ -202,6 +203,21 @@ class DynamicLinkController:
             loop.call_soon_threadsafe(fn)
         except RuntimeError:
             pass  # loop tearing down
+
+    def _seed_from_cached_connection(self):
+        """Already-connected seed (called from _run, on the loop thread). If the
+        drone connected before this loop started — e.g. dynamicLink toggled on
+        mid-session while the link is already up — the DRONE_CONNECTED event
+        already fired and won't repeat. Bind calibration from the bus's cached
+        connection state so the curve + learned-prior key bind immediately,
+        instead of running un-normalized until the next reconnect."""
+        if self._bus is None:
+            return
+        st = self._bus.state("drone")
+        if isinstance(st, dict) and st.get("state") == "connected":
+            with self._lock:
+                self._pending_cal = (st.get("drone") or {}).get("radio")
+            self._connected_inloop()
 
     def _on_drone_connected(self, payload):
         radio = ((payload or {}).get("drone") or {}).get("radio")
