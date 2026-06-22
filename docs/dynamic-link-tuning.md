@@ -113,15 +113,27 @@ OSD overlay message file written by the daemon: `/tmp/MSPOSD.msg`. msposd reads 
 
 Long-GI base rates used by the bitrate formula (kbps):
 
-| MCS | 20 MHz | 40 MHz |
-|-----|--------|--------|
-| 0 | 6 500 | 9 800 |
-| 1 | 12 000 | 18 600 |
-| 2 | 15 500 | 30 400 |
-| 3 | 20 000 | 40 200 |
-| 4 | 25 000 | 55 800 |
-| 5 | 42 000 | 80 400 |
-| 6 | 47 500 | 90 200 |
-| 7 | 55 000 | 97 000 |
+| MCS | 20 MHz | 40 MHz | 10 MHz |
+|-----|--------|--------|--------|
+| 0 | 6 500 | 9 800 | 3 250 |
+| 1 | 12 000 | 18 600 | 6 000 |
+| 2 | 15 500 | 30 400 | 7 750 |
+| 3 | 20 000 | 40 200 | 10 000 |
+| 4 | 25 000 | 55 800 | 12 500 |
+| 5 | 42 000 | 80 400 | 21 000 |
+| 6 | 47 500 | 90 200 | 23 750 |
+| 7 | 55 000 | 97 000 | 27 500 |
 
-Source: OpenIPC WFB calculator (long-GI rows).
+Source: OpenIPC WFB calculator (long-GI rows) and 10 MHz ÷2 approximation.
+
+**10 MHz under dynamic link.** `link.width` is operator-controlled while DL is
+enabled (set it on the ground, per flight; 10 and 20 only — 40 MHz needs DL off).
+The drone bills bitrate from a dedicated 10 MHz OpenIPC rate row (~half of 20 MHz;
+`drone/src/dynlink/bitrate.cpp`), and the GS keeps a separate learned prior per
+width (`/etc/fpvd/learned/<adapter>__bw<width>.json`). To switch, the client
+applies the drone first, then the GS:
+
+```
+PATCH /air/config {"link":{"width":10}}  ; POST /air/apply
+PATCH /gs/config  {"link":{"width":10}}  ; POST /gs/apply
+```

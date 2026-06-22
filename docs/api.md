@@ -389,7 +389,9 @@ The complete shape of the configuration object returned by `GET /config`, `GET /
 ```jsonc
 "link": {
   "channel": 132,       // integer, 1..200 — Wi-Fi channel number
-  "width": 20,          // integer, 10, 20, or 40 — channel width in MHz
+  "width": 20,          // integer, 10, 20, or 40 — channel width in MHz. Operator-settable
+               // while dynamicLink.enabled (ground change; the GS 10<->20 retune is
+               // live). 40 MHz requires dynamicLink.enabled=false.
   "txPowerDbm": 20,     // integer, -10..30 — TX power in dBm (converted x100 to mBm at the radio edge)
   "mcs": 2,             // integer, 0..7 — MCS index
   "fec": {
