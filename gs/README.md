@@ -79,7 +79,6 @@ Arms the in-process GS adaptive-link control loop. Disabled by default.
   "maxMcs": 5,
   "bandwidth": 20,
   "txpower": { "min": 18, "max": 28 },
-  "radioProfile": "m8812eu2",
   "droneAddr": null,
   "dronePort": 9999,
   "tuning": {}
@@ -92,7 +91,6 @@ Arms the in-process GS adaptive-link control loop. Disabled by default.
 | `maxMcs` | int 0–7 | `5` | Upper MCS bound the controller may select. |
 | `bandwidth` | 20 or 40 | `20` | RF bandwidth the controller targets (MHz). |
 | `txpower.min` / `.max` | int (dBm) | 18 / 28 | Controller's tx-power request range, in dBm (distinct from the static `link.txPowerDbm` key). |
-| `radioProfile` | string | `"m8812eu2"` | Packaged radio profile (JSON under `gs/fpvdgs/dynlink/profiles/`). Determines per-MCS bitrate tables. |
 | `droneAddr` | string\|null | `null` | Drone's dynamic-link UDP address. Defaults to the host parsed from `drone.endpoint`. |
 | `dronePort` | int | `9999` | Drone's dynamic-link UDP port. |
 | `videoStreamId` | string | `"video"` | Substring matched against the wfb stats record `id` to select the **video** rx stream. The policy is driven by this stream only; the mavlink/tunnel rx records on `:8103` are ignored (their low packet rate would trip `link_starved` and pin MCS at the floor). |

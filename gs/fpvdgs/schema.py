@@ -13,7 +13,6 @@ CONFIG_TOP_KEYS = {
 DYNAMIC_LINK_KEYS = {
     "enabled",
     "maxMcs",
-    "radioProfile",
     "dronePort",
     "selector",
     "smoothing",
@@ -155,11 +154,6 @@ def _validate_dynamic_link(dl: dict) -> None:
     port = dl.get("dronePort", 9999)
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("dynamicLink.dronePort must be an int in 1..65535")
-    # radioProfile is a free identifier: it keys the learned-prior persistence
-    # and the drone adapter-match warning.
-    profile = dl.get("radioProfile", "m8812eu2")
-    if not isinstance(profile, str) or not profile:
-        raise SchemaError("dynamicLink.radioProfile must be a non-empty string")
     if not isinstance(dl.get("enabled", False), bool):
         raise SchemaError("dynamicLink.enabled must be a bool")
     sel = dl.get("selector")

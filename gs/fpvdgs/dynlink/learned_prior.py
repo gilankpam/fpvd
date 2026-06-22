@@ -5,7 +5,7 @@ Per-rung RSSI knee: knee[K] = RSSI below which rung K is unviable in steady
 state; recency-weighted; learns only from settled operating-rung samples.
 The prior is an accelerant, never the authority — the live probe still gates
 promotes; this only warm-starts the cold MCS and predictively demotes ahead
-of a fade. Keyed (and persisted) per radioProfile.
+of a fade. Keyed (and persisted) per drone adapter id (radio.adapterId).
 """
 
 from __future__ import annotations
@@ -149,7 +149,7 @@ class KneeModel:
 
 
 class LearnedPrior:
-    """Facade over KneeModel, keyed + persisted per radioProfile. Keeps the
+    """Facade over KneeModel, keyed + persisted per drone adapter id (radio.adapterId). Keeps the
     interface policy.py depends on; the live probe stays authoritative for
     promotes — this only warm-starts and feeds the down-only predictive demote."""
 

@@ -153,7 +153,6 @@ def test_stale_nested_selector_key_does_not_brick_boot(tmp_path):
                 "dynamicLink": {
                     "enabled": True,
                     "maxMcs": 5,
-                    "radioProfile": "m8812eu2",
                     "dronePort": 9999,
                     "selector": {
                         "videoDemotePer": 0.05,

@@ -39,7 +39,6 @@ def _snapshot(drone_port, **over):
     snap = {
         "enabled": True,
         "maxMcs": 5,
-        "radioProfile": "m8812eu2",
         "droneAddr": "127.0.0.1",
         "dronePort": drone_port,
     }

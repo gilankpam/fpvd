@@ -288,8 +288,8 @@ class Policy:
         # been unchanged for settle_ticks (loss from the last change drained).
         self._ticks_at_mcs = 0
         self._last_ingest_mcs: int | None = None
-        # Learned per-card prior (always-on), keyed by the operator-set
-        # dynamicLink.radioProfile; GS-local, the live probe stays authoritative.
+        # Learned per-card prior (always-on), keyed by the drone-reported
+        # adapter id (radio.adapterId); GS-local, the live probe stays authoritative.
         self.learned_prior = LearnedPrior(profile_name, cfg.learned_prior)
         self._rssi_window: deque[float] = deque(
             maxlen=cfg.learned_prior.predictive_slope_window_ticks
