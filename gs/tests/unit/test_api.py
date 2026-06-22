@@ -221,6 +221,17 @@ def test_wfb_change_bounces_runner_and_leaves_controller_alone(tmp_path):
     assert ctrl.calls == []  # controller untouched (stayed disabled)
 
 
+def test_width_change_while_enabled_reconfigures_controller(tmp_path):
+    api, store, ctrl, runner = _api_with_dynlink(tmp_path)
+    store.patch({"dynamicLink": {"enabled": True}})
+    api.handle("POST", "/gs/apply", {}, b"")
+    ctrl.calls.clear()
+    store.patch({"link": {"width": 10}})  # 20 -> 10 while DL stays enabled
+    api.handle("POST", "/gs/apply", {}, b"")
+    # Controller rebuilt so it re-binds the prior to <adapter>__bw10 + resets.
+    assert any(c[0] == "set_config" for c in ctrl.calls)
+
+
 # --- pixelpilot apply routing ---
 class _FakePP:
     def __init__(self):
