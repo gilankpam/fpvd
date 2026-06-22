@@ -52,7 +52,7 @@ void OsdWriter::flushLocked() {
     }
 }
 
-void OsdWriter::writeStatus(const dynlink::Decision& d, int rssiDbm, int bfCode,
+void OsdWriter::writeStatus(const dynlink::Decision& d, int bfCode,
                             uint64_t idrCount) {
     std::lock_guard<std::mutex> lk(mu_);
     if (!enabled_) return;
@@ -60,14 +60,13 @@ void OsdWriter::writeStatus(const dynlink::Decision& d, int rssiDbm, int bfCode,
     /* &T/&W/&B/&C are msposd placeholders (board temp, wifi-module temp,
      * video bitrate+fps, cpu%); msposd substitutes at render time. */
     std::snprintf(statusLine_, sizeof(statusLine_),
-                  "%sMCS%u %uM (%u,%u) TX%d R%d I%u%s | &B T&T W&W CPU&C",
+                  "%sMCS%u %uM (%u,%u) TX%d I%u%s | &B T&T W&W CPU&C",
                   kOsdPrefix,
                   static_cast<unsigned>(d.mcs),
                   static_cast<unsigned>((d.bitrateKbps + 500) / 1000),
                   static_cast<unsigned>(d.k),
                   static_cast<unsigned>(d.n),
                   static_cast<int>(d.txPowerDbm),
-                  rssiDbm,
                   static_cast<unsigned>(idrCount),
                   bfToken(bfCode));
 

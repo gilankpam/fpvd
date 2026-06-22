@@ -15,10 +15,9 @@ class OsdWriter {
 public:
     OsdWriter(std::string msgPath, bool enabled);
 
-    /* Rich status line for the last applied dynamic-link decision. rssiDbm is a
-     * hint (0 if unknown); idrCount is the always-on relay's received-burst
-     * count; bfCode is 0/1/2. */
-    void writeStatus(const dynlink::Decision& d, int rssiDbm, int bfCode,
+    /* Rich status line for the last applied dynamic-link decision. idrCount is
+     * the always-on relay's received-burst count; bfCode is 0/1/2. */
+    void writeStatus(const dynlink::Decision& d, int bfCode,
                      uint64_t idrCount);
 
     /* System-stats base line (placeholders only) shown when the dynamic link

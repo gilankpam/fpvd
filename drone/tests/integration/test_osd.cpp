@@ -19,15 +19,16 @@ TEST_CASE("osd: writeStatus renders the BF token by code") {
     d.txPowerDbm = 22;
 
     OsdWriter off(msg.string(), /*enabled=*/true);
-    off.writeStatus(d, 0, /*bfCode=*/0, /*idrCount=*/0);
+    off.writeStatus(d, /*bfCode=*/0, /*idrCount=*/0);
     CHECK(slurp(msg).find(" B") == std::string::npos);   // no token when off
+    CHECK(slurp(msg).find(" R") == std::string::npos);   // no dead RSSI field
 
     OsdWriter armed(msg.string(), true);
-    armed.writeStatus(d, 0, /*bfCode=*/1, /*idrCount=*/0);
+    armed.writeStatus(d, /*bfCode=*/1, /*idrCount=*/0);
     CHECK(slurp(msg).find(" B-") != std::string::npos);  // armed, no report
 
     OsdWriter working(msg.string(), true);
-    working.writeStatus(d, 0, /*bfCode=*/2, /*idrCount=*/0);
+    working.writeStatus(d, /*bfCode=*/2, /*idrCount=*/0);
     CHECK(slurp(msg).find(" B+") != std::string::npos);  // working
     fs::remove(msg);
 }
@@ -38,7 +39,7 @@ TEST_CASE("osd: provider code reaches the rendered line") {
     Decision d{}; d.mcs = 3;
     OsdWriter w(msg.string(), true);
     int code = 2;                                  // stand-in for bfCodeProvider_()
-    w.writeStatus(d, 0, code, /*idrCount=*/0);
+    w.writeStatus(d, code, /*idrCount=*/0);
     CHECK(slurp(msg).find(" B+") != std::string::npos);
     fs::remove(msg);
 }
