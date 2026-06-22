@@ -12,13 +12,14 @@ static const std::vector<std::vector<std::string>> kLockedPaths = {
     // A wholesale link.fec overwrite still trips via the ancestor check below.
     {"link", "fec", "k"},
     {"link", "fec", "n"},
-    {"link", "width"},
     {"link", "txPowerDbm"},
     // NOTE: link.stbc / link.ldpc are deliberately NOT locked. They are static
     // link parameters the controller preserves on every CMD_SET_RADIO from the
     // config snapshot — the GS decision never carries them — so an operator may
     // retune them while DL is enabled. link.txPowerDbm IS locked: the per-MCS power
     // curve drives tx power per decision, so a manual value would be overridden.
+    // link.width is operator-owned: the controller derives the rate row + radiotap
+    // from the selected width on each decision, so it is NOT locked.
     {"video", "bitrate"},
     {"video", "qpDelta"},
     {"video", "roi"},

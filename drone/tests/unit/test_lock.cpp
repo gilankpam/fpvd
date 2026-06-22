@@ -84,10 +84,21 @@ TEST_CASE("lock: body enables DL and writes locked key → rejected") {
 }
 
 TEST_CASE("lock: multiple locked paths reported together") {
-    auto body = nlohmann::json::parse(R"({"link":{"mcs":5,"width":40},"video":{"bitrate":1000}})");
+    // link.width is operator-owned (unlocked); mcs + video.bitrate stay locked.
+    auto body = nlohmann::json::parse(R"({"link":{"mcs":5,"width":20},"video":{"bitrate":1000}})");
     auto r = checkDynamicLinkLock(body, dlOn());
     CHECK_FALSE(r.ok);
-    CHECK(r.lockedPaths.size() == 3);
+    REQUIRE(r.lockedPaths.size() == 2);
+}
+
+TEST_CASE("lock: DL on + body writes link.width → allowed (operator-owned bandwidth)") {
+    // Width is unlocked so an operator can move 10<->20 while DL runs; the
+    // controller derives the rate row + radiotap from the new width on the next
+    // snapshot. (40 MHz under DL is rejected separately by validate(), not lock.)
+    auto body = nlohmann::json::parse(R"({"link":{"width":10}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK(r.ok);
+    CHECK(r.lockedPaths.empty());
 }
 
 TEST_CASE("lock: body writes link.fec but with no children → still rejected") {
