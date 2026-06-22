@@ -27,3 +27,5 @@ config.drone.json
 config.gs.json
 osd.json
 *.bin
+docs/superpowers/plans/
+docs/superpowers/specs/
