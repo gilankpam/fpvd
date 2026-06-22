@@ -75,4 +75,7 @@ def make_dl_snapshot(effective: dict) -> dict:
     block = dict(effective.get("dynamicLink", {}))
     block["droneAddr"] = effective.get("drone", {}).get("host", "10.5.0.10")
     block["dronePort"] = int(block.get("dronePort") or 9999)
+    # Channel width (link.width) — keys the per-width learned prior and is logged
+    # per tick. The dynamicLink block itself stays width-agnostic.
+    block["linkWidth"] = int(effective.get("link", {}).get("width", 20))
     return block

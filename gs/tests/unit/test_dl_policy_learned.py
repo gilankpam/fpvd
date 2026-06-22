@@ -276,10 +276,38 @@ def test_bind_learned_prior_rekeys(tmp_path):
     p = Policy(cfg)
     assert p.learned_prior.key == "unbound"
     first = p.learned_prior
-    p.bind_learned_prior("bl-m8812eu2")
-    assert p.learned_prior.key == "bl-m8812eu2"
+    p.bind_learned_prior("bl-m8812eu2", 20)
+    assert p.learned_prior.key == "bl-m8812eu2__bw20"
     assert p.learned_prior is not first
     # idempotent: same key does not rebuild
     same = p.learned_prior
-    p.bind_learned_prior("bl-m8812eu2")
+    p.bind_learned_prior("bl-m8812eu2", 20)
     assert p.learned_prior is same
+
+
+def test_bind_learned_prior_keys_by_adapter_and_width(tmp_path):
+    from fpvdgs.dynlink.flightlog import FlightLogConfig
+    from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
+    from fpvdgs.dynlink.policy import Policy, PolicyConfig
+
+    cfg = PolicyConfig(
+        learned_prior=LearnedPriorConfig(persist_dir=str(tmp_path)),
+        flightlog=FlightLogConfig(dir=str(tmp_path / "fl")),
+    )
+    p = Policy(cfg, "unbound")
+
+    p.bind_learned_prior("ABC123", 10)
+    assert p.learned_prior.key == "ABC123__bw10"
+    p.learned_prior.ingest(rssi=-60.0, operating_mcs=4, operating_clean=True, settled=True)
+    p.learned_prior.flush()
+    assert (tmp_path / "ABC123__bw10.json").exists()
+
+    # Same adapter, different width -> distinct key + file (no cross-contamination).
+    p.bind_learned_prior("ABC123", 20)
+    assert p.learned_prior.key == "ABC123__bw20"
+
+    # Re-binding the identical adapter+width is a no-op (keeps the live model).
+    same = p.learned_prior
+    p.bind_learned_prior("ABC123", 20)
+    assert p.learned_prior is same
+    p.close()

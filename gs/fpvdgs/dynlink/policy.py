@@ -482,14 +482,17 @@ class Policy:
             },
         )
 
-    def bind_learned_prior(self, adapter_id: str) -> None:
-        """(Re)key the learned prior to the drone-reported adapter id. Called
-        at the connect edge before warm-start, so the session learns/persists
-        under the correct per-card file. No-op when the key is unchanged."""
-        if self.learned_prior.key == adapter_id:
+    def bind_learned_prior(self, adapter_id: str, width: int) -> None:
+        """(Re)key the learned prior to the drone adapter id AND channel width.
+        Called at the connect edge (and on a ground width change) before
+        warm-start, so the session learns/persists under the correct per-card,
+        per-width file (<adapter>__bw<width>.json). 10 MHz sees ~3 dB better SNR
+        than 20, so the knees must not be shared. No-op when the key is unchanged."""
+        key = f"{adapter_id}__bw{int(width)}"
+        if self.learned_prior.key == key:
             return
         self.profile_name = adapter_id
-        self.learned_prior = LearnedPrior(adapter_id, self.cfg.learned_prior)
+        self.learned_prior = LearnedPrior(key, self.cfg.learned_prior)
 
     def reset_for_new_session(self) -> None:
         """Reset volatile selector + hysteresis state to boot (incl. the RSSI
