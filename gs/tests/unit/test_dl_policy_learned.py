@@ -115,7 +115,11 @@ def test_predictive_demote_blocked_when_rssi_flat(tmp_path):
         _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=2),
         prof,
     )
-    _settle_knee(p, 2, -50.0, True)  # learned ceiling at -50 = 2
+    # Direct-set: confident RSSI knee at rung 2 so predictive_ceiling(-50, 0) = 2 < 5.
+    # The gate (flat RSSI → projected_drop = 0 < predictive_min_drop_db) must block
+    # the demote despite the confident knee — that is the gate behaviour being tested.
+    p.learned_prior._model._knee[2] = -50.0
+    p.learned_prior._model._count[2] = 12.0
     p.leading.state.current_mcs = 5  # probe pushed above the learned ceiling
     dec = None
     for ts in (1.0, 1.1, 1.2, 1.3, 1.4):
@@ -138,7 +142,11 @@ def test_predictive_demote_blocked_when_fade_too_shallow(tmp_path):
         ),
         prof,
     )
-    _settle_knee(p, 2, -52.0, True)  # ceiling 2 across the band
+    # Direct-set: confident RSSI knee at rung 2 so predictive_ceiling returns 2 < 5.
+    # The gate (slope -0.2 dB/tick → projected_drop 0.6 dB < predictive_min_drop_db 1.0)
+    # must block the demote despite the confident knee — that is the gate being tested.
+    p.learned_prior._model._knee[2] = -52.0
+    p.learned_prior._model._count[2] = 12.0
     p.leading.state.current_mcs = 5
     dec = None
     for rssi, ts in [(-50.0, 1.0), (-50.2, 1.1), (-50.4, 1.2), (-50.6, 1.3), (-50.8, 1.4)]:

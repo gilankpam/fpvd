@@ -153,6 +153,7 @@ def test_snr_ceiling_learns_independently_of_rssi(tmp_path):
 def test_snr_ceiling_none_when_cold_or_none(tmp_path):
     p = _prior(tmp_path, min_samples=3)
     assert p.snr_ceiling(30.0) is None  # cold
+    # clean settle plants no knee (new invariant); this asserts None-input handling
     _settle_snr(p, 4, 30.0, True)
     assert p.snr_ceiling(None) is None  # None input
 
@@ -216,6 +217,7 @@ def test_snr_rung_unviable_confident_rung(tmp_path):
 
 def test_snr_rung_unviable_none_inputs(tmp_path):
     p = _prior(tmp_path, min_samples=3)
+    # clean settle plants no knee (new invariant); this asserts None-input handling
     _settle_snr(p, 4, 27.0, True)
     assert p.snr_rung_unviable(4, None) is False  # no live snr -> can't judge
     assert p.snr_rung_unviable(None, 39.0) is False
