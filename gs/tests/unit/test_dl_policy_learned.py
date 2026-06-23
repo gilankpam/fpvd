@@ -35,7 +35,7 @@ def _settle_knee(policy, rung, rssi, clean, n=12):
 def test_warm_start_seeds_from_persisted_curve(tmp_path):
     prof = _profile()
     p1 = Policy(_cfg(tmp_path, min_samples=3), prof)
-    _settle_knee(p1, 5, -50.0, True)
+    _settle_knee(p1, 5, -50.0, False)  # dirty to plant the knee
     p1.close()
     p2 = Policy(_cfg(tmp_path, min_samples=3), prof)
     dec = p2.tick(_sig(-50.0, ts=1.0))
@@ -54,9 +54,13 @@ def test_predictive_demote_on_confident_fade(tmp_path):
         _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=1),
         prof,
     )
-    _settle_knee(p, 1, -80.0, True)  # rung1 viable down to -80
-    _settle_knee(p, 2, -62.0, True)  # rung2 viable down to -62
-    _settle_knee(p, 5, -50.0, True)  # rung5 viable only >= -50
+    # Direct-set: plant confident RSSI knees for rungs 1, 2, 5
+    p.learned_prior._model._knee[1] = -80.0
+    p.learned_prior._model._count[1] = 12.0
+    p.learned_prior._model._knee[2] = -62.0
+    p.learned_prior._model._count[2] = 12.0
+    p.learned_prior._model._knee[5] = -50.0
+    p.learned_prior._model._count[5] = 12.0
     p.leading.state.current_mcs = 5
     p.tick(_sig(-50.0, ts=1.0))  # slope 0 -> no demote yet
     dec = p.tick(_sig(-56.0, ts=1.1))  # slope -6, projected -56-18=-74 -> ceiling 1
@@ -111,7 +115,11 @@ def test_predictive_demote_blocked_when_rssi_flat(tmp_path):
         _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=2),
         prof,
     )
-    _settle_knee(p, 2, -50.0, True)  # learned ceiling at -50 = 2
+    # Direct-set: confident RSSI knee at rung 2 so predictive_ceiling(-50, 0) = 2 < 5.
+    # The gate (flat RSSI → projected_drop = 0 < predictive_min_drop_db) must block
+    # the demote despite the confident knee — that is the gate behaviour being tested.
+    p.learned_prior._model._knee[2] = -50.0
+    p.learned_prior._model._count[2] = 12.0
     p.leading.state.current_mcs = 5  # probe pushed above the learned ceiling
     dec = None
     for ts in (1.0, 1.1, 1.2, 1.3, 1.4):
@@ -134,7 +142,11 @@ def test_predictive_demote_blocked_when_fade_too_shallow(tmp_path):
         ),
         prof,
     )
-    _settle_knee(p, 2, -52.0, True)  # ceiling 2 across the band
+    # Direct-set: confident RSSI knee at rung 2 so predictive_ceiling returns 2 < 5.
+    # The gate (slope -0.2 dB/tick → projected_drop 0.6 dB < predictive_min_drop_db 1.0)
+    # must block the demote despite the confident knee — that is the gate being tested.
+    p.learned_prior._model._knee[2] = -52.0
+    p.learned_prior._model._count[2] = 12.0
     p.leading.state.current_mcs = 5
     dec = None
     for rssi, ts in [(-50.0, 1.0), (-50.2, 1.1), (-50.4, 1.2), (-50.6, 1.3), (-50.8, 1.4)]:
@@ -152,14 +164,13 @@ def test_predictive_demote_does_not_misfire_on_detrended_rssi(tmp_path):
         "test-misfire",
         LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=3, predictive_horizon_ticks=3),
     )
-
-    def settle(rung, rssi, n=12):
-        for _ in range(n):
-            lp.ingest(rssi=rssi, operating_mcs=rung, operating_clean=True, settled=True)
-
-    settle(1, -80.0)
-    settle(2, -78.0)
-    settle(5, -55.0)
+    # Direct-set: plant confident RSSI knees for rungs 1, 2, 5
+    lp._model._knee[1] = -80.0
+    lp._model._count[1] = 12.0
+    lp._model._knee[2] = -78.0
+    lp._model._count[2] = 12.0
+    lp._model._knee[5] = -55.0
+    lp._model._count[5] = 12.0
     # Raw: rssi -62, slope -6/tick -> projected -80 -> ceiling 1 < 5 (would demote).
     assert lp.predictive_ceiling(-62.0, -6.0) == 1
     # Normalized: rssi -50, slope 0 -> projected -50 -> ceiling 5 (no demote).
@@ -255,9 +266,13 @@ def test_snr_knee_proactive_demote_still_fires_clearly_below(tmp_path):
     # (well past knee - demote_margin) still steps down ahead of loss.
     prof = _profile()
     p = Policy(_cfg(tmp_path, min_samples=3), prof, probe_status=lambda: _probe_snapshot(5))
-    _settle_snr_knee(p, 3, 30.0)
-    _settle_snr_knee(p, 4, 34.0)
-    _settle_snr_knee(p, 5, 36.0)
+    # Direct-set: plant confident SNR knees for rungs 3, 4, 5
+    p.learned_prior._snr_model._knee[3] = 30.0
+    p.learned_prior._snr_model._count[3] = 12.0
+    p.learned_prior._snr_model._knee[4] = 34.0
+    p.learned_prior._snr_model._count[4] = 12.0
+    p.learned_prior._snr_model._knee[5] = 36.0
+    p.learned_prior._snr_model._count[5] = 12.0
     p.leading.state.current_mcs = 5
     dec = None
     ts = 1.0
@@ -265,7 +280,6 @@ def test_snr_knee_proactive_demote_still_fires_clearly_below(tmp_path):
         dec = p.tick(_sig_snr(33.0, ts))  # 3 dB below knee[5] -> genuinely unviable
         ts += 1.0
     assert dec.mcs < 5  # proactive SNR-demote fired
-    p.close()
     p.close()
 
 

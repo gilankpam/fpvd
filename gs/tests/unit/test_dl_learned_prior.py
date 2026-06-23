@@ -25,7 +25,7 @@ def test_ingest_only_learns_when_settled(tmp_path):
     for _ in range(10):
         p.ingest(rssi=-60.0, operating_mcs=4, operating_clean=True, settled=False)
     assert p.ceiling(-50.0) is None  # nothing learned while unsettled
-    _settle(p, 4, -60.0, True, n=5)
+    _settle(p, 4, -60.0, False, n=5)  # dirty to plant the knee
     assert p.ceiling(-50.0) == 4
 
 
@@ -37,16 +37,22 @@ def test_ingest_skips_none_rssi(tmp_path):
 
 def test_ceiling_and_warmstart_seed_from_knees(tmp_path):
     p = _prior(tmp_path, min_samples=3)
-    _settle(p, 1, -80.0, True)
-    _settle(p, 4, -60.0, True)
+    # Direct-set: plant confident knees without depending on learning dynamics
+    p._model._knee[1] = -80.0
+    p._model._count[1] = 12.0
+    p._model._knee[4] = -60.0
+    p._model._count[4] = 12.0
     assert p.ceiling(-55.0) == 4
     assert p.warmstart_seed(-70.0) == 1
 
 
 def test_predictive_ceiling_projects_with_slope(tmp_path):
     p = _prior(tmp_path, min_samples=3, predictive_horizon_ticks=3)
-    _settle(p, 4, -60.0, True)  # rung4 knee ~ -60
-    _settle(p, 1, -80.0, True)  # rung1 knee ~ -80
+    # Direct-set: plant confident knees without depending on learning dynamics
+    p._model._knee[4] = -60.0
+    p._model._count[4] = 12.0
+    p._model._knee[1] = -80.0
+    p._model._count[1] = 12.0
     # at -58 now, fading -2/tick -> projected -58 + (-2*3) = -64 -> below rung4 knee
     assert p.predictive_ceiling(-58.0, -2.0) == 1
 
@@ -59,7 +65,7 @@ def test_predictive_ceiling_none_rssi(tmp_path):
 
 def test_persistence_round_trip_v2(tmp_path):
     p = _prior(tmp_path, min_samples=3)
-    _settle(p, 4, -60.0, True)
+    _settle(p, 4, -60.0, False)  # dirty to plant the knee
     p.flush()
     p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=3))
     assert p2.ceiling(-50.0) == 4
@@ -71,7 +77,7 @@ def test_v1_file_ignored_and_retrains(tmp_path):
     )
     p = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=3))
     assert p.ceiling(-50.0) is None  # v1 ignored
-    _settle(p, 4, -60.0, True)
+    _settle(p, 4, -60.0, False)  # dirty to plant the knee
     assert p.ceiling(-50.0) == 4  # retrains on v2
 
 
@@ -133,8 +139,11 @@ def _settle_snr(p, rung, snr, clean, n=12):
 
 def test_snr_ceiling_learns_independently_of_rssi(tmp_path):
     p = _prior(tmp_path, min_samples=3)
-    _settle_snr(p, 1, 10.0, True)
-    _settle_snr(p, 4, 30.0, True)
+    # Direct-set: plant confident SNR knees without depending on learning dynamics
+    p._snr_model._knee[1] = 10.0
+    p._snr_model._count[1] = 12.0
+    p._snr_model._knee[4] = 30.0
+    p._snr_model._count[4] = 12.0
     assert p.snr_ceiling(35.0) == 4
     assert p.snr_ceiling(12.0) == 1
     assert p.snr_ceiling(5.0) is None
@@ -144,14 +153,15 @@ def test_snr_ceiling_learns_independently_of_rssi(tmp_path):
 def test_snr_ceiling_none_when_cold_or_none(tmp_path):
     p = _prior(tmp_path, min_samples=3)
     assert p.snr_ceiling(30.0) is None  # cold
+    # clean settle plants no knee (new invariant); this asserts None-input handling
     _settle_snr(p, 4, 30.0, True)
     assert p.snr_ceiling(None) is None  # None input
 
 
 def test_combined_persistence_round_trip(tmp_path):
     p = _prior(tmp_path, min_samples=3)
-    _settle(p, 4, -60.0, True)  # rssi knee (existing helper)
-    _settle_snr(p, 4, 30.0, True)  # snr knee
+    _settle(p, 4, -60.0, False)  # dirty to plant the rssi knee
+    _settle_snr(p, 4, 30.0, False)  # dirty to plant the snr knee
     p.flush()
     p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=3))
     assert p2.ceiling(-50.0) == 4
@@ -163,7 +173,7 @@ def test_v2_flat_file_loads_rssi_keeps_snr_cold(tmp_path):
 
     # a deployed v2 doc is the flat rssi-model dict (no "rssi"/"snr" wrapper)
     p1 = _prior(tmp_path, min_samples=3)
-    _settle(p1, 4, -60.0, True)
+    _settle(p1, 4, -60.0, False)  # dirty to plant the rssi knee
     flat = p1._model.to_dict()
     flat["key"] = "m8812eu2"
     (tmp_path / "m8812eu2.json").write_text(json.dumps(flat))
@@ -189,22 +199,29 @@ def test_load_tolerates_null_model_subkeys(tmp_path):
 
 
 def test_snr_rung_unviable_cold_rung_is_explorable(tmp_path):
-    # Only rung4 has been learned; rung5 (the frontier) is UNKNOWN, not unviable.
+    # Rung4 is a *confident, learned* knee; rungs 5/6 are cold (never seen).
+    # The frontier-deadlock invariant: a cold frontier rung ABOVE a learned rung
+    # must stay explorable — the cumulative-max of effective knees must NOT
+    # propagate rung4's knee upward to block rung5/6.
     p = _prior(tmp_path, min_samples=3)
-    _settle_snr(p, 4, 27.0, True)
+    p._snr_model._knee[4] = 27.0
+    p._snr_model._count[4] = 12.0  # >= min_samples=8 -> confident
     assert p.snr_rung_unviable(5, 39.0) is False  # cold -> explorable (deadlock fix)
     assert p.snr_rung_unviable(6, 39.0) is False
 
 
 def test_snr_rung_unviable_confident_rung(tmp_path):
     p = _prior(tmp_path, min_samples=3)
-    _settle_snr(p, 4, 27.0, True)  # rung4 viable at snr >= ~27
+    # Direct-set: plant confident SNR knee at 27 for rung4
+    p._snr_model._knee[4] = 27.0
+    p._snr_model._count[4] = 12.0
     assert p.snr_rung_unviable(4, 24.0) is True  # below the knee -> known-bad
     assert p.snr_rung_unviable(4, 30.0) is False  # clears the knee -> viable
 
 
 def test_snr_rung_unviable_none_inputs(tmp_path):
     p = _prior(tmp_path, min_samples=3)
+    # clean settle plants no knee (new invariant); this asserts None-input handling
     _settle_snr(p, 4, 27.0, True)
     assert p.snr_rung_unviable(4, None) is False  # no live snr -> can't judge
     assert p.snr_rung_unviable(None, 39.0) is False
@@ -214,7 +231,9 @@ def test_snr_rung_unviable_margin_threads_through(tmp_path):
     # The promote/demote hysteresis margin must reach the knee model: a value a
     # hair below the knee is NOT unviable once a margin is applied.
     p = _prior(tmp_path, min_samples=3)
-    _settle_snr(p, 4, 27.0, True)  # knee ~27
+    # Direct-set: plant confident SNR knee at 27 for rung4
+    p._snr_model._knee[4] = 27.0
+    p._snr_model._count[4] = 12.0
     assert p.snr_rung_unviable(4, 26.6) is True  # strict (default margin 0)
     assert p.snr_rung_unviable(4, 26.6, margin=1.0) is False
     assert p.snr_rung_unviable(4, 25.0, margin=1.0) is True  # clearly below

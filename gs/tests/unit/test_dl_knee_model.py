@@ -5,16 +5,23 @@ def _model(**kw):
     return KneeModel(LearnedPriorConfig(**kw))
 
 
-def test_first_sample_seeds_knee_at_rssi():
+def test_clean_first_sample_does_not_seed_knee():
     m = _model()
-    m.observe(rung=4, rssi=-60.0, clean=True)
+    m.observe(rung=4, rssi=-60.0, clean=True)  # clean -> no knee planted
+    assert m._knee[4] is None
+    assert m._count[4] == 1.0  # but the sample still counts
+
+
+def test_dirty_first_sample_seeds_knee_at_rssi():
+    m = _model()
+    m.observe(rung=4, rssi=-60.0, clean=False)  # failure -> knee = -60
     assert m._knee[4] == -60.0
     assert m._count[4] == 1.0
 
 
 def test_clean_below_knee_pulls_down_slowly():
     m = _model(alpha_relax=0.1, recency_decay=1.0)
-    m.observe(4, -60.0, clean=True)  # seed -60
+    m.observe(4, -60.0, clean=False)  # FAIL at -60 -> seed knee -60
     m.observe(4, -70.0, clean=True)  # works even at -70 -> knee toward -70
     # -60 + 0.1*(-70 - -60) = -61.0
     assert m._knee[4] == -61.0
@@ -22,31 +29,52 @@ def test_clean_below_knee_pulls_down_slowly():
 
 def test_dirty_above_knee_pulls_up_fast():
     m = _model(alpha_tighten=0.5, recency_decay=1.0)
-    m.observe(4, -70.0, clean=True)  # seed -70
-    m.observe(4, -60.0, clean=False)  # fails at -60 -> knee toward -60
+    m.observe(4, -70.0, clean=False)  # FAIL at -70 -> seed -70
+    m.observe(4, -60.0, clean=False)  # fails at -60 (above knee) -> knee toward -60
     # -70 + 0.5*(-60 - -70) = -65.0
     assert m._knee[4] == -65.0
 
 
 def test_tighten_faster_than_relax():
     up = _model(alpha_tighten=0.25, alpha_relax=0.05, recency_decay=1.0)
-    up.observe(4, -70.0, True)
-    up.observe(4, -60.0, False)  # dirty pull up
+    up.observe(4, -65.0, clean=False)  # seed -65
+    up.observe(4, -60.0, clean=False)  # dirty pull up
     down = _model(alpha_tighten=0.25, alpha_relax=0.05, recency_decay=1.0)
-    down.observe(4, -60.0, True)
-    down.observe(4, -70.0, True)  # clean pull down
-    moved_up = abs(up._knee[4] - (-70.0))
-    moved_down = abs(down._knee[4] - (-60.0))
+    down.observe(4, -65.0, clean=False)  # seed -65
+    down.observe(4, -70.0, clean=True)  # clean pull down
+    moved_up = abs(up._knee[4] - (-65.0))
+    moved_down = abs(down._knee[4] - (-65.0))
     assert moved_up > moved_down  # pessimistic asymmetry
 
 
 def test_consistent_sample_does_not_move_knee():
     m = _model(recency_decay=1.0)
-    m.observe(4, -60.0, clean=True)  # seed -60
+    m.observe(4, -60.0, clean=False)  # FAIL -> seed -60
     m.observe(4, -50.0, clean=True)  # clean ABOVE knee -> consistent, no move
     assert m._knee[4] == -60.0
     m.observe(4, -70.0, clean=False)  # dirty BELOW knee -> consistent, no move
     assert m._knee[4] == -60.0
+
+
+def test_recency_decay_ages_out_unreinforced_knee():
+    m = _model(min_samples=8.0, recency_decay=0.9, alpha_relax=0.0, alpha_tighten=0.0)
+    for _ in range(20):  # rung 4 becomes confident (seed via dirty, then hold)
+        m.observe(4, -60.0, clean=False)
+    assert m.ceiling(-50.0) == 4
+    for _ in range(60):  # hammer rung 1; rung 4 decays
+        m.observe(1, -80.0, clean=False)
+    assert m._count[4] < 8.0  # rung 4 confidence aged out
+    assert m.ceiling(-50.0) == 1
+
+
+def test_recency_decay_one_keeps_confidence_forever():
+    m = _model(min_samples=8.0, recency_decay=1.0)
+    for _ in range(10):
+        m.observe(4, -60.0, clean=False)  # seed + hold via dirty
+    for _ in range(1000):
+        m.observe(1, -80.0, clean=False)
+    assert m._count[4] == 10.0  # no decay
+    assert m.ceiling(-50.0) == 4
 
 
 def test_observe_ignores_out_of_range_rung():
@@ -91,29 +119,6 @@ def test_ceiling_enforces_rung_monotonicity_on_inversion():
     # cumulative-max raises rung 4's effective knee to -60 (pessimistic).
     assert m.ceiling(-65.0) is None  # neither effective knee (-60) <= -65
     assert m.ceiling(-58.0) == 4
-
-
-def test_recency_decay_ages_out_unreinforced_knee():
-    # A knee that stops being reinforced loses confidence as OTHER rungs are
-    # observed, and eventually drops below min_samples (no longer in ceiling).
-    m = _model(min_samples=8.0, recency_decay=0.9, alpha_relax=0.0, alpha_tighten=0.0)
-    for _ in range(20):  # rung 4 becomes confident
-        m.observe(4, -60.0, clean=True)
-    assert m.ceiling(-50.0) == 4
-    for _ in range(60):  # hammer rung 1; rung 4 decays
-        m.observe(1, -80.0, clean=True)
-    assert m._count[4] < 8.0  # rung 4 confidence aged out
-    assert m.ceiling(-50.0) == 1  # rung 4 no longer a confident ceiling
-
-
-def test_recency_decay_one_keeps_confidence_forever():
-    m = _model(min_samples=8.0, recency_decay=1.0)
-    for _ in range(10):
-        m.observe(4, -60.0, clean=True)
-    for _ in range(1000):
-        m.observe(1, -80.0, clean=True)
-    assert m._count[4] == 10.0  # no decay
-    assert m.ceiling(-50.0) == 4
 
 
 def test_to_dict_round_trips_through_load_dict():
