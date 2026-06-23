@@ -60,13 +60,12 @@ class SelectorConfig:
     # Proactive SNR demote: consecutive ticks snr_ceiling must stay below the
     # current rung before demoting to it (debounce; snr is already EWMA'd).
     snr_demote_debounce: int = 2
-    # SNR-knee hysteresis (dB). The promote veto blocks a climb only when the
-    # live SNR is more than snr_promote_margin_db BELOW the target rung's learned
-    # knee; the proactive demote fires only when it is more than
-    # snr_demote_margin_db below the current rung's knee. demote > promote opens a
-    # stable dead-band: without it the zero-margin `snr < knee` veto pins MCS at
-    # the rung whose knee sits a hair above the live SNR (it can only relax by
-    # operating there, which the veto blocks) — the MCS-stuck-at-4 field bug.
+    # SNR-knee hysteresis (dB). promote_blocked (snr_promote_margin_db) is now
+    # advisory only: the live probe is authoritative for promotes, so a
+    # clean+fresh+debounced rung promotes regardless. The proactive *demote* still
+    # fires when the live SNR is more than snr_demote_margin_db below the current
+    # rung's knee. The asymmetric demote margin (demote > promote) keeps a stable
+    # dead-band on the demote path while the probe governs the promote path.
     snr_promote_margin_db: float = 1.0
     snr_demote_margin_db: float = 1.5
 
@@ -218,19 +217,15 @@ class LeadingSelector:
         )
         if clean:
             self._promote_clean += 1
-            # SNR caps the probe's optimism: never promote to a rung the live SNR
-            # CONFIDENTLY says is unviable (the 4<->3 oscillation driver — the probe
-            # measures rung+1 at the current rung's TX power and reads it clean).
+            # Fix A: the live probe is authoritative for promotes. A clean+fresh+
+            # debounced rung promotes regardless of promote_blocked — the SNR knee
+            # is advisory only (logged for analysis, still drives proactive demote).
             # promote_blocked is precomputed in policy.tick (it needs the learned
-            # prior). A rung the SNR prior hasn't learned is NOT blocked — unknown
-            # != bad, so the probe may explore the frontier; otherwise the top
-            # rung, whose knee can only be learned BY operating there, is forever
-            # unreachable (the maxMcs-never-reached deadlock).
+            # prior) and passed through for flight-log visibility.
             if (
                 self._promote_clean >= self.cfg.promote_debounce_windows
                 and not within_hold
                 and not within_rate
-                and not promote_blocked
             ):
                 commit(target, f"probe_promote mcs{target} per={rung['per']:.4f}")
         else:

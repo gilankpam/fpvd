@@ -302,30 +302,20 @@ def test_loss_demote_cold_target_falls_back_to_one_step():
 # ── SNR ceiling as operating ceiling: promote cap ──────────────────────────
 
 
-def test_promote_blocked_by_flag():
-    # The per-rung "is this target confidently unviable?" decision is made in
-    # policy.tick (it needs the learned prior); the selector just honours the bool.
+def test_promote_proceeds_despite_blocked_flag():
+    # Fix A: the live probe is authoritative for promotes. A clean+fresh+debounced
+    # current+1 rung promotes even when the SNR knee says promote_blocked=True
+    # (the flag is advisory only, kept for the log). debounce=1 -> one clean select
+    # commits; assert the single promote 3->4 rather than looping (a fully-clean
+    # _probe(7) would otherwise keep climbing).
     s = _selector(max_mcs=5, promote_debounce_windows=1)
     _drive_to_mcs_probe(s, 3)  # reach MCS3
-    ts = 500000.0
-    for _ in range(4):  # clean rung4 probe, but blocked
-        ts += 1000.0
-        mcs, _ = s.select(
-            probe=_probe(7),
-            loss_rate=0.0,
-            fec_pressure=0.0,
-            link_starved=False,
-            ts_ms=ts,
-            promote_blocked=True,
-        )
-    assert mcs == 3  # promote to 4 vetoed
-    ts += 1000.0
-    mcs, _ = s.select(
+    mcs, changed = s.select(
         probe=_probe(7),
         loss_rate=0.0,
         fec_pressure=0.0,
         link_starved=False,
-        ts_ms=ts,
-        promote_blocked=False,
+        ts_ms=600000.0,  # well past the drive's timestamps -> rate limit clear
+        promote_blocked=True,
     )
-    assert mcs == 4  # veto lifts -> promotes
+    assert changed and mcs == 4  # promoted 3->4 despite promote_blocked=True
