@@ -136,8 +136,9 @@ def test_record_carries_predict_gated_flag(tmp_path):
         _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=2),
         prof,
     )
-    for _ in range(12):
-        p.learned_prior.ingest(rssi=-50.0, operating_mcs=2, operating_clean=True, settled=True)
+    # Direct-set: plant a confident RSSI knee at rung2 = -50
+    p.learned_prior._model._knee[2] = -50.0
+    p.learned_prior._model._count[2] = 12.0
     p.leading.state.current_mcs = 5
     p.tick(_sig(-50.0, ts=1.0))
     p.tick(_sig(-50.0, ts=1.1))
@@ -205,11 +206,9 @@ def test_record_carries_snr_norm_ceiling_knees(tmp_path):
     from fpvdgs.dynlink.signals import Signals
 
     p = Policy(_cfg(tmp_path, min_samples=3), _profile())
-    # warm the SNR knee at MCS5 so snr_ceiling resolves
-    for _ in range(12):
-        p.learned_prior.ingest(
-            rssi=None, snr=30.0, operating_mcs=5, operating_clean=True, settled=True
-        )
+    # Direct-set: plant confident SNR knee at MCS5 = 30 so snr_ceiling resolves
+    p.learned_prior._snr_model._knee[5] = 30.0
+    p.learned_prior._snr_model._count[5] = 12.0
     sig = Signals(
         rssi=-50.0, residual_loss_w=0.0, fec_work=0.0, link_starved_w=False, timestamp=1.0, snr=35.0
     )
@@ -225,14 +224,11 @@ def test_reactive_demote_jumps_to_snr_ceiling(tmp_path):
     from fpvdgs.dynlink.signals import Signals
 
     p = Policy(_cfg(tmp_path, min_samples=3), _profile())
-    # SNR knee: rung1 viable at snr>=10, rung4 at >=30; current snr 12 -> ceiling 1
-    for _ in range(12):
-        p.learned_prior.ingest(
-            rssi=None, snr=10.0, operating_mcs=1, operating_clean=True, settled=True
-        )
-        p.learned_prior.ingest(
-            rssi=None, snr=30.0, operating_mcs=4, operating_clean=True, settled=True
-        )
+    # Direct-set: SNR knee: rung1 viable at snr>=10, rung4 at >=30; current snr 12 -> ceiling 1
+    p.learned_prior._snr_model._knee[1] = 10.0
+    p.learned_prior._snr_model._count[1] = 12.0
+    p.learned_prior._snr_model._knee[4] = 30.0
+    p.learned_prior._snr_model._count[4] = 12.0
     p.leading.state.current_mcs = 5
 
     def sig(ts):
@@ -254,14 +250,11 @@ def test_proactive_snr_demote_before_loss(tmp_path):
     from fpvdgs.dynlink.signals import Signals
 
     p = Policy(_cfg(tmp_path, min_samples=3), _profile())
-    # SNR knee: rung3 viable at snr>=15, rung4 at >=30. Current snr 20 -> ceiling 3.
-    for _ in range(12):
-        p.learned_prior.ingest(
-            rssi=None, snr=15.0, operating_mcs=3, operating_clean=True, settled=True
-        )
-        p.learned_prior.ingest(
-            rssi=None, snr=30.0, operating_mcs=4, operating_clean=True, settled=True
-        )
+    # Direct-set: SNR knee: rung3 viable at snr>=15, rung4 at >=30. Current snr 20 -> ceiling 3.
+    p.learned_prior._snr_model._knee[3] = 15.0
+    p.learned_prior._snr_model._count[3] = 12.0
+    p.learned_prior._snr_model._knee[4] = 30.0
+    p.learned_prior._snr_model._count[4] = 12.0
     p.leading.state.current_mcs = 4
 
     def sig(ts):  # NO loss, NO rssi (isolates the SNR proactive path)
