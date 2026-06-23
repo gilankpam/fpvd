@@ -199,9 +199,13 @@ def test_load_tolerates_null_model_subkeys(tmp_path):
 
 
 def test_snr_rung_unviable_cold_rung_is_explorable(tmp_path):
-    # Only rung4 has been learned; rung5 (the frontier) is UNKNOWN, not unviable.
+    # Rung4 is a *confident, learned* knee; rungs 5/6 are cold (never seen).
+    # The frontier-deadlock invariant: a cold frontier rung ABOVE a learned rung
+    # must stay explorable — the cumulative-max of effective knees must NOT
+    # propagate rung4's knee upward to block rung5/6.
     p = _prior(tmp_path, min_samples=3)
-    _settle_snr(p, 4, 27.0, True)
+    p._snr_model._knee[4] = 27.0
+    p._snr_model._count[4] = 12.0  # >= min_samples=8 -> confident
     assert p.snr_rung_unviable(5, 39.0) is False  # cold -> explorable (deadlock fix)
     assert p.snr_rung_unviable(6, 39.0) is False
 

@@ -143,6 +143,9 @@ class LeadingSelector:
         loss_rate: float,
         loss_demote: bool = False,
         loss_demote_target: int | None = None,
+        # Advisory only: the probe is authoritative for promotes; the caller
+        # (policy.tick) computes + passes promote_blocked for flight-log
+        # visibility, but select() no longer gates on it.
         promote_blocked: bool = False,
         fec_pressure: float,
         link_starved: bool,
