@@ -116,3 +116,31 @@ TEST_CASE("applyLocalCompute swfec: k/n slots carry overhead/deadline, bitrate d
     CHECK(d.bitrateKbps ==
           computeBitrateKbpsSwfec(wt, 50, cfg.bitrate.minBitrateKbps, cfg.bitrate.maxBitrateKbps));
 }
+
+TEST_CASE("applyLocalCompute at 10 MHz bills ~half the 20 MHz bitrate") {
+    DlRuntimeConfig c20 = cfgWithBitrate();
+    c20.linkWidthMhz = 20;
+    DlRuntimeConfig c10 = cfgWithBitrate();
+    c10.linkWidthMhz = 10;
+
+    Decision d20{};
+    d20.mcs = 4;
+    d20.bandwidth = 20;
+    Decision d10{};
+    d10.mcs = 4;
+    d10.bandwidth = 20; // modulation width is 20 for a 10 MHz link
+
+    applyLocalCompute(c20, d20);
+    applyLocalCompute(c10, d10);
+
+    // 10 MHz carries ~half the throughput -> ~half the encoder target.
+    CHECK(d10.bitrateKbps < d20.bitrateKbps);
+    CHECK(d10.bitrateKbps > static_cast<uint16_t>(0.40 * d20.bitrateKbps));
+    CHECK(d10.bitrateKbps < static_cast<uint16_t>(0.60 * d20.bitrateKbps));
+    // The MCS-0 failsafe still produces a usable, floored bitrate at 10 MHz.
+    Decision f{};
+    f.mcs = 0;
+    f.bandwidth = 20;
+    applyLocalCompute(c10, f);
+    CHECK(f.bitrateKbps >= c10.bitrate.minBitrateKbps);
+}

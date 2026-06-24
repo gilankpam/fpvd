@@ -6,8 +6,9 @@
 namespace fpvd::dynlink {
 
 // OpenIPC effective-rate table (kbps, long GI), MCS 0-7, already de-rated to
-// real WFB throughput. bandwidthMhz is 20 or 40 (the radiotap value). Returns
-// 0 for an unknown bandwidth or out-of-range mcs.
+// real WFB throughput. bandwidthMhz is the CHANNEL width 10/20/40 (10 MHz is
+// the underclocked-baseband half-rate row; this is NOT the radiotap modulation
+// width). Returns 0 for an unknown bandwidth or out-of-range mcs.
 uint32_t openIpcBaseRateKbps(int bandwidthMhz, int mcs);
 
 // wire_target_kbps = baseRate[bw][mcs] * (2/3 - probe_util), where

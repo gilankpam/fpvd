@@ -255,9 +255,11 @@ class DynamicLinkController:
             else:
                 agg.rssi_norm = RssiNormConfig(enabled=False)
                 log.warning("dynlink: drone supplied no txpower curve — RSSI normalization OFF")
-        # Learned-prior key binds on a present adapter id, independent of the curve.
+        # Learned-prior key binds on a present adapter id + the channel width
+        # (10 MHz and 20 MHz keep independent knees), independent of the curve.
         if adapter:
-            self._policy.bind_learned_prior(str(adapter))
+            width = int(self._snapshot.get("linkWidth", 20))
+            self._policy.bind_learned_prior(str(adapter), width)
 
     def _disconnected_inloop(self):
         p = self._policy

@@ -156,7 +156,7 @@ def _api_with_dynlink(tmp_path):
     from fpvdgs.drone_client import DroneClient
 
     defaults = {
-        "link": {"channel": 132, "width": 40, "region": "US"},
+        "link": {"channel": 132, "width": 20, "region": "US"},
         "wfb": {"profile": "gs", "raw": {}},
         "drone": {"endpoint": "http://10.5.0.10:8080"},
         "dynamicLink": {
@@ -219,6 +219,17 @@ def test_wfb_change_bounces_runner_and_leaves_controller_alone(tmp_path):
     assert code == 200
     assert runner.restarts == 1  # non-dynamicLink change: bounce
     assert ctrl.calls == []  # controller untouched (stayed disabled)
+
+
+def test_width_change_while_enabled_reconfigures_controller(tmp_path):
+    api, store, ctrl, runner = _api_with_dynlink(tmp_path)
+    store.patch({"dynamicLink": {"enabled": True}})
+    api.handle("POST", "/gs/apply", {}, b"")
+    ctrl.calls.clear()
+    store.patch({"link": {"width": 10}})  # 20 -> 10 while DL stays enabled
+    api.handle("POST", "/gs/apply", {}, b"")
+    # Controller rebuilt so it re-binds the prior to <adapter>__bw10 + resets.
+    assert any(c[0] == "set_config" for c in ctrl.calls)
 
 
 # --- pixelpilot apply routing ---
@@ -354,7 +365,7 @@ def _api_with_dl_and_probe(tmp_path):
     defaults = {
         "link": {
             "channel": 132,
-            "width": 40,
+            "width": 20,
             "region": "US",
             "linkId": 7669206,
             "wlans": ["wlan0"],
@@ -403,6 +414,26 @@ def test_disable_dynamiclink_stops_probe(tmp_path):
     code, _ = api.handle("POST", "/gs/apply", {}, b"")
     assert code == 200
     assert probe.started is False and runner.restarts == 0
+
+
+def test_width_only_change_does_not_bounce_probe(tmp_path):
+    """Regression guard: a width-only change rebuilds the DL controller (so it
+    re-keys the learned prior) but must NOT call probe.set_config — the probe
+    snapshot is width-agnostic and bouncing it would interrupt the uplink."""
+    api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path)
+    # Enable DL first so the controller is running.
+    store.patch({"dynamicLink": {"enabled": True}})
+    api.handle("POST", "/gs/apply", {}, b"")
+    # Clear both controllers' recorded calls before the width change.
+    ctrl.calls.clear()
+    probe.cfgs.clear()
+    # Apply a width-only change (link.width 20 -> 10; dynamicLink unchanged).
+    store.patch({"link": {"width": 10}})
+    api.handle("POST", "/gs/apply", {}, b"")
+    # Controller must have been reconfigured (prior re-key + selector reset).
+    assert any(c[0] == "set_config" for c in ctrl.calls)
+    # Probe must NOT have been reconfigured.
+    assert probe.cfgs == []
 
 
 class FakeRelay:

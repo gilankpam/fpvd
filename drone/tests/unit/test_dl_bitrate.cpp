@@ -9,8 +9,12 @@ TEST_CASE("openIpc base rate table endpoints") {
     CHECK(openIpcBaseRateKbps(40, 0) == 9800u);
     CHECK(openIpcBaseRateKbps(40, 7) == 97000u);
     CHECK(openIpcBaseRateKbps(20, 5) == 42000u);
-    // unknown bandwidth / out-of-range mcs -> 0
-    CHECK(openIpcBaseRateKbps(10, 0) == 0u);
+    // 10 MHz = underclocked baseband, ~half the 20 MHz effective rate (provisional).
+    CHECK(openIpcBaseRateKbps(10, 0) == 3250u);
+    CHECK(openIpcBaseRateKbps(10, 7) == 27500u);
+    CHECK(openIpcBaseRateKbps(10, 5) == 21000u);
+    // genuinely unknown bandwidth / out-of-range mcs -> 0
+    CHECK(openIpcBaseRateKbps(5, 0) == 0u);
     CHECK(openIpcBaseRateKbps(20, 8) == 0u);
     CHECK(openIpcBaseRateKbps(20, -1) == 0u);
 }

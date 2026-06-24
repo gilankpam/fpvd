@@ -3,6 +3,7 @@
 #include "dynlink/apply_direction.hpp"
 #include "dynlink/local_compute.hpp"
 #include "dynlink/txpower_curve.hpp"
+#include "link_width.hpp"
 
 #include <arpa/inet.h>
 #include <cassert>
@@ -224,7 +225,7 @@ Decision DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
     useconds_t paceUs = static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
     Decision d{};
     d.mcs = kDlFailsafeMcs;
-    d.bandwidth = cfg.linkBandwidth;
+    d.bandwidth = modulationWidth(cfg.linkWidthMhz);
     applyLocalCompute(cfg, d); // fills k, n, bitrateKbps, fps, txPowerDbm
     wfb_->setFec(d.k, d.n);
     if (paceUs > 0)
@@ -431,7 +432,7 @@ void DynamicLinkController::run(int evfd) {
                         }
 
                         // v3 wire carries only {mcs}; bandwidth is static config.
-                        d.bandwidth = cfg.linkBandwidth;
+                        d.bandwidth = modulationWidth(cfg.linkWidthMhz);
 
                         // Phase 3a: the drone computes its own bitrate/k/n
                         // (and a constant fps) from {mcs,bandwidth};

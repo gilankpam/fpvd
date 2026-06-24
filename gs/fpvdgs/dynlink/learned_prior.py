@@ -1,8 +1,9 @@
 """GS-local learned link-RSSI → viable-ceiling-MCS prior (knee model; see
 docs/superpowers/specs/2026-06-16-learned-prior-knee-model-design.md).
 
-Per-rung RSSI knee: knee[K] = RSSI below which rung K is unviable in steady
-state; recency-weighted; learns only from settled operating-rung samples.
+Per-rung RSSI/SNR knee: knee[K] = the signal value at which rung K was seen
+to FAIL; learned only from dirty (failed) settled samples — a clean sample
+never plants or raises it. A rung that never fails stays None (explorable).
 The prior is an accelerant, never the authority — the live probe still gates
 promotes; this only warm-starts the cold MCS and predictively demotes ahead
 of a fade. Keyed (and persisted) per drone adapter id (radio.adapterId).
@@ -60,8 +61,10 @@ class LearnedPriorConfig:
 
 class KneeModel:
     """Per-rung viability knee, signal-agnostic (instantiated for RSSI and SNR).
-    knee[K] = the signal value below which rung K is unviable in steady state;
-    count[K] = decayed confidence. Monotone-in-rung on read (cumulative max).
+    knee[K] = the signal value at which rung K was seen to FAIL; learned only
+    from dirty (failed) settled samples — a clean sample never plants or raises
+    it. A rung that never fails stays None (= explorable). count[K] = decayed
+    confidence. Monotone-in-rung on read (cumulative max).
     Caller feeds only settled samples."""
 
     SCHEMA_VERSION = 2
@@ -79,7 +82,8 @@ class KneeModel:
             self._count = [c * d for c in self._count]
         k = self._knee[rung]
         if k is None:
-            self._knee[rung] = rssi
+            if not clean:  # establish the floor ONLY from a failure;
+                self._knee[rung] = rssi  # a clean sample leaves it None (= explorable)
         elif clean and rssi < k:
             self._knee[rung] = k + self.cfg.alpha_relax * (rssi - k)
         elif (not clean) and rssi > k:

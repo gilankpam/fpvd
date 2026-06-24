@@ -145,7 +145,24 @@ def test_learned_prior_knob_survives_loader_and_reaches_policy(tmp_path):
     assert build_policy_config(dl).learned_prior.settle_ticks == 9  # reached policy
 
 
+def test_make_dl_snapshot_carries_link_width():
+    eff = {"dynamicLink": _block(), "drone": {"host": "10.5.0.10"}, "link": {"width": 10}}
+    assert make_dl_snapshot(eff)["linkWidth"] == 10
+
+
+def test_make_dl_snapshot_link_width_defaults_to_20_when_absent():
+    assert make_dl_snapshot({"dynamicLink": _block()})["linkWidth"] == 20
+
+
 def test_radio_profile_is_not_a_known_dynamic_link_key():
     from fpvdgs.schema import DYNAMIC_LINK_KEYS
 
     assert "radioProfile" not in DYNAMIC_LINK_KEYS
+
+
+def test_link_width_maps_into_policy_config():
+    assert build_policy_config(_block(linkWidth=10)).link_width == 10
+
+
+def test_link_width_defaults_to_20_when_absent():
+    assert build_policy_config(_block()).link_width == 20

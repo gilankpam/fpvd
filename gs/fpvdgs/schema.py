@@ -92,6 +92,10 @@ def validate_effective(cfg: dict) -> None:
     width = link.get("width")
     if width is not None and width not in VALID_WIDTHS:
         raise SchemaError(f"link.width must be one of {sorted(VALID_WIDTHS)}")
+    # 40 MHz under DL is rejected: its TX-power backoff is unvalidated at true
+    # 40 MHz modulation. Mirrors the drone (drone/src/config/validate.cpp).
+    if width == 40 and bool((cfg.get("dynamicLink") or {}).get("enabled", False)):
+        raise SchemaError("link.width 40 MHz requires dynamicLink.enabled=false")
     if not link.get("region"):
         raise SchemaError("link.region is required")
     if not link.get("channel"):

@@ -36,6 +36,34 @@ def test_validate_effective_accepts_10mhz():
     validate_effective({"link": {"channel": 132, "width": 10, "region": "US"}})
 
 
+def test_validate_effective_rejects_40mhz_with_dynamic_link():
+    with pytest.raises(SchemaError):
+        validate_effective(
+            {
+                "link": {"channel": 132, "width": 40, "region": "US"},
+                "dynamicLink": {"enabled": True},
+            }
+        )
+
+
+def test_validate_effective_accepts_40mhz_when_dynamic_link_off():
+    validate_effective(
+        {
+            "link": {"channel": 132, "width": 40, "region": "US"},
+            "dynamicLink": {"enabled": False},
+        }
+    )
+
+
+def test_validate_effective_accepts_10mhz_with_dynamic_link():
+    validate_effective(
+        {
+            "link": {"channel": 132, "width": 10, "region": "US"},
+            "dynamicLink": {"enabled": True},
+        }
+    )
+
+
 def test_validate_effective_ok():
     validate_effective(
         {

@@ -60,13 +60,12 @@ class SelectorConfig:
     # Proactive SNR demote: consecutive ticks snr_ceiling must stay below the
     # current rung before demoting to it (debounce; snr is already EWMA'd).
     snr_demote_debounce: int = 2
-    # SNR-knee hysteresis (dB). The promote veto blocks a climb only when the
-    # live SNR is more than snr_promote_margin_db BELOW the target rung's learned
-    # knee; the proactive demote fires only when it is more than
-    # snr_demote_margin_db below the current rung's knee. demote > promote opens a
-    # stable dead-band: without it the zero-margin `snr < knee` veto pins MCS at
-    # the rung whose knee sits a hair above the live SNR (it can only relax by
-    # operating there, which the veto blocks) — the MCS-stuck-at-4 field bug.
+    # SNR-knee hysteresis (dB). promote_blocked (snr_promote_margin_db) is now
+    # advisory only: the live probe is authoritative for promotes, so a
+    # clean+fresh+debounced rung promotes regardless. The proactive *demote* still
+    # fires when the live SNR is more than snr_demote_margin_db below the current
+    # rung's knee. The asymmetric demote margin (demote > promote) keeps a stable
+    # dead-band on the demote path while the probe governs the promote path.
     snr_promote_margin_db: float = 1.0
     snr_demote_margin_db: float = 1.5
 
@@ -76,6 +75,7 @@ class PolicyConfig:
     selector: SelectorConfig = field(default_factory=SelectorConfig)
     learned_prior: LearnedPriorConfig = field(default_factory=LearnedPriorConfig)
     flightlog: FlightLogConfig = field(default_factory=FlightLogConfig)
+    link_width: int = 20  # channel width (10/20/40); logged per tick for analysis
 
 
 # ------------------------------------------------------------------
@@ -143,6 +143,9 @@ class LeadingSelector:
         loss_rate: float,
         loss_demote: bool = False,
         loss_demote_target: int | None = None,
+        # Advisory only: the probe is authoritative for promotes; the caller
+        # (policy.tick) computes + passes promote_blocked for flight-log
+        # visibility, but select() no longer gates on it.
         promote_blocked: bool = False,
         fec_pressure: float,
         link_starved: bool,
@@ -217,19 +220,15 @@ class LeadingSelector:
         )
         if clean:
             self._promote_clean += 1
-            # SNR caps the probe's optimism: never promote to a rung the live SNR
-            # CONFIDENTLY says is unviable (the 4<->3 oscillation driver — the probe
-            # measures rung+1 at the current rung's TX power and reads it clean).
+            # Fix A: the live probe is authoritative for promotes. A clean+fresh+
+            # debounced rung promotes regardless of promote_blocked — the SNR knee
+            # is advisory only (logged for analysis, still drives proactive demote).
             # promote_blocked is precomputed in policy.tick (it needs the learned
-            # prior). A rung the SNR prior hasn't learned is NOT blocked — unknown
-            # != bad, so the probe may explore the frontier; otherwise the top
-            # rung, whose knee can only be learned BY operating there, is forever
-            # unreachable (the maxMcs-never-reached deadlock).
+            # prior) and passed through for flight-log visibility.
             if (
                 self._promote_clean >= self.cfg.promote_debounce_windows
                 and not within_hold
                 and not within_rate
-                and not promote_blocked
             ):
                 commit(target, f"probe_promote mcs{target} per={rung['per']:.4f}")
         else:
@@ -452,6 +451,7 @@ class Policy:
                 "evm_lo": signals.evm_lo_w,
                 "evm_min": signals.evm_min_w,
                 "mcs": new_mcs,
+                "width": self.cfg.link_width,
                 "reason": reason,
                 "residual_loss_w": signals.residual_loss_w,
                 "fec_work": signals.fec_work,
@@ -482,14 +482,17 @@ class Policy:
             },
         )
 
-    def bind_learned_prior(self, adapter_id: str) -> None:
-        """(Re)key the learned prior to the drone-reported adapter id. Called
-        at the connect edge before warm-start, so the session learns/persists
-        under the correct per-card file. No-op when the key is unchanged."""
-        if self.learned_prior.key == adapter_id:
+    def bind_learned_prior(self, adapter_id: str, width: int) -> None:
+        """(Re)key the learned prior to the drone adapter id AND channel width.
+        Called at the connect edge (and on a ground width change) before
+        warm-start, so the session learns/persists under the correct per-card,
+        per-width file (<adapter>__bw<width>.json). 10 MHz sees ~3 dB better SNR
+        than 20, so the knees must not be shared. No-op when the key is unchanged."""
+        key = f"{adapter_id}__bw{int(width)}"
+        if self.learned_prior.key == key:
             return
         self.profile_name = adapter_id
-        self.learned_prior = LearnedPrior(adapter_id, self.cfg.learned_prior)
+        self.learned_prior = LearnedPrior(key, self.cfg.learned_prior)
 
     def reset_for_new_session(self) -> None:
         """Reset volatile selector + hysteresis state to boot (incl. the RSSI

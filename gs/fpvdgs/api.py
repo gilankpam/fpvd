@@ -110,8 +110,14 @@ class Api:
                     "error": "apply failed; rolled back to last-good cfg",
                 }
 
+        width_changed = (effective.get("link") or {}).get("width") != (
+            pending.get("link") or {}
+        ).get("width")
         self._route_dynamic_link(
-            effective.get("dynamicLink", {}), pending.get("dynamicLink", {}), pending
+            effective.get("dynamicLink", {}),
+            pending.get("dynamicLink", {}),
+            pending,
+            width_changed,
         )
         self._route_pixelpilot(
             effective.get("pixelpilot", {}), pending.get("pixelpilot", {}), pending
@@ -169,9 +175,11 @@ class Api:
             self.idr_relay.stop()
             self.idr_relay.start()
 
-    def _route_dynamic_link(self, dl_old, dl_new, pending):
+    def _route_dynamic_link(self, dl_old, dl_new, pending, width_changed=False):
         """Start/stop/reconfigure the in-process controller AND the observe-only
-        probe (they share a lifecycle). Never bounces the wfb runner."""
+        probe (they share a lifecycle). Never bounces the wfb runner. A ground
+        width change (link block, not dynamicLink) also rebuilds the controller so
+        the learned prior re-keys to the new width and the selector resets."""
         if self.dynlink is None:
             return
         was, now = bool(dl_old.get("enabled")), bool(dl_new.get("enabled"))
@@ -185,9 +193,11 @@ class Api:
             self.dynlink.stop()
             if self.probe is not None:
                 self.probe.stop()
-        elif was and now and dl_old != dl_new:
+        elif was and now and (dl_old != dl_new or width_changed):
             self.dynlink.set_config(make_dl_snapshot(pending))
-            if self.probe is not None:
+            # The probe snapshot is width-agnostic, so only re-tune it on an
+            # actual dynamicLink change — a width-only change must not bounce it.
+            if self.probe is not None and dl_old != dl_new:
                 self.probe.set_config(make_probe_snapshot(pending))
 
     def _route_pixelpilot(self, pp_old, pp_new, pending):

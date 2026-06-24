@@ -349,6 +349,7 @@ def _make_fake_controller():
     from fpvdgs.dynlink.controller import DynamicLinkController
 
     c = DynamicLinkController.__new__(DynamicLinkController)  # bypass thread setup
+    c._snapshot = {"linkWidth": 20}
 
     class _Agg:
         def __init__(self):
@@ -364,8 +365,8 @@ def _make_fake_controller():
         def __init__(self):
             self.bound = self._UNSET
 
-        def bind_learned_prior(self, a):
-            self.bound = a
+        def bind_learned_prior(self, a, width):
+            self.bound = f"{a}__bw{int(width)}"
 
     c._aggregator = _Agg()
     c._policy = _Policy()
@@ -383,7 +384,7 @@ def test_bind_calibration_applies_drone_curve_and_adapter():
     assert c._aggregator.rssi_norm.tx_power_dbm_by_mcs == (29, 28, 25, 23, 19, 19, 19, 19)
     assert c._aggregator.rssi_norm.p_ref_dbm == 29
     assert c._aggregator.reset_called is True
-    assert c._policy.bound == "bl-m8812eu2"
+    assert c._policy.bound == "bl-m8812eu2__bw20"
 
 
 def test_bind_calibration_missing_curve_disables_normalization():
@@ -394,7 +395,7 @@ def test_bind_calibration_missing_curve_disables_normalization():
     # Normalization disabled due to missing curve …
     assert c._aggregator.rssi_norm.enabled is False
     # … but the adapter id still binds independently.
-    assert c._policy.bound == "bl-m8812eu2"
+    assert c._policy.bound == "bl-m8812eu2__bw20"
 
 
 def test_bind_calibration_valid_curve_null_adapter_still_normalizes():
@@ -433,6 +434,7 @@ def _seed_controller():
     c = DynamicLinkController.__new__(DynamicLinkController)
     c._lock = threading.RLock()
     c._pending_cal = None
+    c._snapshot = {"linkWidth": 20}
 
     class _Agg:
         rssi_norm = "UNTOUCHED"
@@ -455,8 +457,8 @@ def _seed_controller():
         def reset_for_new_session(self):
             self.reset_called += 1
 
-        def bind_learned_prior(self, a):
-            self.bound = a
+        def bind_learned_prior(self, a, width):
+            self.bound = f"{a}__bw{int(width)}"
 
     c._aggregator = _Agg()
     c._policy = _Policy()
@@ -485,7 +487,7 @@ def test_seed_binds_when_drone_already_connected():
     c._seed_from_cached_connection()
     assert c._aggregator.rssi_norm.enabled is True
     assert c._aggregator.rssi_norm.tx_power_dbm_by_mcs == (29, 28, 25, 23, 19, 19, 19, 19)
-    assert c._policy.bound == "bl-m8812eu2"
+    assert c._policy.bound == "bl-m8812eu2__bw20"
     assert c._policy.reset_called == 1
     assert c._policy.flightlog.began == 1
 

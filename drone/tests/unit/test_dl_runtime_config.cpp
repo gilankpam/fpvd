@@ -2,6 +2,7 @@
 #include "config/schema.hpp"
 #include "doctest.h"
 #include "dynlink/runtime_config.hpp"
+#include "link_width.hpp"
 using namespace fpvd;
 using namespace fpvd::dynlink;
 
@@ -95,18 +96,18 @@ TEST_CASE("buildDlSnapshot maps the Phase-3a bitrate-engine knobs") {
     CHECK(s.bitrate.kMax == 40);
 }
 
-TEST_CASE("buildDlSnapshot maps link.width to linkBandwidth (radiotap value)") {
+TEST_CASE("buildDlSnapshot carries link.width as the channel width") {
     fpvd::Config c{};
     c.link.width = 20;
-    auto s20 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
-    CHECK(s20.linkBandwidth == 20);
+    CHECK(fpvd::dynlink::buildDlSnapshot(c, "wlan0").linkWidthMhz == 20);
     c.link.width = 40;
-    auto s40 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
-    CHECK(s40.linkBandwidth == 40);
-    // modulationWidth maps HT40-as-20 (width=10) to the 20 MHz radiotap value
+    CHECK(fpvd::dynlink::buildDlSnapshot(c, "wlan0").linkWidthMhz == 40);
+    // 10 MHz stays 10 here (channel width). modulationWidth() collapses it to 20
+    // for radiotap at the controller — NOT in the snapshot.
     c.link.width = 10;
     auto s10 = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
-    CHECK(s10.linkBandwidth == 20);
+    CHECK(s10.linkWidthMhz == 10);
+    CHECK(fpvd::modulationWidth(s10.linkWidthMhz) == 20);
 }
 
 TEST_CASE("buildDlSnapshot: swfec fields from link.fec") {

@@ -330,3 +330,31 @@ TEST_CASE("validate: link.fec swfec rules") {
         CHECK(fpvd::validate(c).empty());
     }
 }
+
+TEST_CASE("validate: 40 MHz with dynamicLink enabled is rejected") {
+    Config c{};
+    c.link.width = 40;
+    c.dynamicLink.enabled = true;
+    auto errs = validate(c);
+    bool found = false;
+    for (auto& e : errs)
+        if (e.path == "link.width")
+            found = true;
+    CHECK(found);
+}
+
+TEST_CASE("validate: 40 MHz with dynamicLink disabled is allowed") {
+    Config c{};
+    c.link.width = 40;
+    c.dynamicLink.enabled = false;
+    for (auto& e : validate(c))
+        CHECK(e.path != "link.width");
+}
+
+TEST_CASE("validate: 20 MHz with dynamicLink enabled is allowed") {
+    Config c{};
+    c.link.width = 20;
+    c.dynamicLink.enabled = true;
+    for (auto& e : validate(c))
+        CHECK(e.path != "link.width");
+}
