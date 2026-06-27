@@ -145,3 +145,32 @@ TEST_CASE("translate.wfb: tun/tlm tx stay RS even in swfec mode") {
         CHECK(std::find(tx.begin(), tx.end(), "-z") == tx.end());
     }
 }
+
+TEST_CASE("translate.wfb: videoEncryption=false drops -K for video tx only") {
+    Config c{};
+    c.link.videoEncryption = false;
+    auto v = wfbArgs(c, fpvd::WfbRole::VideoTx, "wlan0", "/etc/drone.key");
+    auto has = [](const std::vector<std::string>& a, const std::string& s) {
+        return std::find(a.begin(), a.end(), s) != a.end();
+    };
+    CHECK_FALSE(has(v, "-K"));
+    CHECK_FALSE(has(v, "/etc/drone.key"));
+    CHECK(v[0] == "/usr/bin/wfb_tx");
+    CHECK(v.back() == "wlan0");
+    CHECK(has(v, "-M")); // rest of the argv intact
+
+    // tun/tlm always keep -K regardless of the flag.
+    auto tun = wfbArgs(c, fpvd::WfbRole::TunTx, "wlan0", "/etc/drone.key");
+    CHECK(has(tun, "-K"));
+    CHECK(has(tun, "/etc/drone.key"));
+}
+
+TEST_CASE("translate.wfb: videoEncryption=true (default) keeps -K for video tx") {
+    Config c{}; // default true
+    auto v = wfbArgs(c, fpvd::WfbRole::VideoTx, "wlan0", "/etc/drone.key");
+    auto has = [](const std::vector<std::string>& a, const std::string& s) {
+        return std::find(a.begin(), a.end(), s) != a.end();
+    };
+    CHECK(has(v, "-K"));
+    CHECK(has(v, "/etc/drone.key"));
+}
