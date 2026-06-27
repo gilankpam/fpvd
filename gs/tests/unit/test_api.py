@@ -119,6 +119,15 @@ def test_failed_retune_falls_back_to_bounce():
     assert code == 200 and runner.restarts == 1  # retune failed -> bounced
 
 
+def test_video_encryption_change_bounces_no_live_retune():
+    api, store, _, runner, retunes, ticks, _ = _api()
+    api.handle("PATCH", "/gs/config", {}, json.dumps({"link": {"videoEncryption": False}}).encode())
+    code, obj = api.handle("POST", "/gs/apply", {}, b"")
+    assert code == 200 and obj["applied"] is True
+    assert runner.restarts == 1  # bounced (keypair is constructor-time)
+    assert retunes == []  # NOT a live iw retune
+
+
 def test_apply_fires_armer_tick():
     api, store, drone, runner, retunes, ticks, cfg_out = _api()
     api.handle("POST", "/gs/apply", {}, b"")
