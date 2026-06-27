@@ -112,3 +112,17 @@ def test_render_emits_10hz_log_interval():
     # it belongs to [common]
     common = text.split("[common]", 1)[1].split("[", 1)[0]
     assert "log_interval = 100" in common
+
+
+def test_video_encryption_false_sets_keypair_none():
+    eff = {**EFFECTIVE, "link": {**EFFECTIVE["link"], "videoEncryption": False}}
+    parsed = _parse_literals(render_cfg(eff))
+    assert parsed["gs_video"]["keypair"] is None
+    assert "keypair" not in parsed.get("gs_mavlink", {})
+    assert "keypair" not in parsed.get("gs_tunnel", {})
+
+
+def test_video_encryption_default_omits_keypair():
+    # EFFECTIVE has no videoEncryption key -> treated as encrypted -> no keypair line.
+    parsed = _parse_literals(render_cfg(EFFECTIVE))
+    assert "keypair" not in parsed.get("gs_video", {})
