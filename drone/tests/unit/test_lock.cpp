@@ -217,3 +217,10 @@ TEST_CASE("lock: DL on + mixed link.fec {mode,k} → rejected (touches k)") {
     REQUIRE(r.lockedPaths.size() == 1);
     CHECK(r.lockedPaths[0] == "link.fec.k");
 }
+
+TEST_CASE("lock: DL on + body writes link.videoEncryption → allowed") {
+    auto body = nlohmann::json::parse(R"({"link":{"videoEncryption":false}})");
+    auto r = checkDynamicLinkLock(body, dlOn());
+    CHECK(r.ok);
+    CHECK(r.lockedPaths.empty());
+}
