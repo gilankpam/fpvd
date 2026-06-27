@@ -64,7 +64,8 @@ LinkChange classifyLinkChange(const Config& a, const Config& b) {
                                                   (la.fec.deadlineMs != lb.fec.deadlineMs)
                                             : (la.fec.k != lb.fec.k) || (la.fec.n != lb.fec.n));
     c.fullRestart = (la.linkId != lb.linkId) || (la.wlanAdapter != lb.wlanAdapter) ||
-                    fecMode; // -z is constructor-time: wfb_tx must respawn
+                    fecMode || // -z is constructor-time: wfb_tx must respawn
+                    (la.videoEncryption != lb.videoEncryption); // -K presence is constructor-time
     // link.beamforming is intentionally not routed here — it is reconciled
     // separately in Daemon::apply() (bfChanged), not via this hot-apply diff.
     return c;

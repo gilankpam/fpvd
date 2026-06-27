@@ -25,7 +25,7 @@ struct LinkChange {
     bool nicMtu{false};        // mtu
     bool videoRadiotap{false}; // mcs || stbc || ldpc || width
     bool videoFec{false};      // active-mode fec params (rs: k/n; swfec: overheadPct/deadlineMs)
-    bool fullRestart{false};   // linkId || wlanAdapter || fec.mode
+    bool fullRestart{false};   // linkId || wlanAdapter || fec.mode || videoEncryption
 };
 
 LinkChange classifyLinkChange(const Config& a, const Config& b);

@@ -96,3 +96,15 @@ TEST_CASE("diff: link.channel change does NOT flag DynamicLink") {
     CHECK(r.radio);
     CHECK_FALSE(r.dynamicLink);
 }
+
+TEST_CASE("diff: link.videoEncryption change flags fullRestart") {
+    fpvd::Config a{};
+    fpvd::Config b{};
+    b.link.videoEncryption = !a.link.videoEncryption;
+    auto c = fpvd::classifyLinkChange(a, b);
+    CHECK(c.fullRestart);
+    // It is a constructor-time wfb arg, not a hot radiotap/FEC change.
+    CHECK_FALSE(c.videoRadiotap);
+    CHECK_FALSE(c.videoFec);
+    CHECK_FALSE(c.nicChannel);
+}
