@@ -175,6 +175,23 @@ TEST_CASE("schema: legacy fec object without swfec keys parses with defaults") {
     CHECK(c.link.fec.mode == "swfec");
 }
 
+TEST_CASE("schema: link.videoEncryption defaults to true and round-trips") {
+    fpvd::Config c{};
+    CHECK(c.link.videoEncryption == true);
+
+    // Missing key in JSON → backfills to the struct default (true).
+    nlohmann::json j = nlohmann::json::parse(R"({"link":{"channel":140}})");
+    fpvd::Config loaded = j.get<fpvd::Config>();
+    CHECK(loaded.link.videoEncryption == true);
+
+    // Explicit false survives a round-trip.
+    nlohmann::json j2 = nlohmann::json::parse(R"({"link":{"videoEncryption":false}})");
+    fpvd::Config loaded2 = j2.get<fpvd::Config>();
+    CHECK(loaded2.link.videoEncryption == false);
+    nlohmann::json out = loaded2;
+    CHECK(out["link"]["videoEncryption"] == false);
+}
+
 TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") {
     using nlohmann::json;
     json j = json::parse(R"({

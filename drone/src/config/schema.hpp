@@ -62,9 +62,11 @@ struct Link {
     int mtu{1500};
     std::optional<std::string> wlanAdapter{};
     Beamforming beamforming{};
+    bool videoEncryption{true}; // false => video wfb_tx/wfb_rx omit -K (plaintext)
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Link, channel, width, txPowerDbm, mcs, fec, stbc,
-                                                ldpc, linkId, mtu, wlanAdapter, beamforming)
+                                                ldpc, linkId, mtu, wlanAdapter, beamforming,
+                                                videoEncryption)
 
 struct Roi {
     bool enabled{true};
