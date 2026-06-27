@@ -386,3 +386,13 @@ def test_connection_monitor_tolerates_unknown_keys():
             "connectionMonitor": {"enabled": True, "futureKnob": 99},
         }
     )  # must not raise
+
+
+def test_config_patch_accepts_video_encryption():
+    schema.validate_config_patch({"link": {"videoEncryption": False}})  # no raise
+
+
+def test_default_config_video_encryption_true():
+    from fpvdgs.config_defaults import default_config
+
+    assert default_config()["link"]["videoEncryption"] is True
