@@ -58,13 +58,24 @@ def _probe(viable_mcs, *, per=0.0, age_ms=0.0):
     return {"running": True, "streams": 1, "mcs": mcs}
 
 
-def _select(s, *, probe=None, loss=0.0, loss_demote=False, fec=0.0, link_starved=False, ts_ms=0.0):
+def _select(
+    s,
+    *,
+    probe=None,
+    loss=0.0,
+    loss_demote=False,
+    fec=0.0,
+    link_starved=False,
+    can_demote=True,
+    ts_ms=0.0,
+):
     return s.select(
         probe=probe if probe is not None else _probe(7),
         loss_rate=loss,
         loss_demote=loss_demote,
         fec_pressure=fec,
         link_starved=link_starved,
+        can_demote=can_demote,
         ts_ms=ts_ms,
     )
 
@@ -254,49 +265,25 @@ def test_strong_rssi_does_not_raise_mcs_without_probe_or_prior(tmp_path):
     )
 
 
-def test_loss_demote_jumps_to_target_in_one_move():
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
-    mcs, changed = s.select(
-        probe=_probe(7),
-        loss_rate=0.3,
-        loss_demote=True,
-        loss_demote_target=2,
-        fec_pressure=0.0,
-        link_starved=False,
-        ts_ms=99999.0,
-    )
-    assert changed and mcs == 2  # 5 -> 2 in one commit, not 5 -> 4
+def test_loss_demote_blocked_when_cooldown_not_elapsed():
+    s = _selector(max_mcs=5, promote_debounce_windows=99)
+    s.state.current_mcs = 5
+    mcs, changed = _select(s, loss=0.06, loss_demote=True, can_demote=False, ts_ms=99999.0)
+    assert mcs == 5 and changed is False
 
 
-def test_loss_demote_target_at_or_above_current_does_not_demote():
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
-    mcs, changed = s.select(
-        probe=_probe(7),
-        loss_rate=0.3,
-        loss_demote=True,
-        loss_demote_target=5,
-        fec_pressure=0.0,
-        link_starved=False,
-        ts_ms=99999.0,
-    )
-    assert not changed and mcs == 5  # SNR says 5 is fine -> fluke loss, no demote
+def test_loss_demote_one_step_when_cooldown_elapsed():
+    s = _selector(max_mcs=5, promote_debounce_windows=99)
+    s.state.current_mcs = 5
+    mcs, changed = _select(s, loss=0.06, loss_demote=True, can_demote=True, ts_ms=99999.0)
+    assert mcs == 4 and changed is True
 
 
-def test_loss_demote_cold_target_falls_back_to_one_step():
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
-    mcs, changed = s.select(
-        probe=_probe(7),
-        loss_rate=0.3,
-        loss_demote=True,
-        loss_demote_target=None,
-        fec_pressure=0.0,
-        link_starved=False,
-        ts_ms=99999.0,
-    )
-    assert changed and mcs == 4  # cold SNR knee -> today's one-step demote
+def test_emergency_blocked_when_cooldown_not_elapsed():
+    s = _selector(emergency_fec_pressure=0.80, max_mcs=5, promote_debounce_windows=99)
+    s.state.current_mcs = 5
+    mcs, changed = _select(s, fec=0.9, can_demote=False, ts_ms=99999.0)
+    assert mcs == 5 and changed is False
 
 
 # ── SNR ceiling as operating ceiling: promote cap ──────────────────────────

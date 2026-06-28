@@ -220,7 +220,9 @@ def test_record_carries_snr_norm_ceiling_knees(tmp_path):
     assert isinstance(rec["snr_knees"], list) and len(rec["snr_knees"]) == 8
 
 
-def test_reactive_demote_jumps_to_snr_ceiling(tmp_path):
+def test_reactive_demote_steps_one_rung_not_to_ceiling(tmp_path):
+    """snr_ceiling is logged but is NOT a demote target; reactive loss demotes
+    exactly one rung regardless of what the SNR ceiling says."""
     from fpvdgs.dynlink.signals import Signals
 
     p = Policy(_cfg(tmp_path, min_samples=3), _profile())
@@ -241,8 +243,8 @@ def test_reactive_demote_jumps_to_snr_ceiling(tmp_path):
             snr=12.0,
         )
 
-    dec = p.tick(sig(1.0))  # single breaching window -> jump to snr_ceiling(12)=1
-    assert dec.mcs == 1  # 5 -> 1 in one move, not 5 -> 4
+    dec = p.tick(sig(1.0))  # single breaching window -> one-step demote
+    assert dec.mcs == 4  # 5 -> 4 (one step), not 5 -> 1 (old jump-to-ceiling)
     p.close()
 
 

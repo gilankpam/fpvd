@@ -148,23 +148,24 @@ class LeadingSelector:
         probe: dict | None,
         loss_rate: float,
         loss_demote: bool = False,
-        loss_demote_target: int | None = None,
         # Advisory only: the probe is authoritative for promotes; the caller
         # (policy.tick) computes + passes promote_blocked for flight-log
         # visibility, but select() no longer gates on it.
         promote_blocked: bool = False,
         fec_pressure: float,
         link_starved: bool,
+        can_demote: bool = True,
         ts_ms: float,
     ) -> tuple[int, bool]:
         """Probe-driven promote + reactive demote.
 
         Returns (mcs, changed).
 
-        Demote is reactive and bypasses the promote rate limit: a
-        Channel-B emergency (loss/fec/starvation) or a video on-air PER
-        breach forces an immediate one-step downgrade. Promote requires
-        the `current+1` probe rung to read clean+fresh for
+        Demote is reactive and one-step, gated by can_demote (owned by
+        Policy's cooldown counter). Loss and Channel-B emergencies
+        (fec/starvation) both step exactly one rung down when can_demote
+        is True; when blocked, HOLD (no promote). Promote requires the
+        `current+1` probe rung to read clean+fresh for
         `promote_debounce_windows` consecutive ticks AND the rate limit
         (`min_between_changes_ms` / `hold_modes_down_ms`) to be clear.
         The debounce counter accumulates across ticks even while the
@@ -184,24 +185,22 @@ class LeadingSelector:
                 self._promote_clean = 0
                 reasons.append(why)
 
-        # --- Demote (reactive, bypasses the promote rate limit) ---
-        # Loss (caller-hysteresis-gated) is the common case and is attributed
-        # first; FEC pressure / sustained starvation are the other emergencies.
-        if loss_demote:
-            # Jump straight to the rung the live SNR supports (one move, no
-            # overshoot). target None (cold SNR knee) -> today's one-step demote.
-            if loss_demote_target is not None:
-                tgt = min(prev, int(loss_demote_target))
-                commit(tgt, f"video_per_demote loss={loss_rate:.3f} -> mcs{tgt}")
-            else:
-                commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
-            self._reasons = reasons
-            return (st.current_mcs, st.current_mcs != prev)
-        if self._emergency_active(fec_pressure, link_starved):
-            commit(
-                prev - 1,
-                f"emergency fec={fec_pressure:.3f} starved={link_starved}",
-            )
+        # --- Demote (reactive, one step, cooldown-gated) ---
+        # Loss and Channel-B emergencies (fec/starvation) both step exactly one
+        # rung down. The cooldown (can_demote, owned by Policy) paces the descent
+        # and rejects stale loss readings during the apply lag. When a demote is
+        # wanted but the cooldown blocks it, HOLD (no promote) — never climb while
+        # loss/emergency is live.
+        emergency = loss_demote or self._emergency_active(fec_pressure, link_starved)
+        if emergency:
+            if can_demote:
+                if loss_demote:
+                    commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
+                else:
+                    commit(
+                        prev - 1,
+                        f"emergency fec={fec_pressure:.3f} starved={link_starved}",
+                    )
             self._reasons = reasons
             return (st.current_mcs, st.current_mcs != prev)
 
@@ -301,10 +300,20 @@ class Policy:
         )
         self._predict_demote_count = 0
         self._snr_demote_count = 0
+        # Shared demote cooldown counter: ticks since the last demote. Init to
+        # the cooldown so the first demote after boot is never blocked. Reset to
+        # 0 on any committed demote (any path); incremented each tick.
+        self._windows_since_demote = cfg.selector.demote_cooldown_windows
         self.flightlog = FlightLog(cfg.flightlog)
 
     def tick(self, signals: Signals) -> Decision:
         ts_ms = signals.timestamp * 1000.0 if signals.timestamp else 0.0
+
+        # Shared demote cooldown: advance the counter, snapshot the rung we
+        # started this tick at, and decide whether any demote may fire.
+        self._windows_since_demote += 1
+        cooldown_ok = self._windows_since_demote >= self.cfg.selector.demote_cooldown_windows
+        start_mcs = self.leading.state.current_mcs
 
         # Starvation hysteresis: per-tick link_starved_w flickers on
         # brief packet-rate dips in bursty video. Require N consecutive
@@ -367,10 +376,8 @@ class Policy:
             else:
                 self._predict_demote_count = 0
 
-        # Selector (Phase 2) is the only decision now: probe-promote +
-        # reactive demote. The drone computes its own bitrate / FEC /
-        # depth / tx_power locally, so we emit {mcs} only.
-        loss_demote_target = self.learned_prior.snr_ceiling(signals.snr)
+        # snr_ceiling kept for the flight log only; no longer a demote target.
+        snr_ceiling = self.learned_prior.snr_ceiling(signals.snr)
 
         # Proactive SNR demote (down-only, debounced): if the SNR prior
         # CONFIDENTLY says the CURRENT rung is unviable at the live SNR, jump
@@ -381,14 +388,14 @@ class Policy:
         # climbed onto is not yanked back before its knee can warm.
         snr_demote_reason = ""
         cur_snr = self.leading.state.current_mcs
-        if loss_demote_target is not None and self.learned_prior.snr_rung_unviable(
+        if snr_ceiling is not None and self.learned_prior.snr_rung_unviable(
             cur_snr, signals.snr, margin=self.cfg.selector.snr_demote_margin_db
         ):
             self._snr_demote_count += 1
             if self._snr_demote_count >= self.cfg.selector.snr_demote_debounce:
-                self.leading.state.current_mcs = loss_demote_target
+                self.leading.state.current_mcs = snr_ceiling
                 self.leading._promote_clean = 0
-                snr_demote_reason = f"snr_demote mcs{cur_snr}->{loss_demote_target}"
+                snr_demote_reason = f"snr_demote mcs{cur_snr}->{snr_ceiling}"
         else:
             self._snr_demote_count = 0
 
@@ -405,12 +412,15 @@ class Policy:
             probe=probe_snap,
             loss_rate=signals.residual_loss_w,
             loss_demote=sustained_loss,
-            loss_demote_target=loss_demote_target,
             promote_blocked=promote_blocked,
             fec_pressure=signals.fec_work,
             link_starved=sustained_starved,
+            can_demote=cooldown_ok and self.leading.state.current_mcs == start_mcs,
             ts_ms=ts_ms,
         )
+
+        if new_mcs < start_mcs:
+            self._windows_since_demote = 0
 
         # Learning gate: feed the knee prior ONLY operating-rung outcomes, and
         # only once the rung has been settled for settle_ticks (rejects fast-fade
@@ -450,7 +460,7 @@ class Policy:
                 "rssi_raw": signals.rssi_raw,
                 "snr": signals.snr_w,
                 "snr_norm": signals.snr,
-                "snr_ceiling": loss_demote_target,
+                "snr_ceiling": snr_ceiling,
                 "promote_blocked": promote_blocked,
                 "snr_knees": self.learned_prior.snr_knees_snapshot(),
                 "evm": signals.evm_w,
