@@ -54,6 +54,7 @@ def _fast_cfg(**over):
         http_timeout_s=0.5,
         http_fail_count=2,
         eval_interval_s=0.02,
+        disconnect_grace_s=0.1,
     )
     base.update(over)
     return ConnectionMonitorConfig(**base)
@@ -204,3 +205,77 @@ def test_enter_connected_without_radio_block_omits_it():
 
     m._enter_connected({"version": "vOld"}, now=1.0)
     assert "radio" not in seen[0]["drone"]
+
+
+def test_transient_http_blip_within_grace_does_not_flap():
+    # Bench bug: a brief healthz failure that recovers within disconnect_grace_s
+    # must not cross a session boundary -> no DISCONNECTED, no second CONNECTED.
+    control = {"emit": True}
+    bus = EventBus()
+    connects, disconnects = [], []
+    bus.subscribe(DRONE_CONNECTED, connects.append)
+    bus.subscribe(DRONE_DISCONNECTED, disconnects.append)
+    drone = _FakeDrone()
+    m = ConnectionMonitor(
+        bus,
+        drone,
+        _fast_cfg(disconnect_grace_s=1.0),  # long grace vs. a short blip
+        stats_client_factory=_stats_factory(control),
+    )
+    m.start()
+    try:
+        assert _wait(lambda: m.status()["state"] == "connected")
+        assert len(connects) == 1
+        drone.healthz_ok = False  # brief outage, well under the 1.0s grace
+        assert _wait(lambda: m.status()["suspectMs"] is not None)
+        drone.healthz_ok = True  # recover within grace
+        assert _wait(lambda: m.status()["suspectMs"] is None)
+        assert disconnects == []  # never published
+        assert len(connects) == 1  # never re-armed/re-rolled
+    finally:
+        m.stop()
+
+
+def test_sustained_outage_beyond_grace_disconnects_once():
+    control = {"emit": True}
+    bus = EventBus()
+    disconnects = []
+    bus.subscribe(DRONE_DISCONNECTED, disconnects.append)
+    drone = _FakeDrone()
+    m = ConnectionMonitor(bus, drone, _fast_cfg(), stats_client_factory=_stats_factory(control))
+    m.start()
+    try:
+        assert _wait(lambda: m.status()["state"] == "connected")
+        drone.status_ok = False
+        drone.healthz_ok = False  # sustained: genuine loss on all HTTP paths
+        assert _wait(lambda: bool(disconnects)), "expected DRONE_DISCONNECTED"
+        assert disconnects[0]["reason"] == "http_failed"
+        assert m.status()["state"] == "disconnected"
+        assert m.status()["suspectMs"] is None
+        time.sleep(0.15)  # settle: monitor may re-arm but cannot re-connect (status fails)
+        assert len(disconnects) == 1  # only one DRONE_DISCONNECTED ever published
+    finally:
+        m.stop()
+
+
+def test_status_state_stays_connected_across_a_blip():
+    control = {"emit": True}
+    bus = EventBus()
+    drone = _FakeDrone()
+    m = ConnectionMonitor(
+        bus,
+        drone,
+        _fast_cfg(disconnect_grace_s=1.0),
+        stats_client_factory=_stats_factory(control),
+    )
+    m.start()
+    try:
+        assert _wait(lambda: m.status()["state"] == "connected")
+        drone.healthz_ok = False
+        assert _wait(lambda: m.status()["suspectMs"] is not None)
+        assert m.status()["state"] == "connected"  # not surfaced as a flap
+        drone.healthz_ok = True
+        assert _wait(lambda: m.status()["suspectMs"] is None)
+        assert m.status()["state"] == "connected"
+    finally:
+        m.stop()

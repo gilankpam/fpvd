@@ -57,6 +57,7 @@ def _connection_monitor_defaults() -> dict:
         "httpTimeoutS": cm.http_timeout_s,
         "httpFailCount": cm.http_fail_count,
         "evalIntervalS": cm.eval_interval_s,
+        "disconnectGraceS": cm.disconnect_grace_s,
     }
 
 

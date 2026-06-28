@@ -261,7 +261,7 @@ def _validate_connection_monitor(cm: dict) -> None:
         raise SchemaError("connectionMonitor must be an object")
     if not isinstance(cm.get("enabled", True), bool):
         raise SchemaError("connectionMonitor.enabled must be a bool")
-    for k in ("tunnelStaleS", "httpPollS", "httpTimeoutS", "evalIntervalS"):
+    for k in ("tunnelStaleS", "httpPollS", "httpTimeoutS", "evalIntervalS", "disconnectGraceS"):
         v = cm.get(k)
         if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0):
             raise SchemaError(f"connectionMonitor.{k} must be a positive number")

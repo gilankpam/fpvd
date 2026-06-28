@@ -396,3 +396,12 @@ def test_default_config_video_encryption_true():
     from fpvdgs.config_defaults import default_config
 
     assert default_config()["link"]["videoEncryption"] is True
+
+
+def test_connection_monitor_rejects_bad_grace():
+    from fpvdgs.config_defaults import default_config
+
+    cfg = default_config()
+    cfg["connectionMonitor"]["disconnectGraceS"] = 0  # must be a positive number
+    with pytest.raises(SchemaError):
+        validate_effective(cfg)
