@@ -372,6 +372,63 @@ def test_bind_learned_prior_keys_by_adapter_and_width(tmp_path):
     p.close()
 
 
+def test_no_two_demote_paths_stack_in_same_tick(tmp_path):
+    """Both snr_demote and reactive loss are active in the SAME tick; the
+    current_mcs == start_mcs guard inside snr_demote and select() prevents
+    them from stacking — exactly one rung is stepped, not two.
+
+    Setup: snr_demote reaches its debounce count on tick 2 (fires, 5→4).
+    Simultaneously, residual_loss_w (0.10) exceeds video_demote_per (0.05),
+    so reactive loss also wants to fire in the same tick.  Without the guard,
+    select() would step 4→3 for a net drop of 2; with the guard,
+    self.leading.state.current_mcs is already 4 != start_mcs (5), so
+    can_demote=False and loss is suppressed.  The decision reason names
+    snr_demote (not loss) as the sole cause.
+    """
+    prof = _profile()
+    p = Policy(_cfg(tmp_path, min_samples=3), prof)
+
+    # Plant a confident SNR knee for rung 5: snr_rung_unviable(5, 33.0, margin=1.5)
+    # is True because 33 dB < knee(36) - margin(1.5) = 34.5 dB.
+    p.learned_prior._snr_model._knee[5] = 36.0
+    p.learned_prior._snr_model._count[5] = 12.0
+    p.leading.state.current_mcs = 5
+
+    # Tick 1: SNR unviable → snr_demote_count reaches 1 (< debounce 2); no loss.
+    p.tick(
+        Signals(
+            rssi=None,
+            snr=33.0,
+            residual_loss_w=0.0,
+            fec_work=0.0,
+            link_starved_w=False,
+            timestamp=1.0,
+        )
+    )
+    assert p.leading.state.current_mcs == 5  # no demote yet
+
+    # Tick 2: both demote paths active simultaneously.
+    #   snr_demote: _snr_demote_count reaches 2 == snr_demote_debounce → fires (5→4),
+    #               setting current_mcs=4 BEFORE select() is called.
+    #   reactive loss: residual_loss_w=0.10 >= video_demote_per=0.05 → loss_demote=True.
+    #   Guard: select() receives can_demote = cooldown_ok AND (current_mcs==start_mcs)
+    #          = True AND (4==5) = False → reactive loss is blocked.
+    # Without the guard the net drop would be 2 (5→4→3); with it, exactly 1 (5→4).
+    dec = p.tick(
+        Signals(
+            rssi=None,
+            snr=33.0,
+            residual_loss_w=0.10,
+            fec_work=0.0,
+            link_starved_w=False,
+            timestamp=2.0,
+        )
+    )
+    assert dec.mcs == 4, f"expected one step (5→4), got {dec.mcs}"
+    assert "snr_demote" in dec.reason  # confirms snr_demote fired; no loss reason appended
+    p.close()
+
+
 def test_snr_ceiling_still_logged_though_not_a_demote_target(tmp_path):
     import json
 

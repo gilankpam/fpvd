@@ -113,10 +113,11 @@ class LeadingSelector:
     consecutive ticks. The climb naturally stops at the ceiling — a
     cliffed `current+1` rung (per≈1.0, or absent) never debounces.
 
-    Demote (fast/reactive): a caller-hysteresis-gated loss breach
-    (`loss_demote`, i.e. `residual_loss_w >= video_demote_per`) or a
-    Channel-B emergency (fec_pressure or link_starved) forces an immediate
-    one-step downgrade, bypassing the promote rate limit and hold timers.
+    Demote (reactive, one-step, cooldown-gated): a caller-hysteresis-gated
+    loss breach (`loss_demote`, i.e. `residual_loss_w >= video_demote_per`) or
+    a Channel-B emergency (fec_pressure or link_starved) steps exactly one rung
+    down, gated by `can_demote` (the shared Policy cooldown counter), bypassing
+    the promote rate limit and hold timers.
     """
 
     def __init__(self, cfg: SelectorConfig):
@@ -364,6 +365,7 @@ class Policy:
                         >= self.cfg.learned_prior.predictive_debounce_windows
                         and cooldown_ok
                     ):
+                        # First demote path in the tick: snr_demote and select() self-guard on current_mcs==start_mcs; predict_demote does not.
                         tgt = max(cur - 1, 0)
                         if tgt < cur:
                             self.leading.state.current_mcs = tgt
