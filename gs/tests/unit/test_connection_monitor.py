@@ -246,11 +246,14 @@ def test_sustained_outage_beyond_grace_disconnects_once():
     m.start()
     try:
         assert _wait(lambda: m.status()["state"] == "connected")
-        drone.healthz_ok = False  # sustained: never recovers
+        drone.status_ok = False
+        drone.healthz_ok = False  # sustained: genuine loss on all HTTP paths
         assert _wait(lambda: bool(disconnects)), "expected DRONE_DISCONNECTED"
         assert disconnects[0]["reason"] == "http_failed"
         assert m.status()["state"] == "disconnected"
         assert m.status()["suspectMs"] is None
+        time.sleep(0.15)  # settle: monitor may re-arm but cannot re-connect (status fails)
+        assert len(disconnects) == 1  # only one DRONE_DISCONNECTED ever published
     finally:
         m.stop()
 

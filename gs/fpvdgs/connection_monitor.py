@@ -223,7 +223,7 @@ class ConnectionMonitor:
                 return
             bad_since, pending = self._bad_since, self._pending_reason
         if (now - bad_since) >= self._cfg.disconnect_grace_s:
-            self._enter_disconnected(pending or reason, now)
+            self._enter_disconnected(pending, now)
 
     async def _call(self, fn):
         loop = asyncio.get_running_loop()
