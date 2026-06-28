@@ -33,9 +33,11 @@ class ConnectionMonitorConfig:
     enabled: bool = True
     tunnel_stale_s: float = 4.0
     http_poll_s: float = 1.5
-    http_timeout_s: float = 1.5  # consumed by build_app: the monitor's DroneClient timeout
+    http_timeout_s: float = 3.0  # consumed by build_app: the monitor's DroneClient timeout
     http_fail_count: int = 2
     eval_interval_s: float = 0.5
+    disconnect_grace_s: float = 6.0  # confirm-before-publish: a trip must persist
+    #                                  this long before DRONE_DISCONNECTED fires
 
 
 class ConnectionMonitor:
@@ -69,6 +71,8 @@ class ConnectionMonitor:
         self._last_tunnel_rx = -1.0e9  # monotonic; far past => stale at boot
         self._fail = 0
         self._last_http = -1.0e9
+        self._bad_since = None  # monotonic ts of the current "bad" run, or None
+        self._pending_reason = ""  # reason captured when the bad run began
 
     # ---- public thread-safe API ----
     def start(self):
@@ -104,11 +108,15 @@ class ConnectionMonitor:
             since_ms = None
             if self._state == "connected":
                 since_ms = int((self._time() - self._since) * 1000)
+            suspect_ms = None
+            if self._bad_since is not None:
+                suspect_ms = int((self._time() - self._bad_since) * 1000)
             return {
                 "enabled": bool(self._cfg.enabled),
                 "state": self._state,
                 "reason": self._reason,
                 "sinceMs": since_ms,
+                "suspectMs": suspect_ms,
                 "drone": dict(self._drone_info) if self._drone_info else None,
             }
 
@@ -196,8 +204,26 @@ class ConnectionMonitor:
             ok = await self._call_bool(self._drone.healthz)
             self._fail = 0 if ok else self._fail + 1
         fresh = self._tunnel_fresh()  # re-read: the heartbeat await took time
-        if not fresh or self._fail >= self._cfg.http_fail_count:
-            self._enter_disconnected("tunnel_lost" if not fresh else "http_failed", self._time())
+        bad = (not fresh) or (self._fail >= self._cfg.http_fail_count)
+        now = self._time()
+        if not bad:
+            # Healthy: a recovered transient leaves no published trace.
+            with self._lock:
+                self._bad_since = None
+                self._pending_reason = ""
+            return
+        # Bad: confirm over disconnect_grace_s before publishing, so a single
+        # slow/dropped poll or brief tunnel gap can't cross a session boundary.
+        reason = "tunnel_lost" if not fresh else "http_failed"
+        with self._lock:
+            if self._bad_since is None:
+                self._bad_since = now
+                self._pending_reason = reason
+                log.info("drone suspect: reason=%s (confirming)", reason)
+                return
+            bad_since, pending = self._bad_since, self._pending_reason
+        if (now - bad_since) >= self._cfg.disconnect_grace_s:
+            self._enter_disconnected(pending or reason, now)
 
     async def _call(self, fn):
         loop = asyncio.get_running_loop()
@@ -233,6 +259,8 @@ class ConnectionMonitor:
             self._drone_info = info
             self._fail = 0
             self._last_http = now
+            self._bad_since = None
+            self._pending_reason = ""
         log.info("drone connected: %s", info)
         self._bus.publish(DRONE_CONNECTED, {"state": "connected", "at_mono": now, "drone": info})
 
@@ -243,6 +271,8 @@ class ConnectionMonitor:
             self._reason = reason
             self._drone_info = None
             self._fail = 0
+            self._bad_since = None
+            self._pending_reason = ""
         log.info("drone disconnected: reason=%s", reason)
         self._bus.publish(
             DRONE_DISCONNECTED,
