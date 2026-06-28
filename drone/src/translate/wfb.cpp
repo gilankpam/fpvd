@@ -5,15 +5,15 @@ namespace fpvd {
 
 static std::vector<std::string> commonTx(const Config& c, int mcs, const std::string& /*iface*/,
                                          const std::string& key) {
-    std::vector<std::string> a = {
-        "/usr/bin/wfb_tx",
-        "-K",
-        key,
-        "-M",
-        std::to_string(mcs),
-        "-B",
-        std::to_string(modulationWidth(c.link.width)),
-    };
+    std::vector<std::string> a = {"/usr/bin/wfb_tx"};
+    if (c.link.videoEncryption) {
+        a.push_back("-K");
+        a.push_back(key);
+    }
+    a.push_back("-M");
+    a.push_back(std::to_string(mcs));
+    a.push_back("-B");
+    a.push_back(std::to_string(modulationWidth(c.link.width)));
     if (c.link.fec.mode == "swfec") {
         // swfec repurposes -k/-n: overhead_pct / deadline_ms (see spec).
         a.push_back("-z");

@@ -55,6 +55,21 @@ Then:
 | GET | /status | Daemon + process state |
 | GET | /healthz | 200 OK |
 
+## Video stream encryption
+
+`link.videoEncryption` (bool, default `true`) controls on-air encryption of
+the **video** stream only. Set it `false` to run video unencrypted (the wfb
+video TX/RX drop `-K`), reclaiming the per-fragment AEAD CPU on weak SoCs;
+mavlink, tunnel, and the probe stay encrypted. It is restart-class (toggling
+respawns the wfb plane) and is **not** dynamic-link-locked.
+
+The knob lives in each daemon's `link` block and **must match on both ends**
+(like `link.channel`/`link.width`): set it on the drone (`PATCH /config` →
+`POST /apply`) and the GS (`PATCH /gs/config`, which re-renders the cfg and
+bounces the runner). A mismatch kills only video — symptom is the dead-link
+signature in the `:8103` stats (`bad` climbing, `data` zero), identical to a
+key mismatch. Revert by setting `true` on both ends.
+
 ## Adaptive link (in-process controller)
 
 Set `dynamicLink.enabled = true` to run the adaptive-link control loop

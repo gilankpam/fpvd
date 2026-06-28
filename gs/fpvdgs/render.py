@@ -42,6 +42,9 @@ def render_cfg(effective: dict) -> str:
     lines.append("")
     lines.append("[gs_video]")
     lines.append(f"bandwidth = {_lit(width)}")
+    if not link.get("videoEncryption", True):
+        # plaintext video: override the gs.key inherited from the gs_base profile.
+        lines.append(f"keypair = {_lit(None)}")
 
     lines.append("")
     lines.append("[gs_mavlink]")

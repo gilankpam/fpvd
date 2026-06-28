@@ -1,6 +1,15 @@
 """Validation rules. `link` is a normal mutable block in /config."""
 
-LINK_KEYS = {"channel", "width", "txPowerDbm", "region", "linkId", "beamforming", "wlans"}
+LINK_KEYS = {
+    "channel",
+    "width",
+    "txPowerDbm",
+    "region",
+    "linkId",
+    "beamforming",
+    "wlans",
+    "videoEncryption",
+}
 CONFIG_TOP_KEYS = {
     "link",
     "wfb",

@@ -9,7 +9,7 @@ TEST_CASE("schema: round-trip a minimal config through json") {
     json j = json::parse(R"({
         "link":{"channel":161,"width":20,"txPowerDbm":20,"mcs":2,
                 "fec":{"mode":"rs","k":8,"n":12,"overheadPct":50,"deadlineMs":30},"stbc":false,"ldpc":false,
-                "linkId":7669206,"mtu":1500,"wlanAdapter":null,
+                "linkId":7669206,"mtu":1500,"wlanAdapter":null,"videoEncryption":true,
                 "beamforming":{"enabled":false,"remoteMac":"","ackTimeout":255,"intervalMs":100}},
         "video":{"codec":"h265","resolution":"1920x1080","fps":60,
                  "bitrate":8192,"rcMode":"cbr","gopSize":1.0,"resilience":"off","qpDelta":-4,
@@ -173,6 +173,23 @@ TEST_CASE("schema: legacy fec object without swfec keys parses with defaults") {
     CHECK(c.link.fec.k == 3);
     CHECK(c.link.fec.n == 5);
     CHECK(c.link.fec.mode == "swfec");
+}
+
+TEST_CASE("schema: link.videoEncryption defaults to true and round-trips") {
+    fpvd::Config c{};
+    CHECK(c.link.videoEncryption == true);
+
+    // Missing key in JSON → backfills to the struct default (true).
+    nlohmann::json j = nlohmann::json::parse(R"({"link":{"channel":140}})");
+    fpvd::Config loaded = j.get<fpvd::Config>();
+    CHECK(loaded.link.videoEncryption == true);
+
+    // Explicit false survives a round-trip.
+    nlohmann::json j2 = nlohmann::json::parse(R"({"link":{"videoEncryption":false}})");
+    fpvd::Config loaded2 = j2.get<fpvd::Config>();
+    CHECK(loaded2.link.videoEncryption == false);
+    nlohmann::json out = loaded2;
+    CHECK(out["link"]["videoEncryption"] == false);
 }
 
 TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") {
