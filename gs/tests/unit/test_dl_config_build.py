@@ -25,6 +25,7 @@ def test_selector_block_overrides_defaults():
                 "holdModesDownMs": 1000,
                 "minBetweenChangesMs": 100,
                 "starvationWindows": 9,
+                "demoteCooldownWindows": 5,
             }
         )
     )
@@ -34,6 +35,7 @@ def test_selector_block_overrides_defaults():
     assert s.hold_modes_down_ms == 1000
     assert s.min_between_changes_ms == 100
     assert s.starvation_windows == 9
+    assert s.demote_cooldown_windows == 5
     # unspecified selector knobs keep their defaults
     assert s.video_demote_per == 0.05
 
@@ -45,6 +47,7 @@ def test_selector_defaults_when_absent():
     assert s.probe_freshness_ms == 500.0
     assert s.hold_modes_down_ms == 2000
     assert s.starvation_windows == 5
+    assert s.demote_cooldown_windows == 3
     # SNR-knee hysteresis dead-band defaults (demote > promote)
     assert s.snr_promote_margin_db == 1.0
     assert s.snr_demote_margin_db == 1.5

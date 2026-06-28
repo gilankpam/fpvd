@@ -32,6 +32,7 @@ def build_policy_config(block: dict) -> PolicyConfig:
         starvation_windows=int(sel.get("starvationWindows", d.starvation_windows)),
         snr_promote_margin_db=float(sel.get("snrPromoteMarginDb", d.snr_promote_margin_db)),
         snr_demote_margin_db=float(sel.get("snrDemoteMarginDb", d.snr_demote_margin_db)),
+        demote_cooldown_windows=int(sel.get("demoteCooldownWindows", d.demote_cooldown_windows)),
     )
     fl = block.get("flightlog", {}) or {}
     # flightlog internals are frozen — read only `enabled`.

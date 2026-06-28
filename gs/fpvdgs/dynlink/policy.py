@@ -57,6 +57,12 @@ class SelectorConfig:
     # Total-blackout failsafe: consecutive starved windows before link_starved
     # feeds the emergency demote (10 Hz → 5 windows = 0.5 s).
     starvation_windows: int = 5
+    # Shared demote cooldown: minimum windows between consecutive demotes
+    # (any path). After a demote, the next N windows are frozen so the
+    # lower rung's true loss reading returns over the GS->drone->GS
+    # application lag before deciding to step down again. Enforces <= 1
+    # demote per N windows across reactive/predict/snr/emergency.
+    demote_cooldown_windows: int = 3
     # Proactive SNR demote: consecutive ticks snr_ceiling must stay below the
     # current rung before demoting to it (debounce; snr is already EWMA'd).
     snr_demote_debounce: int = 2
