@@ -382,13 +382,15 @@ class Policy:
         # snr_ceiling kept for the flight log only; no longer a demote target.
         snr_ceiling = self.learned_prior.snr_ceiling(signals.snr)
 
-        # Proactive SNR demote (down-only, debounced): if the SNR prior
-        # CONFIDENTLY says the CURRENT rung is unviable at the live SNR, jump
-        # straight down to the highest rung it still supports, ahead of the loss
-        # — catching the interference the RSSI slope-gate can't see. Gated on the
-        # current rung being confidently unviable (NOT merely "below the highest
-        # confident-viable rung"), so a not-yet-learned rung the probe just
-        # climbed onto is not yanked back before its knee can warm.
+        # Proactive SNR demote (down-only, debounced, cooldown-gated): if the SNR
+        # prior CONFIDENTLY says the CURRENT rung is unviable at the live SNR,
+        # step one rung down (cur - 1) ahead of the reactive loss path —
+        # catching the interference the RSSI slope-gate can't see. Each demote
+        # steps exactly one rung; the shared cooldown (cooldown_ok) paces
+        # consecutive demotes across all paths. Gated on the current rung being
+        # confidently unviable (NOT merely "below the highest confident-viable
+        # rung"), so a not-yet-learned rung the probe just climbed onto is not
+        # yanked back before its knee can warm.
         snr_demote_reason = ""
         cur_snr = self.leading.state.current_mcs
         if self.learned_prior.snr_rung_unviable(
@@ -534,6 +536,7 @@ class Policy:
         self._last_ingest_mcs = None
         self._predict_demote_count = 0
         self._snr_demote_count = 0
+        self._windows_since_demote = self.cfg.selector.demote_cooldown_windows
         self._rssi_window.clear()
 
     def close(self) -> None:

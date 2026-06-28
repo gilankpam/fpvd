@@ -186,6 +186,7 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
     p._starvation_count = 4
     p._snr_demote_count = 2
     p._predict_demote_count = 5
+    p._windows_since_demote = 0
     p._ticks_at_mcs = 7
     p.leading._promote_clean = 3
 
@@ -199,6 +200,7 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
     assert p._ticks_at_mcs == 0
     assert p.leading._promote_clean == 0
     assert p.learned_prior is prior_before  # persistent knees preserved
+    assert p._windows_since_demote == p.cfg.selector.demote_cooldown_windows
 
 
 # ── SNR-knee promote/demote hysteresis (the MCS-stuck-at-4 field bug) ─────────
@@ -368,3 +370,25 @@ def test_bind_learned_prior_keys_by_adapter_and_width(tmp_path):
     p.bind_learned_prior("ABC123", 20)
     assert p.learned_prior is same
     p.close()
+
+
+def test_snr_ceiling_still_logged_though_not_a_demote_target(tmp_path):
+    import json
+
+    from fpvdgs.dynlink.flightlog import FlightLogConfig
+    from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
+    from fpvdgs.dynlink.policy import PolicyConfig
+
+    cfg = PolicyConfig(
+        learned_prior=LearnedPriorConfig(persist_dir=str(tmp_path / "lp")),
+        flightlog=FlightLogConfig(dir=str(tmp_path / "fl")),
+    )
+    p = Policy(cfg, _profile())
+    p.learned_prior._snr_model._knee[0] = 20.0
+    p.learned_prior._snr_model._count[0] = 12.0
+    p.tick(_sig_snr(33.0, 1.0))
+    p.close()
+    files = sorted((tmp_path / "fl").glob("*.jsonl"))
+    with open(files[-1]) as f:
+        last = [json.loads(line) for line in f if line.strip()][-1]
+    assert "snr_ceiling" in last and last["snr_ceiling"] == 0
