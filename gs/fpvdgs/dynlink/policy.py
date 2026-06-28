@@ -391,14 +391,20 @@ class Policy:
         # climbed onto is not yanked back before its knee can warm.
         snr_demote_reason = ""
         cur_snr = self.leading.state.current_mcs
-        if snr_ceiling is not None and self.learned_prior.snr_rung_unviable(
+        if self.learned_prior.snr_rung_unviable(
             cur_snr, signals.snr, margin=self.cfg.selector.snr_demote_margin_db
         ):
             self._snr_demote_count += 1
-            if self._snr_demote_count >= self.cfg.selector.snr_demote_debounce:
-                self.leading.state.current_mcs = snr_ceiling
-                self.leading._promote_clean = 0
-                snr_demote_reason = f"snr_demote mcs{cur_snr}->{snr_ceiling}"
+            if (
+                self._snr_demote_count >= self.cfg.selector.snr_demote_debounce
+                and cooldown_ok
+                and self.leading.state.current_mcs == start_mcs
+            ):
+                tgt = max(cur_snr - 1, 0)
+                if tgt < cur_snr:
+                    self.leading.state.current_mcs = tgt
+                    self.leading._promote_clean = 0
+                    snr_demote_reason = f"snr_demote mcs{cur_snr}->{tgt}"
         else:
             self._snr_demote_count = 0
 

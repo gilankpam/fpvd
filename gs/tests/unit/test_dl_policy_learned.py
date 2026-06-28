@@ -322,6 +322,26 @@ def test_predictive_demote_paced_by_cooldown(tmp_path):
     assert seq[4] == 3  # steps again after cooldown clears
 
 
+def test_snr_demote_steps_one_rung_and_is_paced(tmp_path):
+    prof = _profile()
+    p = Policy(_cfg(tmp_path, min_samples=3), prof, probe_status=lambda: _probe_snapshot(5))
+    p.learned_prior._snr_model._knee[5] = 36.0
+    p.learned_prior._snr_model._count[5] = 12.0
+    p.learned_prior._snr_model._knee[4] = 34.0
+    p.learned_prior._snr_model._count[4] = 12.0
+    p.leading.state.current_mcs = 5
+    p.cfg.selector.demote_cooldown_windows = 3
+    seq = []
+    ts = 1.0
+    for _ in range(9):
+        seq.append(p.tick(_sig_snr(33.0, ts)).mcs)  # 3 dB below knee[5] -> unviable
+        ts += 1.0
+    p.close()
+    # snr_demote_debounce=2 -> first step at the 2nd unviable tick, then paced by cooldown.
+    assert seq[1] == 4  # one rung, not a jump to snr_ceiling
+    assert 4 in seq and min(seq) >= 2  # gradual, never slammed to 0
+
+
 def test_bind_learned_prior_keys_by_adapter_and_width(tmp_path):
     from fpvdgs.dynlink.flightlog import FlightLogConfig
     from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
