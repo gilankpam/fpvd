@@ -138,6 +138,7 @@ def build_app(
         http_timeout_s=float(cm_cfg.get("httpTimeoutS", dcm.http_timeout_s)),
         http_fail_count=int(cm_cfg.get("httpFailCount", dcm.http_fail_count)),
         eval_interval_s=float(cm_cfg.get("evalIntervalS", dcm.eval_interval_s)),
+        disconnect_grace_s=float(cm_cfg.get("disconnectGraceS", dcm.disconnect_grace_s)),
     )
     mon_drone = DroneClient(
         f"http://{drone_host}:{int(drone_cfg.get('apiPort', 8080))}", timeout=mon_cfg.http_timeout_s
