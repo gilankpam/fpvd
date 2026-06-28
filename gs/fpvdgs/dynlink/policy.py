@@ -362,10 +362,13 @@ class Policy:
                     if (
                         self._predict_demote_count
                         >= self.cfg.learned_prior.predictive_debounce_windows
+                        and cooldown_ok
                     ):
-                        self.leading.state.current_mcs = max(pc, 0)
-                        self.leading._promote_clean = 0
-                        predict_reason = f"predict_demote mcs{cur}->{pc}"
+                        tgt = max(cur - 1, 0)
+                        if tgt < cur:
+                            self.leading.state.current_mcs = tgt
+                            self.leading._promote_clean = 0
+                            predict_reason = f"predict_demote mcs{cur}->{tgt}"
                 else:
                     # pc says demote but RSSI isn't falling fast enough to matter
                     # (flat/rising = a static prior-vs-probe disagreement, or a

@@ -63,8 +63,8 @@ def test_predictive_demote_on_confident_fade(tmp_path):
     p.learned_prior._model._count[5] = 12.0
     p.leading.state.current_mcs = 5
     p.tick(_sig(-50.0, ts=1.0))  # slope 0 -> no demote yet
-    dec = p.tick(_sig(-56.0, ts=1.1))  # slope -6, projected -56-18=-74 -> ceiling 1
-    assert dec.mcs == 1
+    dec = p.tick(_sig(-56.0, ts=1.1))  # slope -6 -> predict-demote steps ONE rung 5->4
+    assert dec.mcs == 4
     p.close()
 
 
@@ -297,6 +297,29 @@ def test_bind_learned_prior_rekeys(tmp_path):
     same = p.learned_prior
     p.bind_learned_prior("bl-m8812eu2", 20)
     assert p.learned_prior is same
+
+
+def test_predictive_demote_paced_by_cooldown(tmp_path):
+    prof = _profile()
+    p = Policy(
+        _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=1),
+        prof,
+    )
+    p.learned_prior._model._knee[1] = -80.0
+    p.learned_prior._model._count[1] = 12.0
+    p.leading.state.current_mcs = 5
+    p.cfg.selector.demote_cooldown_windows = 3
+    p.tick(_sig(-50.0, ts=1.0))  # establish slope baseline
+    seq = []
+    ts = 1.1
+    for _ in range(9):  # sustained fade
+        seq.append(p.tick(_sig(-56.0 - (ts * 5), ts=ts)).mcs)
+        ts += 0.1
+    p.close()
+    assert seq[0] == 5  # pc=None (projected RSSI below knee): no demote yet
+    assert seq[1] == 4  # one step on the first confident fade tick (3-pt slope gentler)
+    assert seq[2] == 4 and seq[3] == 4  # frozen during cooldown (windows 1+2 of 3)
+    assert seq[4] == 3  # steps again after cooldown clears
 
 
 def test_bind_learned_prior_keys_by_adapter_and_width(tmp_path):
