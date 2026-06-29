@@ -350,7 +350,7 @@ def test_bind_learned_prior_keys_by_adapter_and_width(tmp_path):
 
     p.bind_learned_prior("ABC123", 10)
     assert p.learned_prior.key == "ABC123__bw10"
-    p.learned_prior.ingest(operating_mcs=4, operating_clean=True, settled=True)
+    p.learned_prior.ingest(snr=22.0, operating_mcs=4, operating_clean=True, settled=True)
     p.learned_prior.flush()
     assert (tmp_path / "ABC123__bw10.json").exists()
 
