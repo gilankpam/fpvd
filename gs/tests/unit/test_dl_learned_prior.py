@@ -280,3 +280,19 @@ def test_real_key_prior_still_flushes(tmp_path):
     _settle(p, 4, -60.0, True)
     p.flush()
     assert os.path.exists(os.path.join(str(tmp_path), "bl-m8812eu2.json"))
+
+
+def test_snr_predictive_rung_unviable(tmp_path):
+    p = _prior(tmp_path, min_samples=3, predictive_horizon_ticks=3)
+    # Cold rung -> explorable, even on a steep projected fade.
+    assert p.snr_predictive_rung_unviable(30.0, -2.0, 5, margin=1.5) is False
+    # Plant a confident knee on rung 5.
+    p._snr_model._knee[5] = 28.0
+    p._snr_model._count[5] = 12.0
+    # projected = 30 + (-2)*3 = 24 < 28 - 1.5  -> unviable
+    assert p.snr_predictive_rung_unviable(30.0, -2.0, 5, margin=1.5) is True
+    # Flat slope: projected = 30, not below 28 - 1.5 -> viable
+    assert p.snr_predictive_rung_unviable(30.0, 0.0, 5, margin=1.5) is False
+    # None guards
+    assert p.snr_predictive_rung_unviable(None, -2.0, 5) is False
+    assert p.snr_predictive_rung_unviable(30.0, -2.0, None) is False

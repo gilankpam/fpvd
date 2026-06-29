@@ -55,6 +55,7 @@ class LearnedPriorConfig:
     predictive_slope_window_ticks: int = 10
     predictive_min_drop_db: float = 1.0
     predictive_debounce_windows: int = 3
+    predictive_demote_margin_db: float = 1.5  # hysteresis on the cur-rung SNR knee
     flush_interval_observations: int = 50
     persist_dir: str = "/etc/fpvd/learned"
 
@@ -218,6 +219,20 @@ class LearnedPrior:
         if target is None or snr is None:
             return False
         return self._snr_model.rung_unviable(int(target), float(snr), margin)
+
+    def snr_predictive_rung_unviable(
+        self, snr, slope_db_per_tick, rung, margin: float = 0.0
+    ) -> bool:
+        """True iff the SNR prior CONFIDENTLY says `rung` is unviable at the
+        PROJECTED SNR (snr + slope*horizon), with `margin` dB of hysteresis. A
+        cold/unlearned rung -> False (explorable), mirroring snr_rung_unviable
+        and the promote-veto. The predictive sibling of snr_rung_unviable:
+        gating predict_demote on the CURRENT rung's own knee keeps cold rungs
+        explorable, so a clean ladder no longer collapses to MCS0 on a fade."""
+        if snr is None or rung is None:
+            return False
+        projected = snr + slope_db_per_tick * self.cfg.predictive_horizon_ticks
+        return self._snr_model.rung_unviable(int(rung), projected, margin)
 
     def snr_knees_snapshot(self) -> list:
         return self._snr_model.knees_snapshot()
