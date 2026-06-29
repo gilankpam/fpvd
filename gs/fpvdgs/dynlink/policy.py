@@ -296,7 +296,7 @@ class Policy:
         # Learned per-card prior (always-on), keyed by the drone-reported
         # adapter id (radio.adapterId); GS-local, the live probe stays authoritative.
         self.learned_prior = LearnedPrior(profile_name, cfg.learned_prior)
-        self._rssi_window: deque[float] = deque(
+        self._snr_window: deque[float] = deque(
             maxlen=cfg.learned_prior.predictive_slope_window_ticks
         )
         self._predict_demote_count = 0
@@ -330,34 +330,40 @@ class Policy:
         # (nothing to cascade), so react on the first breaching window.
         sustained_loss = signals.residual_loss_w >= self.cfg.selector.video_demote_per
 
-        # Warm-start seed (one-shot). Uses the learned per-card curve ONLY —
-        # there is no RSSI hand-table fallback. Under per-MCS dynamic TX power
-        # RSSI is not a reliable absolute MCS predictor, so when the prior is
-        # cold the probe climbs safely from the boot MCS. Only raises the boot
-        # MCS, runs before select().
-        if not self._cold_started and signals.rssi is not None:
-            seed = self.learned_prior.warmstart_seed(signals.rssi)
+        # Warm-start seed (one-shot). Uses the learned per-card SNR curve ONLY —
+        # there is no fallback hand-table. snr_ceiling returns None for a cold
+        # prior, so when no knee is learned the probe climbs safely from the boot
+        # MCS. Only raises the boot MCS, runs before select().
+        if not self._cold_started and signals.snr is not None:
+            seed = self.learned_prior.snr_ceiling(signals.snr)
             if seed is not None and seed > self.leading.state.current_mcs:
                 self.leading.state.current_mcs = min(seed, self.leading._cap_mcs)
             self._cold_started = True
 
-        # Predictive demote (down-only, confidence-gated, debounced). If the
-        # curve says the ceiling at the projected RSSI is below where we run,
-        # pre-demote ahead of the reactive path. The probe still owns promotes;
-        # the reactive Channel-B demote in select() remains the backstop.
+        # Predictive demote (down-only, confidence-gated, debounced). If the SNR
+        # prior says the CURRENT rung is unviable at the PROJECTED SNR, pre-demote
+        # one rung ahead of the reactive path. A cold/unlearned rung is explorable
+        # (mirrors snr_demote + the promote-veto), so a clean ladder never
+        # collapses to MCS0 on a no-loss fade (flight logs 000002/000007). The
+        # probe still owns promotes; the reactive Channel-B demote in select()
+        # remains the backstop.
         predict_reason = ""
         predict_gated = False
-        if signals.rssi is None:
+        if signals.snr is None:
             slope = None
         else:
-            self._rssi_window.append(signals.rssi)
-            slope = lsq_slope(self._rssi_window)
-        pc = None
-        if signals.rssi is not None:
-            pc = self.learned_prior.predictive_ceiling(signals.rssi, slope)
+            self._snr_window.append(signals.snr)
+            slope = lsq_slope(self._snr_window)
+        if signals.snr is not None:
             cur = self.leading.state.current_mcs
             projected_drop = -slope * self.cfg.learned_prior.predictive_horizon_ticks
-            if pc is not None and pc < cur:
+            cur_unviable = self.learned_prior.snr_predictive_rung_unviable(
+                signals.snr,
+                slope,
+                cur,
+                margin=self.cfg.learned_prior.predictive_demote_margin_db,
+            )
+            if cur_unviable:
                 if projected_drop >= self.cfg.learned_prior.predictive_min_drop_db:
                     self._predict_demote_count += 1
                     if (
@@ -365,17 +371,15 @@ class Policy:
                         >= self.cfg.learned_prior.predictive_debounce_windows
                         and cooldown_ok
                     ):
-                        # First demote path in the tick: snr_demote and select() self-guard on current_mcs==start_mcs; predict_demote does not.
                         tgt = max(cur - 1, 0)
                         if tgt < cur:
                             self.leading.state.current_mcs = tgt
                             self.leading._promote_clean = 0
                             predict_reason = f"predict_demote mcs{cur}->{tgt}"
                 else:
-                    # pc says demote but RSSI isn't falling fast enough to matter
-                    # (flat/rising = a static prior-vs-probe disagreement, or a
-                    # fade too shallow to clear predictive_min_drop_db). Not a
-                    # real fade — suppress (the flapping fix) and log it.
+                    # cur unviable but SNR isn't falling fast enough to matter
+                    # (flat/rising = static prior-vs-probe disagreement). Suppress
+                    # (the flapping fix) and log it.
                     predict_gated = True
                     self._predict_demote_count = 0
             else:
@@ -489,7 +493,6 @@ class Policy:
                     self.learned_prior.ceiling(signals.rssi) if signals.rssi is not None else None
                 ),
                 "probe": probe_log,
-                "pc": pc,
                 "knees": self.learned_prior.knees_snapshot(),
                 "prior_learn": prior_learn,
                 "slope": slope,
@@ -524,7 +527,7 @@ class Policy:
         self.learned_prior = LearnedPrior(key, self.cfg.learned_prior)
 
     def reset_for_new_session(self) -> None:
-        """Reset volatile selector + hysteresis state to boot (incl. the RSSI
+        """Reset volatile selector + hysteresis state to boot (incl. the SNR
         slope window, so the first predictive-demote slope is computed fresh).
         A confirmed drone reconnect is a new session, so re-run the learned-prior
         warm-start and re-climb from the boot MCS instead of resuming a stale
@@ -539,7 +542,7 @@ class Policy:
         self._predict_demote_count = 0
         self._snr_demote_count = 0
         self._windows_since_demote = self.cfg.selector.demote_cooldown_windows
-        self._rssi_window.clear()
+        self._snr_window.clear()
 
     def close(self) -> None:
         """Flush the learned prior + close the flight log. Called by the

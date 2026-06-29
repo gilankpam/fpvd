@@ -27,6 +27,10 @@ def _sig(rssi, ts=1.0):
     return Signals(rssi=rssi, residual_loss_w=0.0, fec_work=0.0, link_starved_w=False, timestamp=ts)
 
 
+def _sig_snr(snr, ts=1.0):
+    return Signals(snr=snr, residual_loss_w=0.0, fec_work=0.0, link_starved_w=False, timestamp=ts)
+
+
 def _records(tmp_path):
     files = sorted((tmp_path / "fl").glob("*.jsonl"))
     assert files, "expected a flight-log file"
@@ -55,34 +59,32 @@ def test_record_probe_none_without_probe_status(tmp_path):
     assert _records(tmp_path)[-1]["probe"] is None
 
 
-def test_record_carries_pc_and_slope(tmp_path):
+def test_record_carries_slope_and_knees(tmp_path):
     prof = _profile()
     p = Policy(_cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3), prof)
     for _ in range(5):
-        p.learned_prior.ingest(rssi=-50.0, operating_mcs=5, operating_clean=True, settled=True)
-    p.tick(_sig(-50.0, ts=1.0))
-    p.tick(_sig(-52.0, ts=1.1))
+        p.learned_prior.ingest(
+            rssi=None, snr=30.0, operating_mcs=5, operating_clean=True, settled=True
+        )
+    p.tick(_sig_snr(30.0, ts=1.0))
+    p.tick(_sig_snr(28.0, ts=1.1))
     p.close()
     recs = _records(tmp_path)
     assert recs[0]["slope"] == 0.0
     assert recs[1]["slope"] == -2.0
-    assert isinstance(recs[1]["knees"], list) and len(recs[1]["knees"]) == 8
-    # ticks_at_mcs is 0 then 1 on these two ticks, below default settle_ticks=5
+    assert isinstance(recs[1]["snr_knees"], list) and len(recs[1]["snr_knees"]) == 8
     assert recs[1]["prior_learn"] is False
 
 
-def test_record_pc_and_slope_none_when_prior_cold_or_no_rssi(tmp_path):
-    # Cold prior (empty persist_dir, no learned data) → pc is None even with
-    # RSSI present; no RSSI → pc is always None.
+def test_record_slope_none_when_no_snr(tmp_path):
+    # cold SNR prior → no demote intent; no SNR → slope is None.
     p = Policy(_cfg(tmp_path), _profile())
-    p.tick(_sig(-50.0))
-    p.tick(_sig(None, ts=1.1))
+    p.tick(_sig_snr(30.0, ts=1.0))
+    p.tick(_sig_snr(None, ts=1.1))
     p.close()
     recs = _records(tmp_path)
-    assert recs[0]["pc"] is None
-    assert recs[0]["slope"] == 0.0  # slope is prior-independent
-    assert recs[1]["pc"] is None
-    assert recs[1]["slope"] is None  # no RSSI this tick
+    assert recs[0]["slope"] == 0.0  # one sample -> flat
+    assert recs[1]["slope"] is None  # no SNR this tick
 
 
 def test_record_carries_promote_clean_counter(tmp_path):
@@ -100,14 +102,14 @@ def test_record_carries_promote_clean_counter(tmp_path):
 
 
 def test_logged_slope_is_least_squares_not_single_tick(tmp_path):
-    """A lone RSSI spike barely moves the logged slope (least-squares over a
+    """A lone SNR spike barely moves the logged slope (least-squares over a
     window) — the old single-tick delta would log the full +5 dB jump."""
     p = Policy(_cfg(tmp_path), _profile())
-    for rssi, ts in [(-50.0, 1.0), (-50.0, 1.1), (-50.0, 1.2), (-50.0, 1.3), (-45.0, 1.4)]:
-        p.tick(_sig(rssi, ts=ts))
+    for snr, ts in [(30.0, 1.0), (30.0, 1.1), (30.0, 1.2), (30.0, 1.3), (35.0, 1.4)]:
+        p.tick(_sig_snr(snr, ts=ts))
     p.close()
     last = _records(tmp_path)[-1]
-    # lsq over [-50,-50,-50,-50,-45] = +1.0  (single-tick delta would be +5.0)
+    # lsq over [30,30,30,30,35] = +1.0  (single-tick delta would be +5.0)
     assert abs(last["slope"] - 1.0) < 1e-6
 
 
@@ -118,10 +120,10 @@ def test_logged_slope_uses_only_the_rolling_window(tmp_path):
     p = Policy(_cfg(tmp_path), _profile())
     ts = 1.0
     for _ in range(5):  # flat prefix — rolls out of the window
-        p.tick(_sig(-50.0, ts=ts))
+        p.tick(_sig_snr(30.0, ts=ts))
         ts += 0.1
     for i in range(10):  # -1 dB/tick ramp fills the window
-        p.tick(_sig(-50.0 - i, ts=ts))
+        p.tick(_sig_snr(30.0 - i, ts=ts))
         ts += 0.1
     p.close()
     last = _records(tmp_path)[-1]
@@ -129,19 +131,19 @@ def test_logged_slope_uses_only_the_rolling_window(tmp_path):
 
 
 def test_record_carries_predict_gated_flag(tmp_path):
-    """predict_gated is True when pc < cur but the slope-direction gate blocks
-    the demote (flat RSSI = no real fade); the reason carries no predict_demote."""
+    """predict_gated is True when current rung confidently unviable but the
+    slope-direction gate blocks the demote (flat SNR = no real fade); the reason
+    carries no predict_demote."""
     prof = _profile()
     p = Policy(
         _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=2),
         prof,
     )
-    # Direct-set: plant a confident RSSI knee at rung2 = -50
-    p.learned_prior._model._knee[2] = -50.0
-    p.learned_prior._model._count[2] = 12.0
+    p.learned_prior._snr_model._knee[5] = 38.0
+    p.learned_prior._snr_model._count[5] = 12.0
     p.leading.state.current_mcs = 5
-    p.tick(_sig(-50.0, ts=1.0))
-    p.tick(_sig(-50.0, ts=1.1))
+    p.tick(_sig_snr(34.0, ts=1.0))
+    p.tick(_sig_snr(34.0, ts=1.1))
     p.close()
     last = _records(tmp_path)[-1]
     assert last["predict_gated"] is True
@@ -149,7 +151,7 @@ def test_record_carries_predict_gated_flag(tmp_path):
 
 
 def test_record_predict_gated_false_when_no_demote_intent(tmp_path):
-    # Cold prior → pc None → no demote intent → predict_gated False.
+    # cold SNR prior → no demote intent → predict_gated False.
     p = Policy(_cfg(tmp_path), _profile())
     p.tick(_sig(-50.0))
     p.close()
