@@ -54,8 +54,9 @@ class Signals:
     rssi_max_w: float | None = None  # max(rssi_avg) — best-antenna operating point
     mcs_w: int | None = None  # received MCS of the best antenna this window
     snr_w: float | None = None  # operating (best-RSSI) antenna SNR (per-antenna diversity)
-    # EVM% (lock_quality, higher=better) is per spatial STREAM, not per antenna:
-    # combined per dongle then across dongles. None when no real EVM this window.
+    # |EVM| in dB magnitude (lock_quality, uncapped, higher=better) is per
+    # spatial STREAM, not per antenna: combined per dongle then across dongles.
+    # None when no real EVM this window.
     evm_w: float | None = None  # best dongle (operating modulation quality)
     evm_lo_w: float | None = None  # worst dongle (diversity floor)
     evm_min_w: float | None = None  # worst per-window sample across dongles
@@ -170,11 +171,13 @@ class SignalAggregator:
             # (best-RSSI) antenna's SNR, coherent with rssi_max_w / mcs_w.
             s.snr_w = float(best_ant.snr_avg)
             # EVM is per-STREAM, not per-antenna. Group by dongle (ant>>8);
-            # a real slot has evm_avg > 0 (absent/2nd-stream slots report -1).
-            # Per dongle: stream EVM = max(evm_avg over real slots), worst
-            # sample = min(evm_min). Across dongles: best = max, floor = min;
-            # worst sample = min over all real slots. (Averaging raw per-"ant"
-            # EVM would corrupt it — sentinels and STBC duplicates skew it.)
+            # a real slot has evm_avg > 0 (absent/2nd-stream slots report -1;
+            # 0 = unmeasurable). The > 0 filter holds for the dB magnitude too:
+            # a real lock reads positive dB, sentinels are -1/0. Per dongle:
+            # stream EVM = max(evm_avg over real slots), worst sample =
+            # min(evm_min). Across dongles: best = max, floor = min; worst
+            # sample = min over all real slots. (Averaging raw per-"ant" EVM
+            # would corrupt it — sentinels and STBC duplicates skew it.)
             d_avg: dict[int, float] = {}
             d_min: dict[int, float] = {}
             for a in ev.rx_ant_stats:
