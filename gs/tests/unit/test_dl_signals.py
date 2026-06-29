@@ -104,10 +104,10 @@ def test_ewma_alpha_rssi_matches_config():
     agg = SignalAggregator(ewma_alpha_rssi=0.2)
     s = agg.consume(_rx(0.1, ants=[(-60, -60, 20, 20)]))
     # First window bootstraps prev=None → EWMA returns raw value
-    assert s.rssi == -60.0
+    assert s.rssi_raw == -60.0
     # Next window at -80: 0.2*-80 + 0.8*-60 = -64
     s = agg.consume(_rx(0.2, ants=[(-80, -80, 10, 10)]))
-    assert abs(s.rssi - (-64.0)) < 1e-9
+    assert abs(s.rssi_raw - (-64.0)) < 1e-9
 
 
 def test_residual_loss_is_not_smoothed():
@@ -144,11 +144,11 @@ def test_rssi_max_is_max_of_avgs_across_antennas():
 
 
 def test_ewma_smoothes_rssi_max_not_min():
-    """Smoothed s.rssi must track best-antenna avg (max-of-avgs), not
+    """Smoothed s.rssi_raw must track best-antenna avg (max-of-avgs), not
     the worst-antenna min — that was the survivor-bias bug."""
     agg = SignalAggregator(ewma_alpha_rssi=1.0)  # no smoothing
     s = agg.consume(_rx(0.1, ants=[(-55, -50, 25, 30), (-72, -70, 15, 17)]))
-    assert s.rssi == -50.0  # max(rssi_avg) — the best antenna
+    assert s.rssi_raw == -50.0  # max(rssi_avg) — the best antenna
 
 
 def test_link_starved_w_when_packet_rate_below_threshold():
@@ -187,13 +187,11 @@ def test_signals_has_no_unimplemented_snr_fields():
 
 
 def test_rssi_normalized_by_received_mcs():
-    """A window at MCS5 (curve 19, P_ref 29) raises signals.rssi by +10
-    vs the raw value; rssi_raw keeps the measured value."""
+    """rssi_raw keeps the measured value (observability only now)."""
     agg = SignalAggregator(
         ewma_alpha_rssi=1.0, rssi_norm=_BOUND_NORM
     )  # no smoothing → see one window
     s = agg.consume(_rx(0.1, mcs=5, ants=[(-70, -70, 10, 10)]))
-    assert s.rssi == -60.0  # -70 + (29 - 19)
     assert s.rssi_raw == -70.0  # measured, un-normalized
     assert s.rssi_max_w == -70.0
 
@@ -203,30 +201,24 @@ def test_rssi_norm_disabled_is_identity():
 
     agg = SignalAggregator(ewma_alpha_rssi=1.0, rssi_norm=RssiNormConfig(enabled=False))
     s = agg.consume(_rx(0.1, mcs=5, ants=[(-70, -70, 10, 10)]))
-    assert s.rssi == -70.0  # raw, unchanged
-    assert s.rssi_raw == -70.0
+    assert s.rssi_raw == -70.0  # raw, un-normalized observability
 
 
 def test_rssi_ewma_removes_power_step_across_mcs_climb():
     """Fixed distance, promote MCS0→MCS5: drone power drops 29→19 so the
-    measured RSSI drops ~10 dB. Normalized signals.rssi stays flat (the
-    power step is removed before the EWMA); rssi_raw shows the step down."""
+    measured RSSI drops ~10 dB. rssi_raw shows the step down (observability)."""
     agg = SignalAggregator(ewma_alpha_rssi=0.2, rssi_norm=_BOUND_NORM)
-    # Window 1: MCS0 @ raw -60  → normalized -60.
+    # Window 1: MCS0 @ raw -60
     s = agg.consume(_rx(0.1, mcs=0, ants=[(-60, -60, 20, 20)]))
-    assert s.rssi == -60.0
     assert s.rssi_raw == -60.0
-    # Window 2: MCS5 @ raw -70 (power dropped 10) → normalized -60.
+    # Window 2: MCS5 @ raw -70 (power dropped 10)
     s = agg.consume(_rx(0.2, mcs=5, ants=[(-70, -70, 12, 12)]))
-    assert s.rssi == -60.0  # flat — power step removed
     assert s.rssi_raw < -60.0  # raw EWMA steps down toward -70
 
 
 def test_rssi_norm_uses_best_antenna_mcs():
-    """The window's MCS comes from the best (max rssi_avg) antenna, not any
-    other. Best antenna: rssi_avg -55 @ MCS5 (offset +10); worst: rssi_avg
-    -70 @ MCS0 (offset 0). Normalized rssi must use the best antenna's MCS5
-    → -45, NOT the worst antenna's MCS0 → -55."""
+    """rssi_max_w is the best antenna's rssi_avg. mcs_w is now picked from
+    the best-SNR antenna (not best-RSSI anymore)."""
     agg = SignalAggregator(ewma_alpha_rssi=1.0, rssi_norm=_BOUND_NORM)
     ev = _rx(0.1)
     ev.rx_ant_stats = [
@@ -259,8 +251,7 @@ def test_rssi_norm_uses_best_antenna_mcs():
     ]
     s = agg.consume(ev)
     assert s.rssi_max_w == -55.0  # best antenna's rssi_avg
-    assert s.mcs_w == 5  # best antenna's MCS, not the worst's 0
-    assert s.rssi == -45.0  # -55 + (29 - curve[5]=19), best-antenna MCS5
+    assert s.mcs_w == 5  # best-SNR antenna's MCS (ant 0: SNR 22)
 
 
 # ── SNR + EVM aggregation (instrumentation for the flight log) ───────────────
@@ -367,3 +358,12 @@ def test_reset_smoothed_rssi_clears_ewmas():
     assert agg.signals.rssi is None
     assert agg.signals.rssi_raw is None
     assert agg.signals.snr is None
+
+
+def test_operating_antenna_picked_by_snr():
+    # ant0: high RSSI, low SNR ; ant1: low RSSI, high SNR.
+    agg = SignalAggregator()
+    s = agg.consume(_rx(0.1, mcs=5, ants=[(-40, -40, 18, 18), (-55, -55, 30, 30)]))
+    assert s.snr_w == 30.0  # best-SNR antenna, not best-RSSI (-40 -> 18)
+    assert s.mcs_w == 5
+    assert s.rssi_max_w == -40.0  # rssi_max_w stays the diversity max (observability)

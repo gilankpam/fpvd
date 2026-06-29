@@ -53,7 +53,7 @@ class Signals:
     rssi_avg_w: float | None = None  # diversity-combined estimate
     rssi_max_w: float | None = None  # max(rssi_avg) — best-antenna operating point
     mcs_w: int | None = None  # received MCS of the best antenna this window
-    snr_w: float | None = None  # operating (best-RSSI) antenna SNR (per-antenna diversity)
+    snr_w: float | None = None  # operating (best-SNR) antenna SNR (per-antenna diversity)
     # |EVM| in dB magnitude (lock_quality, uncapped, higher=better) is per
     # spatial STREAM, not per antenna: combined per dongle then across dongles.
     # None when no real EVM this window.
@@ -72,7 +72,9 @@ class Signals:
     link_starved_w: bool = False
 
     # EWMA-smoothed controller inputs
-    rssi: float | None = None
+    rssi: float | None = (
+        None  # DEPRECATED control axis — always None now; rssi_raw is the logged observability
+    )
     rssi_raw: float | None = None  # EWMA of the un-normalized RSSI (observability)
     snr: float | None = None  # EWMA of EIRP-normalized SNR (cross-rung control axis)
     fec_work: float = 0.0
@@ -163,12 +165,12 @@ class SignalAggregator:
             rssi_avgs = [a.rssi_avg for a in ev.rx_ant_stats]
             s.rssi_min_w = float(min(rssi_mins))
             s.rssi_avg_w = float(sum(rssi_avgs) / len(rssi_avgs))
-            best_ant = max(ev.rx_ant_stats, key=lambda a: a.rssi_avg)
-            s.rssi_max_w = float(best_ant.rssi_avg)
+            s.rssi_max_w = float(max(rssi_avgs))  # max RSSI across antennas (observability)
+            # Operating antenna = best SNR (the sole control axis). mcs_w/snr_w
+            # follow it; rssi_max_w stays the diversity max for the log.
+            best_ant = max(ev.rx_ant_stats, key=lambda a: a.snr_avg)
             s.mcs_w = int(best_ant.mcs)
             s.ant_count = len(ev.rx_ant_stats)
-            # SNR is genuine per-antenna diversity: log the operating
-            # (best-RSSI) antenna's SNR, coherent with rssi_max_w / mcs_w.
             s.snr_w = float(best_ant.snr_avg)
             # EVM is per-STREAM, not per-antenna. Group by dongle (ant>>8);
             # a real slot has evm_avg > 0 (absent/2nd-stream slots report -1;
@@ -206,14 +208,12 @@ class SignalAggregator:
         # min(rssi_min) tracks the weakest antenna and misses
         # best-antenna degradation entirely.
         if s.rssi_max_w is not None:
-            # Normalize per-window by the received MCS BEFORE smoothing, so a
-            # promote's power drop never enters the EWMA as a fake fade.
-            rssi_norm_w = normalize_rssi(s.rssi_max_w, s.mcs_w, self.rssi_norm)
-            s.rssi = _ewma(s.rssi, rssi_norm_w, self.ewma_alpha_rssi)
+            # RSSI is observability-only now: smooth the raw value for the log,
+            # but it no longer feeds control (SNR is the sole control axis).
             s.rssi_raw = _ewma(s.rssi_raw, s.rssi_max_w, self.ewma_alpha_rssi)
-            # SNR shares RSSI's per-MCS TX-power offset (SNR scales 1:1 with
-            # TX power, noise unchanged), so reuse normalize_rssi to make SNR
-            # cross-rung comparable, then smooth it like rssi.
+            # SNR scales 1:1 with our per-MCS TX power (noise unchanged), so
+            # EIRP-normalize it by the received MCS BEFORE smoothing — the curve
+            # mirror coupling lives here, not in RSSI.
             if s.snr_w is not None:
                 snr_norm_w = normalize_rssi(s.snr_w, s.mcs_w, self.rssi_norm)
                 s.snr = _ewma(s.snr, snr_norm_w, self.ewma_alpha_rssi)
