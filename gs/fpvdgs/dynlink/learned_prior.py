@@ -1,9 +1,9 @@
-"""GS-local learned link-RSSI → viable-ceiling-MCS prior (knee model; see
+"""GS-local learned link-SNR → viable-ceiling-MCS prior (knee model; see
 docs/superpowers/specs/2026-06-16-learned-prior-knee-model-design.md).
 
-Per-rung RSSI/SNR knee: knee[K] = the signal value at which rung K was seen
-to FAIL; learned only from dirty (failed) settled samples — a clean sample
-never plants or raises it. A rung that never fails stays None (explorable).
+Per-rung SNR knee: knee[K] = the SNR at which rung K was seen to FAIL;
+learned only from dirty (failed) settled samples — a clean sample never
+plants or raises it. A rung that never fails stays None (explorable).
 The prior is an accelerant, never the authority — the live probe still gates
 promotes; this only warm-starts the cold MCS and predictively demotes ahead
 of a fade. Keyed (and persisted) per drone adapter id (radio.adapterId).
@@ -159,53 +159,29 @@ class KneeModel:
 
 
 class LearnedPrior:
-    """Facade over KneeModel, keyed + persisted per drone adapter id (radio.adapterId). Keeps the
-    interface policy.py depends on; the live probe stays authoritative for
-    promotes — this only warm-starts and feeds the down-only predictive demote."""
+    """Facade over KneeModel (SNR axis only), keyed + persisted per drone adapter id
+    (radio.adapterId). Keeps the interface policy.py depends on; the live probe stays
+    authoritative for promotes — this only warm-starts and feeds the down-only
+    predictive demote."""
 
     def __init__(self, key: str, cfg: LearnedPriorConfig) -> None:
         self.key = key
         self.cfg = cfg
-        # The pre-bind sentinel is in-memory only — its learning (under identity
-        # RSSI, before the drone curve binds) is discarded at the connect rekey.
+        # The pre-bind sentinel is in-memory only — its learning (before the
+        # drone curve binds) is discarded at the connect rekey.
         self._ephemeral = key == UNBOUND_KEY
-        self._model = KneeModel(cfg)
         self._snr_model = KneeModel(cfg)
         self._since_flush = 0
         self._load()
 
-    def ingest(self, *, rssi, snr=None, operating_mcs, operating_clean, settled) -> None:
-        if operating_mcs is None or not settled:
+    def ingest(self, *, snr=None, operating_mcs, operating_clean, settled) -> None:
+        if operating_mcs is None or not settled or snr is None:
             return
-        m = int(operating_mcs)
-        clean = bool(operating_clean)
-        learned = False
-        if rssi is not None:
-            self._model.observe(m, float(rssi), clean)
-            learned = True
-        if snr is not None:
-            self._snr_model.observe(m, float(snr), clean)
-            learned = True
-        if learned:
-            self._since_flush += 1
-            if self._since_flush >= self.cfg.flush_interval_observations:
-                self.flush()
-                self._since_flush = 0
-
-    def ceiling(self, rssi) -> int | None:
-        return None if rssi is None else self._model.ceiling(float(rssi))
-
-    def predictive_ceiling(self, rssi, slope_dbm_per_tick) -> int | None:
-        if rssi is None:
-            return None
-        projected = rssi + slope_dbm_per_tick * self.cfg.predictive_horizon_ticks
-        return self._model.ceiling(projected)
-
-    def warmstart_seed(self, rssi) -> int | None:
-        return self.ceiling(rssi)
-
-    def knees_snapshot(self) -> list:
-        return self._model.knees_snapshot()
+        self._snr_model.observe(int(operating_mcs), float(snr), bool(operating_clean))
+        self._since_flush += 1
+        if self._since_flush >= self.cfg.flush_interval_observations:
+            self.flush()
+            self._since_flush = 0
 
     def snr_ceiling(self, snr) -> int | None:
         return None if snr is None else self._snr_model.ceiling(float(snr))
@@ -238,7 +214,7 @@ class LearnedPrior:
         return self._snr_model.knees_snapshot()
 
     def to_status(self) -> dict:
-        return {"key": self.key, "knees": self._model.knees_snapshot()}
+        return {"key": self.key, "knees": self._snr_model.knees_snapshot()}
 
     def _path(self) -> str:
         safe = re.sub(r"[^A-Za-z0-9._-]", "_", self.key)
@@ -255,11 +231,8 @@ class LearnedPrior:
         except (ValueError, OSError) as e:
             log.warning("learned_prior: ignoring unreadable %s: %s", self._path(), e)
             return
-        # Back-compat: a v2 deploy persisted the flat rssi-model dict (no
-        # "rssi"/"snr" wrapper). doc.get("rssi", doc) loads that as the rssi
-        # model and leaves snr cold; a v3 combined doc loads both.
-        if not self._model.load_dict(doc.get("rssi", doc)):
-            log.info("learned_prior: %s rssi ignored (schema/shape) — retraining", self._path())
+        # Old flat v2 rssi-model docs have no "snr" key → SNR stays cold (retrain).
+        # Combined docs load the "snr" subkey; old rssi-only docs are ignored.
         snr_doc = doc.get("snr")
         if snr_doc is not None and not self._snr_model.load_dict(snr_doc):
             log.info("learned_prior: %s snr ignored (schema/shape) — retraining", self._path())
@@ -267,7 +240,7 @@ class LearnedPrior:
     def flush(self) -> None:
         if self._ephemeral:
             return  # sentinel: in-memory only, never write unbound.json
-        doc = {"key": self.key, "rssi": self._model.to_dict(), "snr": self._snr_model.to_dict()}
+        doc = {"key": self.key, "snr": self._snr_model.to_dict()}
         try:
             os.makedirs(self.cfg.persist_dir, exist_ok=True)
             tmp = self._path() + ".tmp"

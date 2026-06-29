@@ -63,9 +63,7 @@ def test_record_carries_slope_and_knees(tmp_path):
     prof = _profile()
     p = Policy(_cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3), prof)
     for _ in range(5):
-        p.learned_prior.ingest(
-            rssi=None, snr=30.0, operating_mcs=5, operating_clean=True, settled=True
-        )
+        p.learned_prior.ingest(snr=30.0, operating_mcs=5, operating_clean=True, settled=True)
     p.tick(_sig_snr(30.0, ts=1.0))
     p.tick(_sig_snr(28.0, ts=1.1))
     p.close()
@@ -303,9 +301,7 @@ def test_promote_explores_cold_frontier_rung(tmp_path):
     cfg.selector.snr_demote_debounce = 2
     p = Policy(cfg, _profile(), probe_status=_clean_probe)
     for _ in range(12):  # rung4 confident, viable at snr >= ~27
-        p.learned_prior.ingest(
-            rssi=None, snr=27.0, operating_mcs=4, operating_clean=True, settled=True
-        )
+        p.learned_prior.ingest(snr=27.0, operating_mcs=4, operating_clean=True, settled=True)
     p.leading.state.current_mcs = 4
 
     def sig(ts):  # healthy snr (clears rung4), no loss

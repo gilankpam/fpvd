@@ -23,22 +23,11 @@ def _sig(rssi, ts=1.0):
     return Signals(rssi=rssi, residual_loss_w=0.0, fec_work=0.0, link_starved_w=False, timestamp=ts)
 
 
-def _settle_knee(policy, rung, rssi, clean, n=12):
-    """Prime the knee model directly via the facade (settled=True), bypassing
-    the policy's tick-driven settle gate — used only for test setup."""
-    for _ in range(n):
-        policy.learned_prior.ingest(
-            rssi=rssi, operating_mcs=rung, operating_clean=clean, settled=True
-        )
-
-
 def test_warm_start_seeds_from_persisted_curve(tmp_path):
     prof = _profile()
     p1 = Policy(_cfg(tmp_path, min_samples=3), prof)
     for _ in range(12):  # dirty SNR samples plant the rung-5 knee
-        p1.learned_prior.ingest(
-            rssi=None, snr=36.0, operating_mcs=5, operating_clean=False, settled=True
-        )
+        p1.learned_prior.ingest(snr=36.0, operating_mcs=5, operating_clean=False, settled=True)
     p1.close()
     p2 = Policy(_cfg(tmp_path, min_samples=3), prof)
     dec = p2.tick(_sig_snr(36.0, ts=1.0))
@@ -226,7 +215,7 @@ def _probe_snapshot(viable_mcs, *, per=0.0, age_ms=0.0):
 def _settle_snr_knee(policy, rung, snr, clean=True, n=12):
     for _ in range(n):
         policy.learned_prior.ingest(
-            rssi=None, snr=snr, operating_mcs=rung, operating_clean=clean, settled=True
+            snr=snr, operating_mcs=rung, operating_clean=clean, settled=True
         )
 
 
@@ -361,7 +350,7 @@ def test_bind_learned_prior_keys_by_adapter_and_width(tmp_path):
 
     p.bind_learned_prior("ABC123", 10)
     assert p.learned_prior.key == "ABC123__bw10"
-    p.learned_prior.ingest(rssi=-60.0, operating_mcs=4, operating_clean=True, settled=True)
+    p.learned_prior.ingest(operating_mcs=4, operating_clean=True, settled=True)
     p.learned_prior.flush()
     assert (tmp_path / "ABC123__bw10.json").exists()
 

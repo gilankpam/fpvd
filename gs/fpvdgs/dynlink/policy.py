@@ -448,9 +448,8 @@ class Policy:
             self._ticks_at_mcs += 1
         self._last_ingest_mcs = new_mcs
         prior_settled = self._ticks_at_mcs >= self.cfg.learned_prior.settle_ticks
-        prior_learn = (signals.rssi is not None or signals.snr is not None) and prior_settled
+        prior_learn = signals.snr is not None and prior_settled
         self.learned_prior.ingest(
-            rssi=signals.rssi,
             snr=signals.snr,
             operating_mcs=new_mcs,
             operating_clean=signals.residual_loss_w < self.cfg.learned_prior.viable_loss,
@@ -489,11 +488,7 @@ class Policy:
                 "residual_loss_w": signals.residual_loss_w,
                 "fec_work": signals.fec_work,
                 "link_starved": sustained_starved,
-                "ceiling": (
-                    self.learned_prior.ceiling(signals.rssi) if signals.rssi is not None else None
-                ),
                 "probe": probe_log,
-                "knees": self.learned_prior.knees_snapshot(),
                 "prior_learn": prior_learn,
                 "slope": slope,
                 "predict_gated": predict_gated,
