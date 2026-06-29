@@ -71,7 +71,7 @@ def test_summarize_counts_prior_learn_and_last_knees(tmp_path):
                     "mcs": 4,
                     "reason": "",
                     "prior_learn": True,
-                    "knees": [None, -80, None, None, -60, None, None, None],
+                    "snr_knees": [None, -80, None, None, -60, None, None, None],
                 }
             )
             + "\n"
@@ -83,7 +83,7 @@ def test_summarize_counts_prior_learn_and_last_knees(tmp_path):
                     "mcs": 4,
                     "reason": "",
                     "prior_learn": False,
-                    "knees": [None, -80, None, None, -60, None, None, None],
+                    "snr_knees": [None, -80, None, None, -60, None, None, None],
                 }
             )
             + "\n"

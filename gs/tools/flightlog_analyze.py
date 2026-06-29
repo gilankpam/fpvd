@@ -54,8 +54,8 @@ def summarize(path) -> dict:
             gated += 1
         if r.get("prior_learn"):
             prior_learn += 1
-        if r.get("knees") is not None:
-            last_knees = r["knees"]
+        if r.get("snr_knees") is not None:
+            last_knees = r["snr_knees"]
         if r.get("mcs") is not None:
             mcss.append(r["mcs"])
         if r.get("ceiling") is not None:
@@ -89,7 +89,7 @@ def _print_summary(s: dict) -> None:
     print(f"reactive demotes:   {s['reactive_demotes']}")
     print(f"gated demotes:      {s['gated_demotes']}")
     print(f"prior-learn ticks:  {s['prior_learn_ticks']}")
-    print(f"last knees:          {s['last_knees']}")
+    print(f"last snr_knees:      {s['last_knees']}")
     print(f"mean SNR / EVM:      {s['mean_snr']} / {s['mean_evm']}   min EVM: {s['min_evm']}")
     print(f"mean MCS: {s['mean_mcs']}   mean ceiling: {s['mean_ceiling']}")
 
@@ -106,10 +106,9 @@ def _plot(path, out):
     ts = [r.get("ts") for r in recs]
     fig, ax = plt.subplots(3, 1, sharex=True)
     ax[0].plot(ts, [r.get("rssi") for r in recs], label="rssi")
-    ax[0].plot(ts, [r.get("ceiling") for r in recs], label="ceiling")
-    ax[0].legend(); ax[0].set_ylabel("RSSI / ceiling")
+    ax[0].plot(ts, [r.get("rssi_raw") for r in recs], label="rssi_raw")
+    ax[0].legend(); ax[0].set_ylabel("RSSI")
     ax[1].plot(ts, [r.get("mcs") for r in recs], label="mcs")
-    ax[1].plot(ts, [r.get("pc") for r in recs], label="pc")
     ax[1].legend(); ax[1].set_ylabel("MCS")
     ax[2].plot(ts, [probe_target_per(r) for r in recs], label="probe per (mcs+1)")
     ax[2].legend(); ax[2].set_ylabel("PER"); ax[2].set_xlabel("ts")
