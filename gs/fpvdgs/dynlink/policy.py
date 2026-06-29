@@ -371,6 +371,10 @@ class Policy:
                         >= self.cfg.learned_prior.predictive_debounce_windows
                         and cooldown_ok
                     ):
+                        # predict_demote runs FIRST among the tick's demote paths,
+                        # so it needs no current_mcs==start_mcs self-guard: snr_demote
+                        # and select() both guard on that and no-op once predict has
+                        # stepped. Keep predict first, or it could double-demote in a tick.
                         tgt = max(cur - 1, 0)
                         if tgt < cur:
                             self.leading.state.current_mcs = tgt

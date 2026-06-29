@@ -149,7 +149,7 @@ def test_record_carries_predict_gated_flag(tmp_path):
 
 
 def test_record_predict_gated_false_when_no_demote_intent(tmp_path):
-    # cold SNR prior → no demote intent → predict_gated False.
+    # no SNR input (_sig sets snr=None) → predict block skipped → predict_gated False.
     p = Policy(_cfg(tmp_path), _profile())
     p.tick(_sig(-50.0))
     p.close()
