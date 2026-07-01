@@ -29,6 +29,10 @@ def _dynamic_link_defaults() -> dict:
             "holdModesDownMs": sel.hold_modes_down_ms,
             "minBetweenChangesMs": sel.min_between_changes_ms,
             "starvationWindows": sel.starvation_windows,
+            "flapBaseBackoffMs": sel.flap_base_backoff_ms,
+            "flapBackoffMult": sel.flap_backoff_mult,
+            "flapBackoffCapMs": sel.flap_backoff_cap_ms,
+            "flapResetCleanDwellTicks": sel.flap_reset_clean_dwell_ticks,
         },
         "smoothing": {
             "ewmaAlphaRssi": agg.ewma_alpha_rssi,

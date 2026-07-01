@@ -40,6 +40,10 @@ SELECTOR_KEYS = {
     "starvationWindows",
     "snrPromoteMarginDb",
     "snrDemoteMarginDb",
+    "flapBaseBackoffMs",
+    "flapBackoffMult",
+    "flapBackoffCapMs",
+    "flapResetCleanDwellTicks",
 }
 SMOOTHING_KEYS = {"ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst", "starvationThresholdPps"}
 LEARNED_PRIOR_KEYS = {

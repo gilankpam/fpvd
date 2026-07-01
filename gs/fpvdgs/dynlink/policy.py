@@ -74,6 +74,13 @@ class SelectorConfig:
     # dead-band on the demote path while the probe governs the promote path.
     snr_promote_margin_db: float = 1.0
     snr_demote_margin_db: float = 1.5
+    # Flap-damper: per-rung escalating promote back-off on observed
+    # promote->loss->demote flapping (honest replacement for the advisory
+    # SNR promote-veto). See 2026-07-02 spec.
+    flap_base_backoff_ms: int = 2000
+    flap_backoff_mult: float = 2.0
+    flap_backoff_cap_ms: int = 30000
+    flap_reset_clean_dwell_ticks: int = 30
 
 
 @dataclass
@@ -135,11 +142,22 @@ class LeadingSelector:
         # Consecutive ticks the current+1 probe rung has read clean+fresh.
         # Resets on any blip, stale read, demote, or applied promote.
         self._promote_clean = 0
+        # Flap-damper state (per rung).
+        self._flap_level: dict[int, int] = {}
+        self._suppress_until_ms: dict[int, int] = {}
+        self._clean_dwell = 0
+        self._promote_suppressed = False
 
     # ---- helpers ----
 
     def _emergency_active(self, fec_pressure: float, link_starved: bool) -> bool:
         return fec_pressure >= self.cfg.emergency_fec_pressure or link_starved
+
+    def _flap_backoff_ms(self, level: int) -> int:
+        return min(
+            int(self.cfg.flap_base_backoff_ms * (self.cfg.flap_backoff_mult ** (level - 1))),
+            self.cfg.flap_backoff_cap_ms,
+        )
 
     # ---- main entry ----
 
@@ -184,6 +202,7 @@ class LeadingSelector:
                 st.last_change_time_ms = ts_ms
                 st.last_mcs_change_time_ms = ts_ms
                 self._promote_clean = 0
+                self._clean_dwell = 0
                 reasons.append(why)
 
         # --- Demote (reactive, one step, cooldown-gated) ---
@@ -197,6 +216,10 @@ class LeadingSelector:
             if can_demote:
                 if loss_demote:
                     commit(prev - 1, f"video_per_demote loss={loss_rate:.3f}")
+                    if st.current_mcs != prev:
+                        lvl = self._flap_level.get(prev, 0) + 1
+                        self._flap_level[prev] = lvl
+                        self._suppress_until_ms[prev] = ts_ms + self._flap_backoff_ms(lvl)
                 else:
                     commit(
                         prev - 1,
@@ -224,7 +247,8 @@ class LeadingSelector:
             and rung.get("per") is not None
             and (1.0 - rung["per"]) >= self.cfg.probe_viable_threshold
         )
-        if clean:
+        self._promote_suppressed = ts_ms < self._suppress_until_ms.get(target, 0)
+        if clean and not self._promote_suppressed:
             self._promote_clean += 1
             # Fix A: the live probe is authoritative for promotes. A clean+fresh+
             # debounced rung promotes regardless of promote_blocked — the SNR knee
@@ -239,6 +263,13 @@ class LeadingSelector:
                 commit(target, f"probe_promote mcs{target} per={rung['per']:.4f}")
         else:
             self._promote_clean = 0
+
+        if not reasons:  # clean hold this tick — no rung change
+            self._clean_dwell += 1
+            if self._clean_dwell >= self.cfg.flap_reset_clean_dwell_ticks:
+                cur = st.current_mcs
+                self._flap_level.pop(cur, None)
+                self._suppress_until_ms.pop(cur, None)
 
         self._reasons = reasons
         return st.current_mcs, (st.current_mcs != prev)
@@ -460,6 +491,8 @@ class Policy:
                 "snr": signals.snr_w,
                 "snr_ewma": signals.snr,
                 "promote_blocked": promote_blocked,
+                "promote_suppressed": self.leading._promote_suppressed,
+                "flap_level": self.leading._flap_level.get(self.leading.state.current_mcs + 1, 0),
                 "snr_knees": self.learned_prior.snr_knees_snapshot(),
                 "evm": signals.evm_w,
                 "evm_lo": signals.evm_lo_w,

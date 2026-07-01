@@ -33,6 +33,12 @@ def build_policy_config(block: dict) -> PolicyConfig:
         snr_promote_margin_db=float(sel.get("snrPromoteMarginDb", d.snr_promote_margin_db)),
         snr_demote_margin_db=float(sel.get("snrDemoteMarginDb", d.snr_demote_margin_db)),
         demote_cooldown_windows=int(sel.get("demoteCooldownWindows", d.demote_cooldown_windows)),
+        flap_base_backoff_ms=int(sel.get("flapBaseBackoffMs", d.flap_base_backoff_ms)),
+        flap_backoff_mult=float(sel.get("flapBackoffMult", d.flap_backoff_mult)),
+        flap_backoff_cap_ms=int(sel.get("flapBackoffCapMs", d.flap_backoff_cap_ms)),
+        flap_reset_clean_dwell_ticks=int(
+            sel.get("flapResetCleanDwellTicks", d.flap_reset_clean_dwell_ticks)
+        ),
     )
     fl = block.get("flightlog", {}) or {}
     # flightlog internals are frozen — read only `enabled`.

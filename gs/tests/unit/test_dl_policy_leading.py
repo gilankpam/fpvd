@@ -306,3 +306,58 @@ def test_promote_proceeds_despite_blocked_flag():
         promote_blocked=True,
     )
     assert changed and mcs == 4  # promoted 3->4 despite promote_blocked=True
+
+
+# ── Flap-damper: per-rung escalating promote back-off ───────────────────────
+
+
+def test_flap_backoff_escalates():
+    s = _selector()
+    assert s._flap_backoff_ms(1) == s.cfg.flap_base_backoff_ms
+    assert s._flap_backoff_ms(2) == 2 * s.cfg.flap_base_backoff_ms
+    assert s._flap_backoff_ms(3) == 4 * s.cfg.flap_base_backoff_ms
+    assert s._flap_backoff_ms(99) == s.cfg.flap_backoff_cap_ms
+
+
+def test_loss_demote_registers_flap_strike():
+    s = _selector(max_mcs=5)
+    _drive_to_mcs_probe(s, 4)
+    assert s.state.current_mcs == 4
+    _select(s, probe=_probe(4), loss=0.9, loss_demote=True, ts_ms=500_000.0)
+    assert s.state.current_mcs == 3  # one-step demote
+    assert s._flap_level.get(4) == 1  # struck the rung we left
+    assert s._suppress_until_ms[4] == 500_000.0 + s._flap_backoff_ms(1)
+
+
+def test_promote_gate_respects_suppression():
+    s = _selector(max_mcs=5)
+    _drive_to_mcs_probe(s, 3)
+    assert s.state.current_mcs == 3
+    s._suppress_until_ms[4] = 600_000.0  # 4 suppressed until t=600s
+    for ts in (500_000.0, 501_000.0, 502_000.0, 503_000.0):
+        _select(s, probe=_probe(4), ts_ms=ts)  # clean probe on 4, but suppressed
+    assert s.state.current_mcs == 3  # HOLD — damper blocked the climb
+    assert s._promote_suppressed is True
+    for ts in (601_000.0, 602_000.0, 603_000.0):  # after expiry: debounce -> promote
+        _select(s, probe=_probe(4), ts_ms=ts)
+    assert s.state.current_mcs == 4
+
+
+def test_clean_dwell_resets_flap_level():
+    s = _selector(max_mcs=5)
+    _drive_to_mcs_probe(s, 3)
+    s._flap_level[3] = 2
+    ts = 500_000.0
+    for _ in range(s.cfg.flap_reset_clean_dwell_ticks + 1):
+        _select(s, probe=_probe(2), ts_ms=ts)  # nothing above 3 clean -> HOLD at 3
+        ts += 1000.0
+    assert s._flap_level.get(3, 0) == 0  # holding the rung cleanly cleared it
+
+
+def test_emergency_demote_does_not_strike():
+    s = _selector(max_mcs=5)
+    _drive_to_mcs_probe(s, 4)
+    assert s.state.current_mcs == 4
+    _select(s, probe=_probe(4), fec=0.95, ts_ms=500_000.0)  # emergency, not a loss
+    assert s.state.current_mcs == 3
+    assert s._flap_level.get(4, 0) == 0  # emergencies don't strike
