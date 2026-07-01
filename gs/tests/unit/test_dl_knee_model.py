@@ -139,7 +139,7 @@ def test_load_dict_rejects_v1_schema():
 
 def test_load_dict_rejects_malformed():
     m = _model()
-    assert m.load_dict({"schema": 2, "knees": [1, 2], "counts": []}) is False
+    assert m.load_dict({"schema": 3, "knees": [1, 2], "counts": []}) is False
 
 
 def test_knees_snapshot_rounds():
