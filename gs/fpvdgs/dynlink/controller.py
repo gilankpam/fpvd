@@ -18,20 +18,10 @@ from ..events import DRONE_CONNECTED, DRONE_DISCONNECTED
 from .config_build import build_aggregator, build_policy_config
 from .policy import Policy
 from .return_link import ReturnLink
-from .signals import RssiNormConfig
 from .stats_client import RxEvent, SessionEvent, StatsClient
 from .wire import Encoder as WireEncoder
 
 log = logging.getLogger("fpvdgs.dynlink")
-
-
-def _valid_curve(curve) -> bool:
-    """A drone TX-power curve: a list/tuple of exactly 8 ints (not bools)."""
-    return (
-        isinstance(curve, (list, tuple))
-        and len(curve) == 8
-        and all(isinstance(v, int) and not isinstance(v, bool) for v in curve)
-    )
 
 
 class DynamicLinkController:
@@ -241,20 +231,11 @@ class DynamicLinkController:
 
     def _bind_calibration(self, radio):
         agg = self._aggregator
-        curve = (radio or {}).get("txPowerCurve")
         adapter = (radio or {}).get("adapterId")
-        # Normalization binds on a valid drone curve; identity until one arrives.
+        # New session: clear stale smoothed signals. Raw SNR is the control axis
+        # — no txpower-curve normalization (2026-07-02 spec).
         if agg is not None:
-            if _valid_curve(curve):
-                c = tuple(int(v) for v in curve)
-                agg.rssi_norm = RssiNormConfig(
-                    enabled=True, p_ref_dbm=max(c), tx_power_dbm_by_mcs=c
-                )
-                agg.reset_smoothed_rssi()
-                log.info("dynlink: bound drone txpower curve=%s", c)
-            else:
-                agg.rssi_norm = RssiNormConfig(enabled=False)
-                log.warning("dynlink: drone supplied no txpower curve — RSSI normalization OFF")
+            agg.reset_smoothed()
         # Learned-prior key binds on a present adapter id + the channel width
         # (10 MHz and 20 MHz keep independent knees), independent of the curve.
         if adapter:

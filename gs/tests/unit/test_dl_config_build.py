@@ -107,12 +107,11 @@ def test_flightlog_reads_only_enabled():
     assert cfg.flightlog.dir == "/media/dvr/log/dynamic-link/"  # frozen default
 
 
-def test_rssi_norm_defaults_to_identity():
-    # The operator config knob for RSSI-norm is retired; the aggregator starts
-    # in identity and the controller binds the drone curve at the connect event.
+def test_aggregator_has_no_rssi_norm():
+    # rssi_norm and the normalization plumbing have been removed; the aggregator
+    # uses raw SNR as the control axis with no txpower-curve offset.
     agg = build_aggregator(_block())
-    assert agg.rssi_norm.enabled is False
-    assert agg.rssi_norm.tx_power_dbm_by_mcs == ()
+    assert not hasattr(agg, "rssi_norm")
 
 
 def test_make_dl_snapshot_uses_drone_host():

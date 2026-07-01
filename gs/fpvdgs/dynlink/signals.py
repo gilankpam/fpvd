@@ -15,31 +15,6 @@ from .stats_client import RxEvent, SessionInfo
 WINDOW_S = 0.1  # design cadence: log_interval = 100 ms (§3)
 
 
-@dataclass(frozen=True)
-class RssiNormConfig:
-    """EIRP-normalization of the video-link RSSI by the drone's per-MCS TX
-    power. The controller binds `tx_power_dbm_by_mcs` (and the derived
-    `p_ref_dbm`) from the drone's /status curve at the connect event — the
-    drone is the single source of truth. `enabled` is internal bind state, not
-    a config knob: it is False (identity / raw RSSI) until a curve is bound,
-    True while a valid drone curve is in effect."""
-
-    enabled: bool = False
-    p_ref_dbm: int = 0
-    tx_power_dbm_by_mcs: tuple[int, ...] = ()
-
-
-def normalize_rssi(rssi_raw: float | None, mcs: int | None, cfg: RssiNormConfig) -> float | None:
-    """EIRP-normalize one RSSI reading: rssi_raw + (P_ref − curve[mcs]).
-    Clamps mcs into the curve's index range. None-safe (returns rssi_raw
-    when disabled, or when rssi_raw / mcs is None)."""
-    if not cfg.enabled or not cfg.tx_power_dbm_by_mcs or rssi_raw is None or mcs is None:
-        return rssi_raw
-    n = len(cfg.tx_power_dbm_by_mcs)
-    m = max(0, min(n - 1, int(mcs)))
-    return rssi_raw + (cfg.p_ref_dbm - cfg.tx_power_dbm_by_mcs[m])
-
-
 @dataclass
 class Signals:
     """One tick's view of the controller inputs.
@@ -76,7 +51,7 @@ class Signals:
         None  # DEPRECATED control axis — always None now; rssi_raw is the logged observability
     )
     rssi_raw: float | None = None  # EWMA of the un-normalized RSSI (observability)
-    snr: float | None = None  # EWMA of EIRP-normalized SNR (cross-rung control axis)
+    snr: float | None = None  # EWMA of raw SNR (sole control axis; no TX-power normalization)
     fec_work: float = 0.0
     burst_rate: float = 0.0
     holdoff_rate: float = 0.0
@@ -113,18 +88,15 @@ class SignalAggregator:
     # above background noise from a stalled stream.
     starvation_threshold_pps: float = 50.0
 
-    rssi_norm: RssiNormConfig = field(default_factory=RssiNormConfig)
-
     signals: Signals = field(default_factory=Signals)
 
     def update_session(self, session: SessionInfo) -> None:
         self.signals.session = session
 
-    def reset_smoothed_rssi(self) -> None:
-        """Drop the smoothed RSSI/SNR EWMAs so they restart clean. Called
-        when the TX-power curve is (re)bound from the drone: samples taken
-        under a different (or identity) normalization must not bleed into
-        the freshly-normalized series."""
+    def reset_smoothed(self) -> None:
+        """Drop the smoothed RSSI/SNR EWMAs so they restart clean on a new
+        drone session (called on reconnect). Ensures stale pre-disconnect
+        samples do not bleed into the new session's series."""
         self.signals.rssi = None
         self.signals.rssi_raw = None
         self.signals.snr = None
@@ -211,12 +183,11 @@ class SignalAggregator:
             # RSSI is observability-only now: smooth the raw value for the log,
             # but it no longer feeds control (SNR is the sole control axis).
             s.rssi_raw = _ewma(s.rssi_raw, s.rssi_max_w, self.ewma_alpha_rssi)
-            # SNR scales 1:1 with our per-MCS TX power (noise unchanged), so
-            # EIRP-normalize it by the received MCS BEFORE smoothing — the curve
-            # mirror coupling lives here, not in RSSI.
+            # Raw SNR IS the control axis — no TX-power normalization. The curve
+            # is a fictional driver token (2026-07-02 spec); normalizing by it was
+            # a no-op per-rung and uncalibrated cross-rung.
             if s.snr_w is not None:
-                snr_norm_w = normalize_rssi(s.snr_w, s.mcs_w, self.rssi_norm)
-                s.snr = _ewma(s.snr, snr_norm_w, self.ewma_alpha_rssi)
+                s.snr = _ewma(s.snr, s.snr_w, self.ewma_alpha_rssi)
 
         s.fec_work = _ewma(s.fec_work, s.fec_work_rate_w, self.ewma_alpha_fec)
         s.burst_rate = _ewma(s.burst_rate, s.burst_rate_w, self.ewma_alpha_burst)

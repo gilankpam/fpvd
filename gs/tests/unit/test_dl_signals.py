@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from fpvdgs.dynlink.signals import RssiNormConfig, SignalAggregator
+from fpvdgs.dynlink.signals import SignalAggregator
 from fpvdgs.dynlink.signals import SignalAggregator as _Agg
 from fpvdgs.dynlink.stats_client import RxAnt, RxEvent, SessionInfo
 from fpvdgs.dynlink.stats_client import RxAnt as _RxAnt
 from fpvdgs.dynlink.stats_client import RxEvent as _RxEvent
-
-# Standard drone TX-power curve used in normalization tests.
-_NORM_CURVE = (29, 28, 25, 23, 19, 19, 19, 19)
-_BOUND_NORM = RssiNormConfig(enabled=True, p_ref_dbm=29, tx_power_dbm_by_mcs=_NORM_CURVE)
 
 
 def _rx(
@@ -188,26 +184,16 @@ def test_signals_has_no_unimplemented_snr_fields():
 
 def test_rssi_normalized_by_received_mcs():
     """rssi_raw keeps the measured value (observability only now)."""
-    agg = SignalAggregator(
-        ewma_alpha_rssi=1.0, rssi_norm=_BOUND_NORM
-    )  # no smoothing → see one window
+    agg = SignalAggregator(ewma_alpha_rssi=1.0)  # no smoothing → see one window
     s = agg.consume(_rx(0.1, mcs=5, ants=[(-70, -70, 10, 10)]))
     assert s.rssi_raw == -70.0  # measured, un-normalized
     assert s.rssi_max_w == -70.0
 
 
-def test_rssi_norm_disabled_is_identity():
-    from fpvdgs.dynlink.signals import RssiNormConfig
-
-    agg = SignalAggregator(ewma_alpha_rssi=1.0, rssi_norm=RssiNormConfig(enabled=False))
-    s = agg.consume(_rx(0.1, mcs=5, ants=[(-70, -70, 10, 10)]))
-    assert s.rssi_raw == -70.0  # raw, un-normalized observability
-
-
 def test_rssi_ewma_removes_power_step_across_mcs_climb():
     """Fixed distance, promote MCS0→MCS5: drone power drops 29→19 so the
     measured RSSI drops ~10 dB. rssi_raw shows the step down (observability)."""
-    agg = SignalAggregator(ewma_alpha_rssi=0.2, rssi_norm=_BOUND_NORM)
+    agg = SignalAggregator(ewma_alpha_rssi=0.2)
     # Window 1: MCS0 @ raw -60
     s = agg.consume(_rx(0.1, mcs=0, ants=[(-60, -60, 20, 20)]))
     assert s.rssi_raw == -60.0
@@ -219,7 +205,7 @@ def test_rssi_ewma_removes_power_step_across_mcs_climb():
 def test_rssi_norm_uses_best_antenna_mcs():
     """rssi_max_w is the best antenna's rssi_avg. mcs_w is now picked from
     the best-SNR antenna (not best-RSSI anymore)."""
-    agg = SignalAggregator(ewma_alpha_rssi=1.0, rssi_norm=_BOUND_NORM)
+    agg = SignalAggregator(ewma_alpha_rssi=1.0)
     ev = _rx(0.1)
     ev.rx_ant_stats = [
         RxAnt(
@@ -331,13 +317,15 @@ def test_snr_w_is_operating_antenna_snr():
     assert s.snr_w == 30.0
 
 
-def test_snr_is_eirp_normalized_and_smoothed():
-    # raw SNR 20 at MCS4 (curve 19, P_ref 29) -> +10 offset -> snr_norm 30.
-    # First window: EWMA seeds to the value, so s.snr == 30.
-    s = _Agg(rssi_norm=_BOUND_NORM).consume(
-        _evm_rxev([_evm_ant(0, -60, 20, -1, -1)])
-    )  # snr_avg=20, mcs=4
-    assert s.snr == 30.0
+def test_snr_is_raw_ewma_no_normalization():
+    agg = SignalAggregator()  # no rssi_norm anymore
+    # feed two windows at different received MCS; snr must NOT be shifted by any curve
+    agg.consume(_rx(0.1, mcs=0, ants=[(-60, -60, 20, 20)]))
+    first = agg.signals.snr
+    agg.consume(_rx(0.2, mcs=4, ants=[(-60, -60, 20, 20)]))
+    # identical raw SNR at a different MCS must stay identical (no per-MCS offset)
+    assert agg.signals.snr == first
+    assert first is not None and abs(first - 20.0) < 1e-6  # alpha seeds to first sample
 
 
 def test_snr_none_before_any_antenna_data():
@@ -349,12 +337,12 @@ def test_snr_none_before_any_antenna_data():
     assert s.snr is None
 
 
-def test_reset_smoothed_rssi_clears_ewmas():
+def test_reset_smoothed_clears_ewmas():
     agg = SignalAggregator()
     agg.signals.rssi = -50.0
     agg.signals.rssi_raw = -48.0
     agg.signals.snr = 30.0
-    agg.reset_smoothed_rssi()
+    agg.reset_smoothed()
     assert agg.signals.rssi is None
     assert agg.signals.rssi_raw is None
     assert agg.signals.snr is None

@@ -479,7 +479,7 @@ class Policy:
                 "rssi": signals.rssi,
                 "rssi_raw": signals.rssi_raw,
                 "snr": signals.snr_w,
-                "snr_norm": signals.snr,
+                "snr_ewma": signals.snr,
                 "snr_ceiling": snr_ceiling,
                 "promote_blocked": promote_blocked,
                 "snr_knees": self.learned_prior.snr_knees_snapshot(),

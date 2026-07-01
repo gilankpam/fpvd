@@ -202,7 +202,7 @@ def test_record_link_width_defaults_to_20(tmp_path):
     assert _records(tmp_path)[-1]["width"] == 20
 
 
-def test_record_carries_snr_norm_ceiling_knees(tmp_path):
+def test_record_carries_snr_ewma_ceiling_knees(tmp_path):
     from fpvdgs.dynlink.signals import Signals
 
     p = Policy(_cfg(tmp_path, min_samples=3), _profile())
@@ -215,7 +215,7 @@ def test_record_carries_snr_norm_ceiling_knees(tmp_path):
     p.tick(sig)
     p.close()
     rec = _records(tmp_path)[-1]
-    assert rec["snr_norm"] == 35.0
+    assert rec["snr_ewma"] == 35.0
     assert rec["snr_ceiling"] == 5
     assert isinstance(rec["snr_knees"], list) and len(rec["snr_knees"]) == 8
 

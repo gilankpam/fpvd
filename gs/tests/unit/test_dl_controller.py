@@ -353,10 +353,9 @@ def _make_fake_controller():
 
     class _Agg:
         def __init__(self):
-            self.rssi_norm = None
             self.reset_called = False
 
-        def reset_smoothed_rssi(self):
+        def reset_smoothed(self):
             self.reset_called = True
 
     class _Policy:
@@ -373,56 +372,37 @@ def _make_fake_controller():
     return c
 
 
-def test_bind_calibration_applies_drone_curve_and_adapter():
+def test_bind_calibration_resets_smoothed_and_binds_adapter():
     c = _make_fake_controller()
 
     c._bind_calibration(
         {"adapterId": "bl-m8812eu2", "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]}
     )
 
-    assert c._aggregator.rssi_norm.enabled is True
-    assert c._aggregator.rssi_norm.tx_power_dbm_by_mcs == (29, 28, 25, 23, 19, 19, 19, 19)
-    assert c._aggregator.rssi_norm.p_ref_dbm == 29
     assert c._aggregator.reset_called is True
     assert c._policy.bound == "bl-m8812eu2__bw20"
 
 
-def test_bind_calibration_missing_curve_disables_normalization():
+def test_bind_calibration_missing_curve_still_resets_and_binds():
     c = _make_fake_controller()
 
     c._bind_calibration({"adapterId": "bl-m8812eu2", "txPowerCurve": None})
 
-    # Normalization disabled due to missing curve …
-    assert c._aggregator.rssi_norm.enabled is False
-    # … but the adapter id still binds independently.
+    # reset_smoothed always fires on connect regardless of curve …
+    assert c._aggregator.reset_called is True
+    # … and the adapter id still binds.
     assert c._policy.bound == "bl-m8812eu2__bw20"
 
 
-def test_bind_calibration_valid_curve_null_adapter_still_normalizes():
+def test_bind_calibration_null_adapter_resets_but_no_prior_bind():
     c = _make_fake_controller()
 
     c._bind_calibration({"adapterId": None, "txPowerCurve": [29, 28, 25, 23, 19, 19, 19, 19]})
 
-    # Curve binds normalization even with no adapter id …
-    assert c._aggregator.rssi_norm.enabled is True
-    # … and the policy's bind is NOT called.
+    # reset_smoothed still fires even with no adapter id …
+    assert c._aggregator.reset_called is True
+    # … but the policy's prior bind is NOT called.
     assert c._policy.bound == c._policy._UNSET
-
-
-def test_valid_curve():
-    from fpvdgs.dynlink.controller import _valid_curve
-
-    # A list/tuple of exactly 8 ints → True
-    assert _valid_curve([29, 28, 25, 23, 19, 19, 19, 19]) is True
-    assert _valid_curve((29, 28, 25, 23, 19, 19, 19, 19)) is True
-    # Bools are ints in Python but must be rejected
-    assert _valid_curve([True] * 8) is False
-    # Wrong length
-    assert _valid_curve([29, 28, 25, 23, 19, 19, 19]) is False
-    # None
-    assert _valid_curve(None) is False
-    # Floats
-    assert _valid_curve([29.0, 28.0, 25.0, 23.0, 19.0, 19.0, 19.0, 19.0]) is False
 
 
 def _seed_controller():
@@ -437,9 +417,10 @@ def _seed_controller():
     c._snapshot = {"linkWidth": 20}
 
     class _Agg:
-        rssi_norm = "UNTOUCHED"
+        def __init__(self):
+            self.reset_called = False
 
-        def reset_smoothed_rssi(self):
+        def reset_smoothed(self):
             self.reset_called = True
 
     class _FL:
@@ -485,8 +466,7 @@ def test_seed_binds_when_drone_already_connected():
 
     c._bus = _Bus()
     c._seed_from_cached_connection()
-    assert c._aggregator.rssi_norm.enabled is True
-    assert c._aggregator.rssi_norm.tx_power_dbm_by_mcs == (29, 28, 25, 23, 19, 19, 19, 19)
+    assert c._aggregator.reset_called is True  # reset_smoothed fired on connect
     assert c._policy.bound == "bl-m8812eu2__bw20"
     assert c._policy.reset_called == 1
     assert c._policy.flightlog.began == 1
@@ -501,7 +481,7 @@ def test_seed_noop_when_disconnected():
 
     c._bus = _Bus()
     c._seed_from_cached_connection()
-    assert c._aggregator.rssi_norm == "UNTOUCHED"  # never bound
+    assert c._aggregator.reset_called is False  # never bound
     assert c._policy.bound == "SENTINEL_UNSET"
 
 
@@ -520,4 +500,4 @@ def test_seed_noop_when_no_cached_state_or_bus():
 
     c2._bus = _Bus()
     c2._seed_from_cached_connection()
-    assert c2._aggregator.rssi_norm == "UNTOUCHED"
+    assert c2._aggregator.reset_called is False  # never bound

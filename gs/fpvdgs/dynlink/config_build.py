@@ -14,7 +14,7 @@ from __future__ import annotations
 from .flightlog import FlightLogConfig
 from .learned_prior import LearnedPriorConfig
 from .policy import PolicyConfig, SelectorConfig
-from .signals import RssiNormConfig, SignalAggregator
+from .signals import SignalAggregator
 
 
 def build_policy_config(block: dict) -> PolicyConfig:
@@ -65,9 +65,6 @@ def build_aggregator(block: dict) -> SignalAggregator:
         ewma_alpha_fec=float(s.get("ewmaAlphaFec", d.ewma_alpha_fec)),
         ewma_alpha_burst=float(s.get("ewmaAlphaBurst", d.ewma_alpha_burst)),
         starvation_threshold_pps=float(s.get("starvationThresholdPps", d.starvation_threshold_pps)),
-        rssi_norm=RssiNormConfig(
-            enabled=False
-        ),  # identity until the controller binds the drone curve
     )
 
 
