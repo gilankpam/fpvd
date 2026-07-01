@@ -224,8 +224,8 @@ class DynamicLinkController:
             return
         with self._lock:
             radio = self._pending_cal
-        self._bind_calibration(radio)  # before warm-start so the prior is right
-        p.reset_for_new_session()  # new session: re-warm-start, re-climb
+        self._bind_calibration(radio)  # bind prior key before reset so first climb uses it
+        p.reset_for_new_session()  # new session: reset selector, re-climb from start MCS via probe
         p.flightlog.begin_flight()  # start a fresh flight file
         log.info("dynlink: drone connected — bound calibration + began new flight")
 

@@ -63,8 +63,8 @@ class SelectorConfig:
     # application lag before deciding to step down again. Enforces <= 1
     # demote per N windows across reactive/predict/snr/emergency.
     demote_cooldown_windows: int = 3
-    # Proactive SNR demote: consecutive ticks snr_ceiling must stay below the
-    # current rung before demoting to it (debounce; snr is already EWMA'd).
+    # Proactive SNR demote: consecutive ticks the current rung must be
+    # confidently unviable at the live SNR before demoting (debounce; snr is already EWMA'd).
     snr_demote_debounce: int = 2
     # SNR-knee hysteresis (dB). promote_blocked (snr_promote_margin_db) is now
     # advisory only: the live probe is authoritative for promotes, so a
@@ -144,7 +144,7 @@ class LeadingSelector:
         self._promote_clean = 0
         # Flap-damper state (per rung).
         self._flap_level: dict[int, int] = {}
-        self._suppress_until_ms: dict[int, int] = {}
+        self._suppress_until_ms: dict[int, float] = {}
         self._clean_dwell = 0
         self._promote_suppressed = False
 
@@ -155,7 +155,7 @@ class LeadingSelector:
 
     def _flap_backoff_ms(self, level: int) -> int:
         return min(
-            int(self.cfg.flap_base_backoff_ms * (self.cfg.flap_backoff_mult ** (level - 1))),
+            int(self.cfg.flap_base_backoff_ms * (self.cfg.flap_backoff_mult ** min(level - 1, 40))),
             self.cfg.flap_backoff_cap_ms,
         )
 

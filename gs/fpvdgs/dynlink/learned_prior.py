@@ -105,9 +105,7 @@ class KneeModel:
         """True iff rung K is CONFIDENTLY unviable at `value` — its own knee is
         confident and `value` falls more than `margin` below it. A cold/unlearned
         rung returns False: unknown is not unviable, so the caller may still
-        explore it. Distinct from `ceiling`, which answers "highest
-        confidently-VIABLE rung"; a rung above that ceiling may simply be
-        unmeasured, not known-bad.
+        explore it.
 
         `margin` (dB) is hysteresis: the value must be CLEARLY below the knee to
         count as unviable. A zero-margin `value < knee` is a knife-edge — when

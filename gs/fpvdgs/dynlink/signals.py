@@ -174,7 +174,7 @@ class SignalAggregator:
         s.link_starved_w = s.session is not None and s.packet_rate_w < self.starvation_threshold_pps
 
         # --- EWMA smoothing (§3) ---------------------------------------
-        # The leading loop runs on SNR (best-SNR antenna, normalized below);
+        # The leading loop runs on the raw best-SNR-antenna EWMA (snr field below);
         # rssi_raw is observability only, smoothed from the best-antenna
         # aggregation max(rssi_avg) — what the diversity receiver decodes
         # against (and what the OSD shows), not min(rssi_min) which tracks the
