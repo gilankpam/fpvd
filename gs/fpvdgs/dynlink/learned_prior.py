@@ -68,14 +68,14 @@ class KneeModel:
     confidence. Monotone-in-rung on read (cumulative max).
     Caller feeds only settled samples."""
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, cfg: LearnedPriorConfig) -> None:
         self.cfg = cfg
         self._knee: list[float | None] = [None] * (MAX_MCS + 1)
         self._count: list[float] = [0.0] * (MAX_MCS + 1)
 
-    def observe(self, rung: int, rssi: float, clean: bool) -> None:
+    def observe(self, rung: int, value: float, clean: bool) -> None:
         if rung < 0 or rung > MAX_MCS:
             return
         d = self.cfg.recency_decay
@@ -84,11 +84,11 @@ class KneeModel:
         k = self._knee[rung]
         if k is None:
             if not clean:  # establish the floor ONLY from a failure;
-                self._knee[rung] = rssi  # a clean sample leaves it None (= explorable)
-        elif clean and rssi < k:
-            self._knee[rung] = k + self.cfg.alpha_relax * (rssi - k)
-        elif (not clean) and rssi > k:
-            self._knee[rung] = k + self.cfg.alpha_tighten * (rssi - k)
+                self._knee[rung] = value  # a clean sample leaves it None (= explorable)
+        elif clean and value < k:
+            self._knee[rung] = k + self.cfg.alpha_relax * (value - k)
+        elif (not clean) and value > k:
+            self._knee[rung] = k + self.cfg.alpha_tighten * (value - k)
         self._count[rung] += 1.0
 
     def _eff_knees(self) -> list[float | None]:

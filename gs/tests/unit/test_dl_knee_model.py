@@ -7,14 +7,14 @@ def _model(**kw):
 
 def test_clean_first_sample_does_not_seed_knee():
     m = _model()
-    m.observe(rung=4, rssi=-60.0, clean=True)  # clean -> no knee planted
+    m.observe(rung=4, value=-60.0, clean=True)  # clean -> no knee planted
     assert m._knee[4] is None
     assert m._count[4] == 1.0  # but the sample still counts
 
 
 def test_dirty_first_sample_seeds_knee_at_rssi():
     m = _model()
-    m.observe(rung=4, rssi=-60.0, clean=False)  # failure -> knee = -60
+    m.observe(rung=4, value=-60.0, clean=False)  # failure -> knee = -60
     assert m._knee[4] == -60.0
     assert m._count[4] == 1.0
 
@@ -79,7 +79,7 @@ def test_recency_decay_one_keeps_confidence_forever():
 
 def test_observe_ignores_out_of_range_rung():
     m = _model()
-    m.observe(rung=99, rssi=-50.0, clean=True)
+    m.observe(rung=99, value=-50.0, clean=True)
     assert all(k is None for k in m._knee)
 
 
@@ -125,7 +125,7 @@ def test_to_dict_round_trips_through_load_dict():
     m = _model()
     _confident(m, 4, -60.0, n=12)
     doc = m.to_dict()
-    assert doc["schema"] == 2
+    assert doc["schema"] == 3
     m2 = _model()
     assert m2.load_dict(doc) is True
     assert m2.ceiling(-50.0) == 4
@@ -154,6 +154,13 @@ def test_load_dict_rejects_non_dict():
     assert m.load_dict(None) is False
     assert m.load_dict([1, 2, 3]) is False
     assert m.ceiling(-50.0) is None  # no crash, stays empty
+
+
+def test_schema_v2_doc_is_ignored_cold_retrain():
+    m = KneeModel(LearnedPriorConfig())
+    ok = m.load_dict({"schema": 2, "knees": [10.0] * 8, "counts": [50.0] * 8})
+    assert ok is False
+    assert m.knees_snapshot() == [None] * 8  # cold — no normalized knees carried
 
 
 # ── rung_unviable hysteresis margin ──────────────────────────────────────────
