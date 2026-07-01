@@ -23,7 +23,9 @@ def _sig(rssi, ts=1.0):
     return Signals(rssi=rssi, residual_loss_w=0.0, fec_work=0.0, link_starved_w=False, timestamp=ts)
 
 
-def test_warm_start_seeds_from_persisted_curve(tmp_path):
+def test_no_warmstart_seed_boot_stays_at_start_mcs(tmp_path):
+    # A persisted prior with warm SNR knees (rung-5 knee planted) must NOT
+    # jump the boot MCS; the probe alone climbs from the start rung.
     prof = _profile()
     p1 = Policy(_cfg(tmp_path, min_samples=3), prof)
     for _ in range(12):  # dirty SNR samples plant the rung-5 knee
@@ -31,7 +33,8 @@ def test_warm_start_seeds_from_persisted_curve(tmp_path):
     p1.close()
     p2 = Policy(_cfg(tmp_path, min_samples=3), prof)
     dec = p2.tick(_sig_snr(36.0, ts=1.0))
-    assert dec.mcs == 5  # warm-started from the persisted SNR knee
+    # No seed: boot rung climbs only via the probe, not a ceiling jump.
+    assert dec.mcs == 1  # stays at boot MCS (start_mcs=1), not jumped to 5
     p2.close()
 
 
@@ -174,7 +177,6 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
     prior_before = p.learned_prior
     # Simulate a session that climbed + accumulated hysteresis state.
     p.leading.state.current_mcs = 5
-    p._cold_started = True
     p._starvation_count = 4
     p._snr_demote_count = 2
     p._predict_demote_count = 5
@@ -185,7 +187,6 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
     p.reset_for_new_session()
 
     assert p.leading.state.current_mcs == 1  # back to the boot MCS
-    assert p._cold_started is False  # warm-start will re-run
     assert p._starvation_count == 0
     assert p._snr_demote_count == 0
     assert p._predict_demote_count == 0
@@ -420,25 +421,3 @@ def test_no_two_demote_paths_stack_in_same_tick(tmp_path):
     assert dec.mcs == 4, f"expected one step (5→4), got {dec.mcs}"
     assert "snr_demote" in dec.reason  # confirms snr_demote fired; no loss reason appended
     p.close()
-
-
-def test_snr_ceiling_still_logged_though_not_a_demote_target(tmp_path):
-    import json
-
-    from fpvdgs.dynlink.flightlog import FlightLogConfig
-    from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
-    from fpvdgs.dynlink.policy import PolicyConfig
-
-    cfg = PolicyConfig(
-        learned_prior=LearnedPriorConfig(persist_dir=str(tmp_path / "lp")),
-        flightlog=FlightLogConfig(dir=str(tmp_path / "fl")),
-    )
-    p = Policy(cfg, _profile())
-    p.learned_prior._snr_model._knee[0] = 20.0
-    p.learned_prior._snr_model._count[0] = 12.0
-    p.tick(_sig_snr(33.0, 1.0))
-    p.close()
-    files = sorted((tmp_path / "fl").glob("*.jsonl"))
-    with open(files[-1]) as f:
-        last = [json.loads(line) for line in f if line.strip()][-1]
-    assert "snr_ceiling" in last and last["snr_ceiling"] == 0

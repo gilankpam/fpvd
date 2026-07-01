@@ -202,13 +202,10 @@ def test_record_link_width_defaults_to_20(tmp_path):
     assert _records(tmp_path)[-1]["width"] == 20
 
 
-def test_record_carries_snr_ewma_ceiling_knees(tmp_path):
+def test_record_carries_snr_ewma_knees(tmp_path):
     from fpvdgs.dynlink.signals import Signals
 
     p = Policy(_cfg(tmp_path, min_samples=3), _profile())
-    # Direct-set: plant confident SNR knee at MCS5 = 30 so snr_ceiling resolves
-    p.learned_prior._snr_model._knee[5] = 30.0
-    p.learned_prior._snr_model._count[5] = 12.0
     sig = Signals(
         rssi=-50.0, residual_loss_w=0.0, fec_work=0.0, link_starved_w=False, timestamp=1.0, snr=35.0
     )
@@ -216,17 +213,17 @@ def test_record_carries_snr_ewma_ceiling_knees(tmp_path):
     p.close()
     rec = _records(tmp_path)[-1]
     assert rec["snr_ewma"] == 35.0
-    assert rec["snr_ceiling"] == 5
+    assert "snr_ceiling" not in rec  # removed: cross-rung ceiling field is gone
     assert isinstance(rec["snr_knees"], list) and len(rec["snr_knees"]) == 8
 
 
-def test_reactive_demote_steps_one_rung_not_to_ceiling(tmp_path):
-    """snr_ceiling is logged but is NOT a demote target; reactive loss demotes
-    exactly one rung regardless of what the SNR ceiling says."""
+def test_reactive_demote_steps_one_rung(tmp_path):
+    """Reactive loss demotes exactly one rung (one step at a time), not a
+    multi-rung jump: a single breaching window steps 5→4, no further."""
     from fpvdgs.dynlink.signals import Signals
 
     p = Policy(_cfg(tmp_path, min_samples=3), _profile())
-    # Direct-set: SNR knee: rung1 viable at snr>=10, rung4 at >=30; current snr 12 -> ceiling 1
+    # Direct-set: SNR knees planted at rungs 1 and 4 (prior state; demote is reactive)
     p.learned_prior._snr_model._knee[1] = 10.0
     p.learned_prior._snr_model._count[1] = 12.0
     p.learned_prior._snr_model._knee[4] = 30.0
@@ -244,7 +241,7 @@ def test_reactive_demote_steps_one_rung_not_to_ceiling(tmp_path):
         )
 
     dec = p.tick(sig(1.0))  # single breaching window -> one-step demote
-    assert dec.mcs == 4  # 5 -> 4 (one step), not 5 -> 1 (old jump-to-ceiling)
+    assert dec.mcs == 4  # 5 -> 4 (one step)
     p.close()
 
 
@@ -252,7 +249,7 @@ def test_proactive_snr_demote_before_loss(tmp_path):
     from fpvdgs.dynlink.signals import Signals
 
     p = Policy(_cfg(tmp_path, min_samples=3), _profile())
-    # Direct-set: SNR knee: rung3 viable at snr>=15, rung4 at >=30. Current snr 20 -> ceiling 3.
+    # Direct-set: SNR knee: rung3 viable at snr>=15, rung4 at >=30. Current snr 20 -> rung4 unviable.
     p.learned_prior._snr_model._knee[3] = 15.0
     p.learned_prior._snr_model._count[3] = 12.0
     p.learned_prior._snr_model._knee[4] = 30.0
@@ -289,8 +286,7 @@ def test_promote_explores_cold_frontier_rung(tmp_path):
     # confident for rung4 ONLY (the link only ever settled there). Healthy SNR +
     # clean probe rung5. rung5 is UNKNOWN (cold), not unviable, so the probe must
     # be allowed to promote to it AND the proactive SNR demote must NOT yank it
-    # back before its knee can warm. Fails on the old code 3 ways: promote vetoed
-    # (snr_ceiling=4), or promoted-then-demoted (ceiling 4 < 5), or never settles.
+    # back before its knee can warm.
     from fpvdgs.dynlink.signals import Signals
 
     cfg = _cfg(tmp_path, min_samples=3)

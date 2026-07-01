@@ -18,7 +18,7 @@ def test_persistence_round_trip_v2(tmp_path):
     _settle_snr(p, 4, 22.0, False)  # dirty to plant the knee
     p.flush()
     p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=3))
-    assert p2.snr_ceiling(30.0) == 4
+    assert p2._snr_model._knee[4] is not None  # rung-4 knee was loaded from disk
 
 
 def test_v1_file_ignored_and_retrains(tmp_path):
@@ -26,15 +26,15 @@ def test_v1_file_ignored_and_retrains(tmp_path):
         json.dumps({"schema": 1, "bins": [2.0, -90, -30], "cells": []})
     )
     p = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=3))
-    assert p.snr_ceiling(30.0) is None  # v1 ignored
+    assert p._snr_model._knee[4] is None  # v1 ignored -> knee cold
     _settle_snr(p, 4, 22.0, False)  # dirty to plant the knee
-    assert p.snr_ceiling(30.0) == 4  # retrains on v2
+    assert p._snr_model._knee[4] is not None  # retrains on v2
 
 
 def test_corrupt_file_is_ignored(tmp_path):
     (tmp_path / "m8812eu2.json").write_text("{not json")
     p = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path)))
-    assert p.snr_ceiling(30.0) is None
+    assert all(k is None for k in p._snr_model._knee)  # corrupt file -> cold
 
 
 def test_to_status_reports_knees(tmp_path):
@@ -82,32 +82,12 @@ def test_key_sanitized_in_filename(tmp_path):
     assert len(files) == 1 and "/" not in files[0].name
 
 
-def test_snr_ceiling_learns_independently_of_rssi(tmp_path):
-    p = _prior(tmp_path, min_samples=3)
-    # Direct-set: plant confident SNR knees without depending on learning dynamics
-    p._snr_model._knee[1] = 10.0
-    p._snr_model._count[1] = 12.0
-    p._snr_model._knee[4] = 30.0
-    p._snr_model._count[4] = 12.0
-    assert p.snr_ceiling(35.0) == 4
-    assert p.snr_ceiling(12.0) == 1
-    assert p.snr_ceiling(5.0) is None
-
-
-def test_snr_ceiling_none_when_cold_or_none(tmp_path):
-    p = _prior(tmp_path, min_samples=3)
-    assert p.snr_ceiling(30.0) is None  # cold
-    # clean settle plants no knee (new invariant); this asserts None-input handling
-    _settle_snr(p, 4, 30.0, True)
-    assert p.snr_ceiling(None) is None  # None input
-
-
 def test_snr_persistence_round_trip(tmp_path):
     p = _prior(tmp_path, min_samples=3)
     _settle_snr(p, 4, 22.0, False)  # dirty to plant the snr knee
     p.flush()
     p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=3))
-    assert p2.snr_ceiling(30.0) == 4
+    assert p2._snr_model._knee[4] is not None  # snr knee was persisted and loaded
 
 
 def test_old_flat_rssi_file_leaves_snr_cold(tmp_path):
@@ -123,7 +103,7 @@ def test_old_flat_rssi_file_leaves_snr_cold(tmp_path):
     }
     (tmp_path / "m8812eu2.json").write_text(json.dumps(flat))
     p2 = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=3))
-    assert p2.snr_ceiling(35.0) is None
+    assert all(k is None for k in p2._snr_model._knee)  # old flat doc has no snr key -> cold
 
 
 def test_load_tolerates_null_model_subkeys(tmp_path):
@@ -134,7 +114,7 @@ def test_load_tolerates_null_model_subkeys(tmp_path):
         json.dumps({"rssi": None, "snr": None, "key": "m8812eu2"})
     )
     p = LearnedPrior("m8812eu2", LearnedPriorConfig(persist_dir=str(tmp_path)))
-    assert p.snr_ceiling(30.0) is None
+    assert all(k is None for k in p._snr_model._knee)  # null subkeys -> cold
 
 
 # ── snr_rung_unviable: per-rung known-bad, NOT highest-confident-viable ───────
@@ -213,7 +193,7 @@ def test_unbound_sentinel_prior_ignores_existing_file(tmp_path):
         json.dump(doc, f)
     cfg = LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=1)
     p = LearnedPrior(UNBOUND_KEY, cfg)
-    assert p.snr_ceiling(40.0) is None  # did not load the stale confident knees
+    assert all(k is None for k in p._snr_model._knee)  # did not load stale confident knees
 
 
 def test_real_key_prior_still_flushes(tmp_path):

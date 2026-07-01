@@ -101,14 +101,6 @@ class KneeModel:
                 eff[K] = run
         return eff
 
-    def ceiling(self, rssi: float) -> int | None:
-        eff = self._eff_knees()
-        best = None
-        for K in range(MAX_MCS + 1):
-            if eff[K] is not None and eff[K] <= rssi:
-                best = K
-        return best
-
     def rung_unviable(self, rung: int, value: float, margin: float = 0.0) -> bool:
         """True iff rung K is CONFIDENTLY unviable at `value` — its own knee is
         confident and `value` falls more than `margin` below it. A cold/unlearned
@@ -161,8 +153,8 @@ class KneeModel:
 class LearnedPrior:
     """Facade over KneeModel (SNR axis only), keyed + persisted per drone adapter id
     (radio.adapterId). Keeps the interface policy.py depends on; the live probe stays
-    authoritative for promotes — this only warm-starts and feeds the down-only
-    predictive demote."""
+    authoritative for promotes — this feeds the down-only predictive and proactive
+    demote paths."""
 
     def __init__(self, key: str, cfg: LearnedPriorConfig) -> None:
         self.key = key
@@ -182,9 +174,6 @@ class LearnedPrior:
         if self._since_flush >= self.cfg.flush_interval_observations:
             self.flush()
             self._since_flush = 0
-
-    def snr_ceiling(self, snr) -> int | None:
-        return None if snr is None else self._snr_model.ceiling(float(snr))
 
     def snr_rung_unviable(self, target, snr, margin: float = 0.0) -> bool:
         """True iff the SNR prior CONFIDENTLY says rung `target` is unviable at

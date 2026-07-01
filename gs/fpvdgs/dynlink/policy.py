@@ -6,8 +6,8 @@ Decision on every tick.
 
 Phase 3b: the drone computes its own bitrate / FEC / depth / tx_power
 locally, so the GS no longer composes any of that. The selector (Phase 2)
-is the only decision: probe-promote + reactive demote, with a learned-prior
-warm-start seed and starvation hysteresis feeding the emergency demote.
+is the only decision: probe-promote + reactive demote, with starvation
+hysteresis feeding the emergency demote.
 """
 
 from __future__ import annotations
@@ -272,14 +272,6 @@ class Policy:
         # left None (e.g. tests / no probe) the selector can never
         # promote — it only reacts to emergencies.
         self._probe_status = probe_status
-        # Warm-start one-shot: seed the operating MCS from the learned
-        # per-card prior on the first tick where RSSI is present, so the
-        # first real decision isn't stuck at the boot MCS while the probe
-        # warms up. Flipped True after the single seed; the probe-driven
-        # select() owns MCS thereafter. (No raw-RSSI fallback — that
-        # cold-start table was removed; a cold prior just lets the probe
-        # climb from boot.)
-        self._cold_started = False
         self.leading = LeadingSelector(cfg.selector)
         # Per-window link_starved_w can flicker on brief packet-rate
         # dips inside an otherwise-healthy bursty stream. Require N
@@ -330,16 +322,6 @@ class Policy:
         # (nothing to cascade), so react on the first breaching window.
         sustained_loss = signals.residual_loss_w >= self.cfg.selector.video_demote_per
 
-        # Warm-start seed (one-shot). Uses the learned per-card SNR curve ONLY —
-        # there is no fallback hand-table. snr_ceiling returns None for a cold
-        # prior, so when no knee is learned the probe climbs safely from the boot
-        # MCS. Only raises the boot MCS, runs before select().
-        if not self._cold_started and signals.snr is not None:
-            seed = self.learned_prior.snr_ceiling(signals.snr)
-            if seed is not None and seed > self.leading.state.current_mcs:
-                self.leading.state.current_mcs = min(seed, self.leading._cap_mcs)
-            self._cold_started = True
-
         # Predictive demote (down-only, confidence-gated, debounced). If the SNR
         # prior says the CURRENT rung is unviable at the PROJECTED SNR, pre-demote
         # one rung ahead of the reactive path. A cold/unlearned rung is explorable
@@ -388,9 +370,6 @@ class Policy:
                     self._predict_demote_count = 0
             else:
                 self._predict_demote_count = 0
-
-        # snr_ceiling kept for the flight log only; no longer a demote target.
-        snr_ceiling = self.learned_prior.snr_ceiling(signals.snr)
 
         # Proactive SNR demote (down-only, debounced, cooldown-gated): if the SNR
         # prior CONFIDENTLY says the CURRENT rung is unviable at the live SNR,
@@ -480,7 +459,6 @@ class Policy:
                 "rssi_raw": signals.rssi_raw,
                 "snr": signals.snr_w,
                 "snr_ewma": signals.snr,
-                "snr_ceiling": snr_ceiling,
                 "promote_blocked": promote_blocked,
                 "snr_knees": self.learned_prior.snr_knees_snapshot(),
                 "evm": signals.evm_w,
@@ -528,13 +506,12 @@ class Policy:
     def reset_for_new_session(self) -> None:
         """Reset volatile selector + hysteresis state to boot (incl. the SNR
         slope window, so the first predictive-demote slope is computed fresh).
-        A confirmed drone reconnect is a new session, so re-run the learned-prior
-        warm-start and re-climb from the boot MCS instead of resuming a stale
-        climbed-up rung. The persistent learned_prior knees are kept
-        (cross-session knowledge). This is selector state only — the connect
-        handler also calls self.flightlog.begin_flight() to roll the flight."""
+        A confirmed drone reconnect is a new session; re-climb from the boot MCS
+        instead of resuming a stale climbed-up rung. The persistent learned_prior
+        knees are kept (cross-session knowledge). This is selector state only —
+        the connect handler also calls self.flightlog.begin_flight() to roll the
+        flight."""
         self.leading = LeadingSelector(self.cfg.selector)
-        self._cold_started = False
         self._starvation_count = 0
         self._ticks_at_mcs = 0
         self._last_ingest_mcs = None
