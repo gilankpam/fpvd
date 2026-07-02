@@ -494,13 +494,19 @@ class Policy:
         else:
             self._snr_demote_count = 0
 
-        # Promote gates for the knee-driven selector: target_blocked = the SNR
-        # prior CONFIDENTLY says the target rung is unviable at the live SNR
-        # (route 2's headroom test, logged as promote_blocked);
+        # Promote gates for the knee-driven selector.
+        # target_blocked (route 2's headroom test): the failure knee for the
+        # target rung is confident AND the live SNR has less than
+        # snr_promote_margin_db dB of headroom ABOVE the knee. The negative
+        # margin passed to snr_rung_unviable (which tests `snr < knee - margin`)
+        # flips the direction: `snr < knee - (-m)` = `snr < knee + m`, so
+        # promote requires SNR ≥ knee + m. The demote path uses a POSITIVE margin
+        # (`snr < knee - m`) — only demote when clearly below the knee. The two
+        # asymmetric margins form a stable dead-band.
         # target_confident splits route 2 (knee-gated) from route 3 (explore).
         promote_target = self.leading.state.current_mcs + 1
         promote_blocked = self.learned_prior.snr_rung_unviable(
-            promote_target, signals.snr, margin=self.cfg.selector.snr_promote_margin_db
+            promote_target, signals.snr, margin=-self.cfg.selector.snr_promote_margin_db
         )
         target_confident = self.learned_prior.snr_rung_confident(promote_target)
 

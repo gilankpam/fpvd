@@ -229,16 +229,22 @@ def _sig_snr(snr, ts):
 def test_snr_knee_hysteresis_unsticks_stuck_promote(tmp_path):
     prof = _profile()
     p = Policy(_cfg(tmp_path, min_samples=3), prof)
-    _settle_snr_knee(p, 4, 34.0)  # knee[4] ~34
-    _settle_snr_knee(p, 5, 36.0)  # knee[5] ~36 (the wall)
+    # Note: _settle_snr_knee uses clean=True by default. In the current
+    # KneeModel, clean samples do NOT plant a failure knee (knee[K] stays None).
+    # So after this call the rung is COLD (target_confident=False) and the
+    # promote fires via route 3 (explore), not route 2 (knee-gated).
+    _settle_snr_knee(p, 4, 34.0)
+    _settle_snr_knee(p, 5, 36.0)
     p.leading.state.current_mcs = 4
     dec = None
     ts = 1.0
-    # knee-gated promote fires after promote_dwell_ticks (30) clean ticks with headroom
+    # Clean ingest (default clean=True) observes SNR but never plants a failure
+    # knee, so knee[5] stays None after _settle_snr_knee. The rung is COLD.
+    # => target_confident=False, so route 3 (explore) fires after 30 clean ticks.
     for _ in range(35):  # 35 > promote_dwell_ticks (30)
-        dec = p.tick(_sig_snr(35.6, ts))  # 0.4 dB below knee[5]=36: strict veto locks
-        ts += 1.0  # but promote_margin=1.0 -> 36-1=35 < 35.6 -> NOT blocked
-    assert dec.mcs == 5  # knee_promote: margin clears the knife-edge veto
+        dec = p.tick(_sig_snr(35.6, ts))
+        ts += 1.0
+    assert dec.mcs == 5  # explore_promote (cold rung -> route 3)
     p.close()
 
 
