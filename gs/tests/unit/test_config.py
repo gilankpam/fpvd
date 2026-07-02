@@ -171,6 +171,22 @@ def test_stale_nested_selector_key_does_not_brick_boot(tmp_path):
     assert "bogusSmoothing" not in s.effective()["dynamicLink"]["smoothing"]
 
 
+def test_tap_defaults_present():
+    from fpvdgs.config_defaults import default_config
+
+    tap = default_config()["dynamicLink"]["tap"]
+    assert tap == {"enabled": True, "port": 8110, "staleMs": 500, "captureRaw": False}
+
+
+def test_stale_tap_key_stripped_on_load():
+    from fpvdgs.config import _warn_unknown
+    from fpvdgs.config_defaults import default_config
+
+    loaded = {"dynamicLink": {"tap": {"enabled": True, "removedKnob": 3}}}
+    pruned = _warn_unknown(loaded, default_config())
+    assert "removedKnob" not in pruned["dynamicLink"]["tap"]
+
+
 def test_learned_prior_known_key_survives_loader_bogus_key_stripped(tmp_path, caplog):
     """A valid learnedPrior knob in config.json must survive the tolerant loader;
     an unknown learnedPrior key must be stripped (not crash the boot path).

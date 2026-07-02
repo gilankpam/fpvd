@@ -413,3 +413,35 @@ def test_selector_accepts_new_knobs_rejects_probe_knobs():
     )  # must not raise
     with pytest.raises(SchemaError):
         schema.validate_effective(_dl(selector={"probeViableThreshold": 0.9}))
+
+
+def test_tap_block_valid_patch_accepted():
+    from fpvdgs import schema
+
+    schema.validate_config_patch(
+        {
+            "dynamicLink": {
+                "tap": {"enabled": False, "port": 9000, "staleMs": 250, "captureRaw": True}
+            }
+        }
+    )
+
+
+def test_tap_unknown_key_rejected():
+    import pytest
+
+    from fpvdgs import schema
+
+    with pytest.raises(schema.SchemaError):
+        schema._validate_dynamic_link({"tap": {"bogus": 1}})
+
+
+def test_tap_port_and_stale_range_rejected():
+    import pytest
+
+    from fpvdgs import schema
+
+    with pytest.raises(schema.SchemaError):
+        schema._validate_dynamic_link({"tap": {"port": 80}})
+    with pytest.raises(schema.SchemaError):
+        schema._validate_dynamic_link({"tap": {"staleMs": 0}})

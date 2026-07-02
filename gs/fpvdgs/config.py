@@ -12,7 +12,14 @@ import os
 import threading
 
 from .config_defaults import default_config
-from .schema import DRONE_KEYS, DYNAMIC_LINK_KEYS, LEARNED_PRIOR_KEYS, SELECTOR_KEYS, SMOOTHING_KEYS
+from .schema import (
+    DRONE_KEYS,
+    DYNAMIC_LINK_KEYS,
+    LEARNED_PRIOR_KEYS,
+    SELECTOR_KEYS,
+    SMOOTHING_KEYS,
+    TAP_KEYS,
+)
 
 log = logging.getLogger("fpvdgs.config")
 
@@ -44,6 +51,7 @@ def _warn_unknown(loaded: dict, defaults: dict) -> dict:
             ("selector", SELECTOR_KEYS),
             ("smoothing", SMOOTHING_KEYS),
             ("learnedPrior", LEARNED_PRIOR_KEYS),
+            ("tap", TAP_KEYS),
         ):
             sub = dl.get(block)
             if isinstance(sub, dict):

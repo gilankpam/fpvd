@@ -27,6 +27,7 @@ DYNAMIC_LINK_KEYS = {
     "smoothing",
     "flightlog",
     "learnedPrior",
+    "tap",
 }
 DRONE_KEYS = {"host", "apiPort"}  # the drone's address; reused by HTTP/IDR/DL
 SELECTOR_KEYS = {
@@ -59,6 +60,7 @@ LEARNED_PRIOR_KEYS = {
     "minSamples",
     "recencyDecay",
 }
+TAP_KEYS = frozenset({"enabled", "port", "staleMs", "captureRaw"})
 VALID_WIDTHS = {10, 20, 40}  # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
@@ -175,6 +177,19 @@ def _validate_dynamic_link(dl: dict) -> None:
     port = dl.get("dronePort", 9999)
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("dynamicLink.dronePort must be an int in 1..65535")
+    tap = dl.get("tap")
+    if tap is not None:
+        if not isinstance(tap, dict):
+            raise SchemaError("dynamicLink.tap must be an object")
+        unknown_tap = set(tap) - TAP_KEYS
+        if unknown_tap:
+            raise SchemaError(f"unknown dynamicLink.tap keys: {sorted(unknown_tap)}")
+        port = tap.get("port", 8110)
+        if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+            raise SchemaError("dynamicLink.tap.port must be an int in 1024..65535")
+        stale = tap.get("staleMs", 500)
+        if isinstance(stale, bool) or not isinstance(stale, (int, float)) or stale <= 0:
+            raise SchemaError("dynamicLink.tap.staleMs must be > 0")
     if not isinstance(dl.get("enabled", False), bool):
         raise SchemaError("dynamicLink.enabled must be a bool")
     sel = dl.get("selector")
