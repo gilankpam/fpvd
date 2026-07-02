@@ -2,6 +2,8 @@
 
 from dataclasses import replace
 
+import pytest
+
 from fpvdgs.dynlink.policy import LeadingSelector, SelectorConfig
 
 T0 = 1_000_000.0  # ms
@@ -290,3 +292,84 @@ def test_confirmation_expires():
         step(s, ts, snr=29.0)
     # no snap-back: must ladder-climb (dwell) instead — still at 1 after 0.5 s
     assert s.state.current_mcs == 1
+
+
+# ---- initial state ----------------------------------------------------------
+
+
+def test_starts_at_safe_default_mcs1():
+    s = mk()
+    assert s.state.current_mcs == 1
+
+
+def test_max_mcs_too_low_raises():
+    with pytest.raises(ValueError, match="max_mcs"):
+        mk(max_mcs=-1)
+
+
+# ---- emergency / reactive demote --------------------------------------------
+
+
+def test_emergency_fec_pressure_demotes_one_step():
+    s = mk()
+    ts = climb_one(s, T0)  # 1 -> 2
+    pre = s.state.current_mcs
+    ts += TICK
+    mcs, changed = step(s, ts, fec=0.85)
+    assert changed and mcs == pre - 1
+    assert any("emergency" in r for r in s.reasons)
+
+
+def test_emergency_link_starved_demotes_one_step():
+    s = mk()
+    ts = climb_one(s, T0)  # 1 -> 2
+    pre = s.state.current_mcs
+    ts += TICK
+    mcs, changed = step(s, ts, starved=True)
+    assert changed and mcs == pre - 1
+    assert any("emergency" in r for r in s.reasons)
+
+
+def test_emergency_at_mcs0_cannot_force_below():
+    """Already at MCS 0 — emergency has nowhere to go, no change."""
+    s = mk()
+    ts = T0
+    while s.state.current_mcs > 0:
+        ts += TICK
+        step(s, ts, starved=True)
+    ts += TICK
+    mcs, changed = step(s, ts, starved=True)
+    assert not changed
+    assert mcs == 0
+
+
+def test_loss_demote_blocked_when_cooldown_not_elapsed():
+    s = mk()
+    ts = climb_one(s, T0)  # 1 -> 2
+    pre = s.state.current_mcs
+    ts += TICK
+    mcs, changed = step(s, ts, loss=0.06, loss_demote=True, can_demote=False)
+    assert mcs == pre and changed is False
+
+
+def test_emergency_blocked_when_cooldown_not_elapsed():
+    s = mk()
+    ts = climb_one(s, T0)  # 1 -> 2
+    pre = s.state.current_mcs
+    ts += TICK
+    mcs, changed = step(s, ts, fec=0.9, can_demote=False)
+    assert mcs == pre and changed is False
+
+
+def test_emergency_demote_does_not_strike():
+    """Emergency demotes (fec/starved) must not charge the flap-damper
+    and must not set last_fail — they are infrastructure events, not
+    promote-failure evidence."""
+    s = mk()
+    ts = climb_one(s, T0)  # 1 -> 2
+    pre = s.state.current_mcs
+    ts += TICK
+    mcs, changed = step(s, ts, fec=0.95)
+    assert changed and mcs == pre - 1
+    assert s._flap_level == {}  # emergency never charges the damper
+    assert s.last_fail is None  # emergency never teaches a failure
