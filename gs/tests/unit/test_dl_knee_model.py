@@ -165,3 +165,16 @@ def test_rung_unviable_default_margin_unchanged():
     _confident(m, 4, 27.0)
     assert m.rung_unviable(4, 26.9) is True
     assert m.rung_unviable(4, 27.1) is False
+
+
+def test_rung_confident_cold_and_confident():
+    cfg = LearnedPriorConfig(min_samples=2.0, recency_decay=1.0)
+    m = KneeModel(cfg)
+    assert m.rung_confident(3) is False  # cold: no knee
+    m.observe(3, 20.0, clean=False)  # plants knee, count=1 < min_samples
+    assert m.rung_confident(3) is False
+    m.observe(3, 20.0, clean=False)  # count=2 >= min_samples
+    assert m.rung_confident(3) is True
+    # monotone effective ladder: rung above a confident knee stays cold
+    assert m.rung_confident(4) is False
+    assert m.rung_confident(9) is False  # out of range

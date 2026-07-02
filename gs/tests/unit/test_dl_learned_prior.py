@@ -221,3 +221,24 @@ def test_snr_predictive_rung_unviable(tmp_path):
     # None guards
     assert p.snr_predictive_rung_unviable(None, -2.0, 5) is False
     assert p.snr_predictive_rung_unviable(30.0, -2.0, None) is False
+
+
+def test_teach_failure_plants_knee_with_attribution(tmp_path):
+    cfg = LearnedPriorConfig(min_samples=1.0, persist_dir=str(tmp_path))
+    p = LearnedPrior("cardX__bw20", cfg)
+    p.teach_failure(4, 21.5)
+    assert p.snr_knees_snapshot()[4] == 21.5
+    assert p.snr_rung_confident(4) is True
+    # None-tolerant (starved windows have no SNR)
+    p.teach_failure(None, 20.0)
+    p.teach_failure(4, None)
+    assert p.snr_knees_snapshot()[4] == 21.5
+
+
+def test_teach_failure_flushes_periodically(tmp_path):
+    cfg = LearnedPriorConfig(flush_interval_observations=2, persist_dir=str(tmp_path))
+    p = LearnedPrior("cardY__bw20", cfg)
+    p.teach_failure(2, 15.0)
+    assert not (tmp_path / "cardY__bw20.json").exists()
+    p.teach_failure(2, 16.0)
+    assert (tmp_path / "cardY__bw20.json").exists()

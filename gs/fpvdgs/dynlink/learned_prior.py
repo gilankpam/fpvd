@@ -119,6 +119,14 @@ class KneeModel:
         k = self._eff_knees()[rung]
         return k is not None and value < k - margin
 
+    def rung_confident(self, rung: int) -> bool:
+        """True iff rung has a CONFIDENT effective knee (its own or inherited
+        via the monotone ladder). Cold/unlearned -> False. Splits the promote
+        path: confident -> knee-gated climb, cold -> explore-once."""
+        if rung < 0 or rung > MAX_MCS:
+            return False
+        return self._eff_knees()[rung] is not None
+
     def knees_snapshot(self) -> list:
         return [None if k is None else round(k, 1) for k in self._knee]
 
@@ -172,6 +180,25 @@ class LearnedPrior:
         if self._since_flush >= self.cfg.flush_interval_observations:
             self.flush()
             self._since_flush = 0
+
+    def teach_failure(self, rung, snr) -> None:
+        """Event-driven dirty sample from a classified loss-demote (fade/flap):
+        the demoted-FROM rung failed at `snr`. Correct-attribution replacement
+        for the settle-gated dirty ingest (which attributed the failure tick to
+        the post-demote rung and discarded it — 2026-07-02 spec)."""
+        if rung is None or snr is None:
+            return
+        self._snr_model.observe(int(rung), float(snr), False)
+        self._since_flush += 1
+        if self._since_flush >= self.cfg.flush_interval_observations:
+            self.flush()
+            self._since_flush = 0
+
+    def snr_rung_confident(self, rung) -> bool:
+        """True iff rung has a confident effective knee (promote route 2 vs 3)."""
+        if rung is None:
+            return False
+        return self._snr_model.rung_confident(int(rung))
 
     def snr_rung_unviable(self, target, snr, margin: float = 0.0) -> bool:
         """True iff the SNR prior CONFIDENTLY says rung `target` is unviable at
