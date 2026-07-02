@@ -226,21 +226,20 @@ def _sig_snr(snr, ts):
     )
 
 
-def test_snr_knee_hysteresis_unsticks_stuck_promote(tmp_path):
+def test_cold_knee_rung_explores_after_dwell(tmp_path):
+    """A rung with only clean observations stays cold (no failure knee planted),
+    so the explore route (route 3) promotes after the dwell period.
+
+    _settle_snr_knee uses clean=True, so KneeModel never plants a failure knee
+    → knee[5] stays None → target_confident=False. Route 3 (explore) fires
+    once after promote_dwell_ticks clean ticks, regardless of margin."""
     prof = _profile()
     p = Policy(_cfg(tmp_path, min_samples=3), prof)
-    # Note: _settle_snr_knee uses clean=True by default. In the current
-    # KneeModel, clean samples do NOT plant a failure knee (knee[K] stays None).
-    # So after this call the rung is COLD (target_confident=False) and the
-    # promote fires via route 3 (explore), not route 2 (knee-gated).
     _settle_snr_knee(p, 4, 34.0)
     _settle_snr_knee(p, 5, 36.0)
     p.leading.state.current_mcs = 4
     dec = None
     ts = 1.0
-    # Clean ingest (default clean=True) observes SNR but never plants a failure
-    # knee, so knee[5] stays None after _settle_snr_knee. The rung is COLD.
-    # => target_confident=False, so route 3 (explore) fires after 30 clean ticks.
     for _ in range(35):  # 35 > promote_dwell_ticks (30)
         dec = p.tick(_sig_snr(35.6, ts))
         ts += 1.0
@@ -462,13 +461,61 @@ def test_explore_flap_teaches_knee_then_blocks_retry(tmp_path):
     assert p.leading.state.current_mcs == 1
     assert p.learned_prior.snr_knees_snapshot()[2] == 22.0
 
-    # rung 2 now confident; snr=18.0 is below BOTH the knee-margin block
-    # (22.0-1.0=21.0) AND the snap-back threshold (22.0-3.0=19.0) => stays at 1
+    # rung 2 now confident; snr=18.0 is below BOTH the headroom boundary
+    # (knee+1.0 = 22.0+1.0 = 23.0) AND the snap-back threshold (22.0-3.0=19.0) => stays at 1
     for _ in range(400):
         tick(18.0)
     assert p.leading.state.current_mcs == 1
 
-    # headroom appears: snr=26.0 > knee-margin (21.0) => knee_promote (or snap-back)
+    # headroom appears: snr=26.0 >= promote boundary (knee+1.0 = 23.0) => knee_promote (or snap-back)
     for _ in range(60):
         tick(26.0)
     assert p.leading.state.current_mcs == 2
+
+
+def test_planted_knee_deadband_blocks_then_headroom_promotes(tmp_path):
+    """A planted confident failure knee creates a promote dead-band: route 2
+    (knee_promote) requires SNR >= knee + snr_promote_margin_db.
+
+    Setup: knee[2]=20.0 planted via teach_failure; promote boundary = 20.0 + 1.0 = 21.0.
+    (a) snr=20.5 is inside the dead-band (< 21.0): target_confident=True and
+        target_blocked=True suppress both route 2 and route 3 → no promote.
+    (b) snr=21.5 >= 21.0: target_blocked=False → route 2 fires after the dwell.
+    """
+    cfg = PolicyConfig()
+    cfg.selector.max_mcs = 2  # cap so rung 2 is the only promote target
+    cfg.learned_prior.min_samples = 1.0
+    cfg.learned_prior.recency_decay = 1.0
+    cfg.learned_prior.persist_dir = str(tmp_path)
+    cfg.flightlog.enabled = False
+    p = Policy(cfg, "cardZ")
+
+    # Plant a confident failure knee for rung 2 at SNR=20 directly (no loss ticks;
+    # avoids any flap-damper charge on rung 2 that could interfere with section b).
+    p.learned_prior.teach_failure(2, 20.0)
+
+    ts = 1_000_000.0
+
+    def tick_snr(snr):
+        nonlocal ts
+        ts += 0.1
+        s = Signals()
+        s.timestamp = ts
+        s.snr = snr
+        s.snr_w = snr
+        return p.tick(s)
+
+    # (a) Dead-band: snr=20.5 < promote boundary (knee+1.0 = 21.0).
+    # target_confident=True (planted knee) and target_blocked=True → neither
+    # route 2 nor route 3 fires.
+    for _ in range(60):  # well past promote_dwell_ticks=30
+        tick_snr(20.5)
+    assert p.leading.state.current_mcs == 1
+
+    # (b) Headroom: snr=21.5 >= promote boundary (21.0) → target_blocked=False.
+    # Clean dwell >= promote_dwell_ticks already, so route 2 fires promptly.
+    for _ in range(5):
+        tick_snr(21.5)
+    assert p.leading.state.current_mcs == 2
+
+    p.close()

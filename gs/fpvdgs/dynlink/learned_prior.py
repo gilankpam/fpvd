@@ -107,13 +107,17 @@ class KneeModel:
         rung returns False: unknown is not unviable, so the caller may still
         explore it.
 
-        `margin` (dB) is hysteresis: the value must be CLEARLY below the knee to
-        count as unviable. A zero-margin `value < knee` is a knife-edge — when
-        the live signal settles a hair below a confident knee the rung is forever
-        "unviable", and since the knee only relaxes by OPERATING there, the lock
-        is self-perpetuating (the MCS-stuck field bug). Callers pass a smaller
-        margin for the promote veto than for the proactive demote so the two
-        gates form a stable dead-band instead of a single oscillating edge."""
+        `margin` (dB) is a SIGNED offset applied as `value < knee - margin`:
+          positive → value must be clearly BELOW the knee (grace band; the
+            proactive and predictive demote paths pass +margin so the rung is
+            only flagged unviable when SNR is well clear of the knee).
+          negative → value must have headroom ABOVE the knee (the promote veto
+            passes -snr_promote_margin_db so promote requires SNR ≥ knee + |margin|).
+        A zero-margin `value < knee` is a knife-edge — when the live signal settles
+        a hair below a confident knee the rung is forever "unviable", and since the
+        knee only relaxes by OPERATING there, the lock is self-perpetuating (the
+        MCS-stuck field bug). The two asymmetric signed margins create a stable
+        dead-band instead of a single oscillating edge."""
         if rung < 0 or rung > MAX_MCS:
             return False
         k = self._eff_knees()[rung]
@@ -202,10 +206,14 @@ class LearnedPrior:
 
     def snr_rung_unviable(self, target, snr, margin: float = 0.0) -> bool:
         """True iff the SNR prior CONFIDENTLY says rung `target` is unviable at
-        `snr`, with `margin` dB of hysteresis. None/cold -> False (explorable).
-        Gates the promote veto (on the target rung, small margin) and the
-        proactive demote (on the current rung, larger margin); the asymmetric
-        margins give a stable dead-band — see KneeModel.rung_unviable."""
+        `snr`. None/cold -> False (explorable).
+
+        `margin` is a SIGNED offset (see KneeModel.rung_unviable): positive
+        means SNR must be clearly BELOW the knee (proactive/predictive demote
+        paths pass +snr_demote_margin_db); negative means SNR must have headroom
+        ABOVE the knee (promote veto passes -snr_promote_margin_db so promotes
+        require SNR ≥ knee + |margin|). The asymmetric signs give a stable
+        dead-band."""
         if target is None or snr is None:
             return False
         return self._snr_model.rung_unviable(int(target), float(snr), margin)
