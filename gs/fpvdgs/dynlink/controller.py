@@ -156,6 +156,11 @@ class DynamicLinkController:
         tap_port = int(tap_cfg.get("port", 8110))
         tap_stale_s = float(tap_cfg.get("staleMs", 500)) / 1000.0
         tap_state = {"last_rx": None, "micros": 0}
+        tap_capture = None
+        if tap_enabled and bool(tap_cfg.get("captureRaw", False)):
+            from .tap_client import TapCapture
+
+            tap_capture = TapCapture()
 
         def _tap_alive():
             lr = tap_state["last_rx"]
@@ -181,6 +186,8 @@ class DynamicLinkController:
 
         def on_micro(rec):
             _mark_tap_rx()
+            if tap_capture is not None:
+                tap_capture.write("micro", rec)
             signals = aggregator.consume_micro(rec, now_s=time.time())
             if rec.pkt_lost:
                 d = policy.loss_event(signals)
@@ -192,6 +199,8 @@ class DynamicLinkController:
 
         def on_loss(rec):
             _mark_tap_rx()
+            if tap_capture is not None:
+                tap_capture.write("loss", rec)
             t0 = time.monotonic()
             signals = aggregator.consume_loss(rec, now_s=time.time())
             d = policy.loss_event(signals, latency_ms=(time.monotonic() - t0) * 1000.0)
@@ -239,6 +248,8 @@ class DynamicLinkController:
         finally:
             if tap_transport is not None:
                 tap_transport.close()
+            if tap_capture is not None:
+                tap_capture.close()
             policy.close()
             return_link.close()
             with self._lock:

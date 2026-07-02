@@ -223,3 +223,25 @@ def test_summarize_old_log_with_probe_no_crash(tmp_path):
     assert s["promote_route_counts"] == {}
     assert s["fade_recovery_p50_s"] is None
     assert s["fade_recovery_max_s"] is None
+
+
+def test_analyze_counts_fast_demotes_and_latency(tmp_path):
+    mod = _load_tool()
+    p = tmp_path / "f.jsonl"
+    recs = [
+        {"ts": 1.0, "mcs": 3, "reason": "", "tap_active": True},
+        {
+            "ts": 1.1,
+            "mcs": 2,
+            "reason": "video_per_demote loss=0.100 class=burst _fast",
+            "loss_latency_ms": 2.5,
+            "tap_active": True,
+            "fast_path": True,
+        },
+        {"ts": 1.2, "mcs": 2, "reason": "", "tap_active": False},
+    ]
+    p.write_text("".join(json.dumps(r) + "\n" for r in recs))
+    s = mod.summarize(str(p))
+    assert s["fast_demotes"] == 1
+    assert s["loss_latency_p50_ms"] == 2.5
+    assert s["tap_active_ticks"] == 2

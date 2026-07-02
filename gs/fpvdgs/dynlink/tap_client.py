@@ -44,3 +44,73 @@ class TapProtocol(asyncio.DatagramProtocol):
             self._on_micro(rec)
         elif isinstance(rec, TapLoss):
             self._on_loss(rec)
+
+
+class TapCapture:
+    """Debug JSONL dump of decoded tap records (dynamicLink.tap.captureRaw).
+
+    One fixed file, truncated on controller start, size-capped — a bench
+    debugging aid, not a flight log (the flightlog carries the per-tick
+    story; this carries the raw tap input for TapReplayClient)."""
+
+    MAX_BYTES = 32 * 1024 * 1024
+
+    def __init__(self, path: str = "/media/dvr/log/dynamic-link/tap_capture.jsonl") -> None:
+        self._fh = None
+        self._bytes = 0
+        try:
+            self._fh = open(path, "w")
+        except OSError as e:
+            log.warning("tap capture: open %s failed: %s", path, e)
+
+    def write(self, kind: str, rec) -> None:
+        if self._fh is None or self._bytes >= self.MAX_BYTES:
+            return
+        import dataclasses
+        import json
+
+        line = json.dumps({"type": kind, "rec": dataclasses.asdict(rec)}) + "\n"
+        try:
+            self._fh.write(line)
+            self._bytes += len(line)
+        except OSError:
+            self._fh = None
+
+    def close(self) -> None:
+        if self._fh is not None:
+            try:
+                self._fh.close()
+            except OSError:
+                pass
+            self._fh = None
+
+
+class TapReplayClient:
+    """Replay a TapCapture JSONL file through the tap callbacks (offline
+    selector validation, sibling of stats_client.ReplayClient)."""
+
+    def __init__(self, path: str, on_micro, on_loss) -> None:
+        self._path = path
+        self._on_micro = on_micro
+        self._on_loss = on_loss
+
+    def run(self) -> None:
+        import json
+
+        from .stats_client import RxAnt
+
+        with open(self._path) as fd:
+            for line in fd:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                rec = obj.get("rec") or {}
+                if obj.get("type") == "micro":
+                    ants = [RxAnt(**a) for a in rec.pop("rx_ant_stats", [])]
+                    self._on_micro(TapMicro(rx_ant_stats=ants, **rec))
+                elif obj.get("type") == "loss":
+                    self._on_loss(TapLoss(**rec))

@@ -290,3 +290,29 @@ def test_no_tap_falls_back_to_stats_events():
     finally:
         ctl.stop()
         drone.close()
+
+
+def test_tap_capture_roundtrip(tmp_path):
+    from fpvdgs.dynlink.tap_client import TapCapture, TapReplayClient
+    from fpvdgs.dynlink.tap_wire import decode
+
+    micro = decode(
+        bytes.fromhex(
+            "010102017b4f0772900100008e0000008200000003000000010000008d00000002"
+            "ad160514000100000000000058000000b9bec2161a1d0e0012001500"
+            "ad160514010100000000000036000000b2b6ba0f1316ffffffffffff"
+        )
+    )
+    loss = decode(bytes.fromhex("02010301834f0772900100000400000000ce010005ce0100"))
+
+    path = str(tmp_path / "cap.jsonl")
+    cap = TapCapture(path)
+    cap.write("micro", micro)
+    cap.write("loss", loss)
+    cap.close()
+
+    micros, losses = [], []
+    TapReplayClient(path, micros.append, losses.append).run()
+    assert len(micros) == 1 and len(losses) == 1
+    assert micros[0] == micro
+    assert losses[0] == loss
