@@ -134,3 +134,20 @@ def test_build_app_wires_connection_monitor_and_bus(tmp_path, monkeypatch):
     app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
     assert app.connection_monitor is not None
     assert app.bus is not None
+
+
+def test_build_app_probe_is_bypassed(tmp_path, monkeypatch):
+    """After the probe bypass, build_app must not wire a ProbeController:
+    app.probe and app.api.probe must both be None even with dynamicLink enabled."""
+    import fpvdgs.supervisor as sup
+
+    monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
+    monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
+    config = tmp_path / "config.json"
+    config.write_text(
+        '{"link": {"region": "US", "channel": 132, "width": 20, "wlans": ["wlan0"]}, '
+        '"dynamicLink": {"enabled": true}}'
+    )
+    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+    assert app.probe is None, "probe bypass: no ProbeController must be constructed"
+    assert app.api.probe is None

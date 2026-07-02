@@ -31,13 +31,11 @@ class DynamicLinkController:
         *,
         stats_endpoint="tcp://127.0.0.1:8103",
         stats_client_factory=StatsClient,
-        probe_status=None,
         bus=None,
     ):
         self._snapshot = dict(snapshot)
         self._stats_endpoint = stats_endpoint
         self._make_stats = stats_client_factory
-        self._probe_status = probe_status
         self._bus = bus
         self._policy = None
         self._aggregator = None
@@ -225,7 +223,7 @@ class DynamicLinkController:
         with self._lock:
             radio = self._pending_cal
         self._bind_calibration(radio)  # bind prior key before reset so first climb uses it
-        p.reset_for_new_session()  # new session: reset selector, re-climb from start MCS via probe
+        p.reset_for_new_session()  # new session: reset selector, re-climb from start MCS
         p.flightlog.begin_flight()  # start a fresh flight file
         log.info("dynlink: drone connected — bound calibration + began new flight")
 
