@@ -8,11 +8,20 @@ a visible FPV glitch (§3).
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 
 from .stats_client import RxEvent, SessionInfo
 
 WINDOW_S = 0.1  # design cadence: log_interval = 100 ms (§3)
+
+MICROS_PER_WINDOW = 10  # 10 ms tap micro-windows per 100 ms policy window
+
+
+def micro_alpha(alpha: float) -> float:
+    """Rescale a 10 Hz EWMA alpha to the 100 Hz micro cadence so the
+    smoothing time constant is preserved exactly: (1-a')^10 == (1-a)."""
+    return 1.0 - (1.0 - alpha) ** (1.0 / MICROS_PER_WINDOW)
 
 
 @dataclass
@@ -45,6 +54,10 @@ class Signals:
     # have dropped to near zero — distinct from "healthy idle" because
     # a session implies the drone is still TXing.
     link_starved_w: bool = False
+
+    # True while the wfb_rx dynlink tap is driving the aggregator (set by
+    # the controller); logged per tick for fallback-transition analysis.
+    tap_active: bool = False
 
     # EWMA-smoothed controller inputs
     rssi: float | None = (
@@ -90,6 +103,12 @@ class SignalAggregator:
 
     signals: Signals = field(default_factory=Signals)
 
+    # tap micro-window state: rolling (data, fec_rec, lost, out) per 10 ms
+    # slot; pending_lost carries LOSS-record losses not yet in a completed
+    # micro window (cleared on the next MICRO, which contains them).
+    _micro: deque = field(default_factory=lambda: deque(maxlen=MICROS_PER_WINDOW))
+    _pending_lost: int = 0
+
     def update_session(self, session: SessionInfo) -> None:
         self.signals.session = session
 
@@ -100,6 +119,41 @@ class SignalAggregator:
         self.signals.rssi = None
         self.signals.rssi_raw = None
         self.signals.snr = None
+
+    def _fold_ants(self, ants) -> None:
+        """Antenna-derived raw signals from one window's rx_ant_stats
+        (shared by the 100 ms :8103 path and the 10 ms tap path)."""
+        s = self.signals
+        rssi_mins = [a.rssi_min for a in ants]
+        rssi_avgs = [a.rssi_avg for a in ants]
+        s.rssi_min_w = float(min(rssi_mins))
+        s.rssi_avg_w = float(sum(rssi_avgs) / len(rssi_avgs))
+        s.rssi_max_w = float(max(rssi_avgs))  # max RSSI across antennas (observability)
+        # Operating antenna = best SNR (the sole control axis). mcs_w/snr_w
+        # follow it; rssi_max_w stays the diversity max for the log.
+        best_ant = max(ants, key=lambda a: a.snr_avg)
+        s.mcs_w = int(best_ant.mcs)
+        s.ant_count = len(ants)
+        s.snr_w = float(best_ant.snr_avg)
+        # EVM is per-STREAM, not per-antenna. Group by dongle (ant>>8);
+        # a real slot has evm_avg > 0 (absent/2nd-stream slots report -1;
+        # 0 = unmeasurable). The > 0 filter holds for the dB magnitude too:
+        # a real lock reads positive dB, sentinels are -1/0. Per dongle:
+        # stream EVM = max(evm_avg over real slots), worst sample =
+        # min(evm_min). Across dongles: best = max, floor = min; worst
+        # sample = min over all real slots. (Averaging raw per-"ant" EVM
+        # would corrupt it — sentinels and STBC duplicates skew it.)
+        d_avg: dict[int, float] = {}
+        d_min: dict[int, float] = {}
+        for a in ants:
+            if a.evm_avg > 0:
+                d = a.ant >> 8
+                d_avg[d] = max(d_avg.get(d, float(a.evm_avg)), float(a.evm_avg))
+                d_min[d] = min(d_min.get(d, float(a.evm_min)), float(a.evm_min))
+        if d_avg:
+            s.evm_w = max(d_avg.values())
+            s.evm_lo_w = min(d_avg.values())
+            s.evm_min_w = min(d_min.values())
 
     def consume(self, ev: RxEvent) -> Signals:
         s = self.signals
@@ -133,36 +187,7 @@ class SignalAggregator:
 
         # --- Antenna-derived signals (§3) ------------------------------
         if ev.rx_ant_stats:
-            rssi_mins = [a.rssi_min for a in ev.rx_ant_stats]
-            rssi_avgs = [a.rssi_avg for a in ev.rx_ant_stats]
-            s.rssi_min_w = float(min(rssi_mins))
-            s.rssi_avg_w = float(sum(rssi_avgs) / len(rssi_avgs))
-            s.rssi_max_w = float(max(rssi_avgs))  # max RSSI across antennas (observability)
-            # Operating antenna = best SNR (the sole control axis). mcs_w/snr_w
-            # follow it; rssi_max_w stays the diversity max for the log.
-            best_ant = max(ev.rx_ant_stats, key=lambda a: a.snr_avg)
-            s.mcs_w = int(best_ant.mcs)
-            s.ant_count = len(ev.rx_ant_stats)
-            s.snr_w = float(best_ant.snr_avg)
-            # EVM is per-STREAM, not per-antenna. Group by dongle (ant>>8);
-            # a real slot has evm_avg > 0 (absent/2nd-stream slots report -1;
-            # 0 = unmeasurable). The > 0 filter holds for the dB magnitude too:
-            # a real lock reads positive dB, sentinels are -1/0. Per dongle:
-            # stream EVM = max(evm_avg over real slots), worst sample =
-            # min(evm_min). Across dongles: best = max, floor = min; worst
-            # sample = min over all real slots. (Averaging raw per-"ant" EVM
-            # would corrupt it — sentinels and STBC duplicates skew it.)
-            d_avg: dict[int, float] = {}
-            d_min: dict[int, float] = {}
-            for a in ev.rx_ant_stats:
-                if a.evm_avg > 0:
-                    d = a.ant >> 8
-                    d_avg[d] = max(d_avg.get(d, float(a.evm_avg)), float(a.evm_avg))
-                    d_min[d] = min(d_min.get(d, float(a.evm_min)), float(a.evm_min))
-            if d_avg:
-                s.evm_w = max(d_avg.values())
-                s.evm_lo_w = min(d_avg.values())
-                s.evm_min_w = min(d_min.values())
+            self._fold_ants(ev.rx_ant_stats)
         # If no antenna lines this window, keep prior values — don't
         # reset; the RSSI operating point doesn't vanish just because
         # no fragments arrived.
@@ -194,4 +219,55 @@ class SignalAggregator:
         s.holdoff_rate = _ewma(s.holdoff_rate, s.holdoff_rate_w, self.ewma_alpha_burst)
         s.late_rate = _ewma(s.late_rate, s.late_rate_w, self.ewma_alpha_burst)
 
+        return s
+
+    def _recompute_micro_window(self) -> None:
+        """Window-denominated fields from the rolling 100 ms sum of micro
+        counters (+ pending LOSS losses), so every Signals field keeps its
+        per-100 ms meaning under the tap."""
+        s = self.signals
+        data = sum(m[0] for m in self._micro)
+        fec_rec = sum(m[1] for m in self._micro)
+        lost = sum(m[2] for m in self._micro) + self._pending_lost
+        out = sum(m[3] for m in self._micro)
+        tx_primaries = out + lost
+        if tx_primaries > 0:
+            s.residual_loss_w = lost / tx_primaries
+            s.fec_work_rate_w = fec_rec / tx_primaries
+        else:
+            s.residual_loss_w = 0.0
+            s.fec_work_rate_w = 0.0
+        s.packet_rate_w = data / WINDOW_S
+        s.link_starved_w = s.session is not None and s.packet_rate_w < self.starvation_threshold_pps
+
+    def consume_micro(self, rec, now_s: float) -> Signals:
+        """Fold one 10 ms tap MICRO record. Mirrors consume() at the micro
+        cadence: EWMAs use micro-rescaled alphas (same time constants);
+        burst/holdoff/late rates are observability-only and not carried by
+        the tap, so they stop updating while the tap drives. Timestamps come
+        from the GS clock (now_s) — the tap clock base differs from :8103
+        and selector timers must not jump across a fallback transition."""
+        s = self.signals
+        s.timestamp = now_s
+        self._micro.append((rec.pkt_data, rec.pkt_fec_rec, rec.pkt_lost, rec.pkt_out))
+        self._pending_lost = 0  # this MICRO's window contains any held losses
+        self._recompute_micro_window()
+        if rec.rx_ant_stats:
+            self._fold_ants(rec.rx_ant_stats)
+        a = micro_alpha(self.ewma_alpha_rssi)
+        if s.rssi_max_w is not None:
+            s.rssi_raw = _ewma(s.rssi_raw, s.rssi_max_w, a)
+            if s.snr_w is not None:
+                s.snr = _ewma(s.snr, s.snr_w, a)
+        s.fec_work = _ewma(s.fec_work, s.fec_work_rate_w, micro_alpha(self.ewma_alpha_fec))
+        return s
+
+    def consume_loss(self, rec, now_s: float) -> Signals:
+        """Fold an immediate LOSS record: these losses are not yet in any
+        completed micro window, so hold them as pending (added to the rolling
+        loss sum) until the next MICRO — which contains them — arrives."""
+        s = self.signals
+        s.timestamp = now_s
+        self._pending_lost += int(rec.lost_count)
+        self._recompute_micro_window()
         return s
