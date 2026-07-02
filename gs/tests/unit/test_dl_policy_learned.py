@@ -182,7 +182,7 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
     p._predict_demote_count = 5
     p._windows_since_demote = 0
     p._ticks_at_mcs = 7
-    p.leading._promote_clean = 3
+    p.leading._clean_dwell = 3
 
     p.reset_for_new_session()
 
@@ -191,7 +191,7 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
     assert p._snr_demote_count == 0
     assert p._predict_demote_count == 0
     assert p._ticks_at_mcs == 0
-    assert p.leading._promote_clean == 0
+    assert p.leading._clean_dwell == 0
     assert p.learned_prior is prior_before  # persistent knees preserved
     assert p._windows_since_demote == p.cfg.selector.demote_cooldown_windows
 
@@ -228,22 +228,23 @@ def _sig_snr(snr, ts):
 
 def test_snr_knee_hysteresis_unsticks_stuck_promote(tmp_path):
     prof = _profile()
-    p = Policy(_cfg(tmp_path, min_samples=3), prof, probe_status=lambda: _probe_snapshot(5))
+    p = Policy(_cfg(tmp_path, min_samples=3), prof)
     _settle_snr_knee(p, 4, 34.0)  # knee[4] ~34
     _settle_snr_knee(p, 5, 36.0)  # knee[5] ~36 (the wall)
     p.leading.state.current_mcs = 4
     dec = None
     ts = 1.0
-    for _ in range(10):  # > promote_debounce_windows
-        dec = p.tick(_sig_snr(35.6, ts))  # 0.4 dB below knee[5]: strict locks
-        ts += 1.0
-    assert dec.mcs == 5  # margin clears the knife-edge veto
+    # knee-gated promote fires after promote_dwell_ticks (30) clean ticks with headroom
+    for _ in range(35):  # 35 > promote_dwell_ticks (30)
+        dec = p.tick(_sig_snr(35.6, ts))  # 0.4 dB below knee[5]=36: strict veto locks
+        ts += 1.0  # but promote_margin=1.0 -> 36-1=35 < 35.6 -> NOT blocked
+    assert dec.mcs == 5  # knee_promote: margin clears the knife-edge veto
     p.close()
 
 
 def test_snr_knee_hysteresis_holds_no_flap(tmp_path):
     prof = _profile()
-    p = Policy(_cfg(tmp_path, min_samples=3), prof, probe_status=lambda: _probe_snapshot(5))
+    p = Policy(_cfg(tmp_path, min_samples=3), prof)
     _settle_snr_knee(p, 4, 34.0)
     _settle_snr_knee(p, 5, 36.0)
     p.leading.state.current_mcs = 5  # already climbed onto the rung
@@ -260,7 +261,7 @@ def test_snr_knee_proactive_demote_still_fires_clearly_below(tmp_path):
     # The demote margin must not disable the proactive SNR-demote: a clear fade
     # (well past knee - demote_margin) still steps down ahead of loss.
     prof = _profile()
-    p = Policy(_cfg(tmp_path, min_samples=3), prof, probe_status=lambda: _probe_snapshot(5))
+    p = Policy(_cfg(tmp_path, min_samples=3), prof)
     # Direct-set: plant confident SNR knees for rungs 3, 4, 5
     p.learned_prior._snr_model._knee[3] = 30.0
     p.learned_prior._snr_model._count[3] = 12.0
@@ -320,7 +321,7 @@ def test_predictive_demote_paced_by_cooldown(tmp_path):
 
 def test_snr_demote_steps_one_rung_and_is_paced(tmp_path):
     prof = _profile()
-    p = Policy(_cfg(tmp_path, min_samples=3), prof, probe_status=lambda: _probe_snapshot(5))
+    p = Policy(_cfg(tmp_path, min_samples=3), prof)
     p.learned_prior._snr_model._knee[5] = 36.0
     p.learned_prior._snr_model._count[5] = 12.0
     p.learned_prior._snr_model._knee[4] = 34.0
@@ -421,3 +422,47 @@ def test_no_two_demote_paths_stack_in_same_tick(tmp_path):
     assert dec.mcs == 4, f"expected one step (5→4), got {dec.mcs}"
     assert "snr_demote" in dec.reason  # confirms snr_demote fired; no loss reason appended
     p.close()
+
+
+def test_explore_flap_teaches_knee_then_blocks_retry(tmp_path):
+    """Explore promote -> steady-SNR flap -> knee planted for the target ->
+    subsequent promote requires headroom (route 3 self-converts to route 2)."""
+    cfg = PolicyConfig()
+    cfg.selector.max_mcs = 2  # cap so clean ticks don't keep climbing above 2
+    cfg.learned_prior.min_samples = 1.0
+    cfg.learned_prior.recency_decay = 1.0  # deterministic: no confidence fade in-test
+    cfg.learned_prior.persist_dir = str(tmp_path)
+    cfg.flightlog.enabled = False
+    p = Policy(cfg, "cardZ")
+    ts = 1_000_000.0
+
+    def tick(snr, snr_w=None, loss=0.0):
+        nonlocal ts
+        ts += 0.1
+        s = Signals()
+        s.timestamp = ts
+        s.snr = snr
+        s.snr_w = snr if snr_w is None else snr_w
+        s.residual_loss_w = loss
+        return p.tick(s)
+
+    # climb 1->2 via explore (cold knees), snr steady at 22
+    for _ in range(60):
+        tick(22.0)
+    assert p.leading.state.current_mcs == 2
+
+    # steady flap at 2 (loss with steady SNR while on trial)
+    tick(22.0, loss=0.2)
+    assert p.leading.state.current_mcs == 1
+    assert p.learned_prior.snr_knees_snapshot()[2] == 22.0
+
+    # rung 2 now confident; snr=18.0 is below BOTH the knee-margin block
+    # (22.0-1.0=21.0) AND the snap-back threshold (22.0-3.0=19.0) => stays at 1
+    for _ in range(400):
+        tick(18.0)
+    assert p.leading.state.current_mcs == 1
+
+    # headroom appears: snr=26.0 > knee-margin (21.0) => knee_promote (or snap-back)
+    for _ in range(60):
+        tick(26.0)
+    assert p.leading.state.current_mcs == 2

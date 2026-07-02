@@ -1,6 +1,6 @@
-"""Flight-log debug fields: per-rung probe snapshot, predictive internals
-(pc/slope), and the promote debounce counter — the data needed to replay a
-promote→demote oscillation offline."""
+"""Flight-log debug fields: failure classifier, selector state (clean_dwell,
+trial, snapback_tgt), slope/knees, and predictive internals — the data
+needed to replay a promote→demote oscillation offline."""
 
 from __future__ import annotations
 
@@ -38,25 +38,19 @@ def _records(tmp_path):
         return [json.loads(line) for line in f if line.strip()]
 
 
-def test_record_carries_per_rung_probe_per_and_age(tmp_path):
-    probe_snap = {
-        "running": True,
-        "streams": 1,
-        "mcs": {"2": {"per": 0.0125, "ageMs": 120.0, "rssi": -50.0, "snr": 25.0}},
-    }
-    p = Policy(_cfg(tmp_path), _profile(), probe_status=lambda: probe_snap)
-    p.tick(_sig(-50.0))
-    p.close()
-    last = _records(tmp_path)[-1]
-    # Compact per-rung view: per + ageMs only (rssi/snr not logged).
-    assert last["probe"] == {"2": {"per": 0.0125, "ageMs": 120.0}}
-
-
-def test_record_probe_none_without_probe_status(tmp_path):
+def test_record_carries_new_selector_state_fields(tmp_path):
+    """The record carries the new probe-less selector observability fields:
+    fail_class, trial, snapback_tgt, clean_dwell (replacing probe/promote_clean)."""
     p = Policy(_cfg(tmp_path), _profile())
     p.tick(_sig(-50.0))
     p.close()
-    assert _records(tmp_path)[-1]["probe"] is None
+    last = _records(tmp_path)[-1]
+    assert "fail_class" in last  # None when no loss-demote this tick
+    assert "trial" in last  # int|None: current trial rung
+    assert "snapback_tgt" in last  # int|None: snap-back target this tick
+    assert "clean_dwell" in last  # int: clean consecutive ticks at current rung
+    assert "probe" not in last  # removed: probe is no longer consulted for promotes
+    assert "promote_clean" not in last  # removed: replaced by clean_dwell
 
 
 def test_record_carries_slope_and_knees(tmp_path):
@@ -85,18 +79,16 @@ def test_record_slope_none_when_no_snr(tmp_path):
     assert recs[1]["slope"] is None  # no SNR this tick
 
 
-def test_record_carries_promote_clean_counter(tmp_path):
-    # Clean + fresh current+1 rung (boot MCS 1 -> target 2): the debounce
-    # counter accumulates 1, 2, ... across ticks (default debounce 3, so no
-    # commit yet); the record shows the post-tick value.
-    probe_snap = {"mcs": {"2": {"per": 0.0, "ageMs": 100.0}}}
-    p = Policy(_cfg(tmp_path), _profile(), probe_status=lambda: probe_snap)
+def test_record_carries_clean_dwell_counter(tmp_path):
+    # clean_dwell counts consecutive clean ticks at the current rung (boot MCS 1).
+    # It starts at 0 and increments each clean tick; the record shows the post-tick value.
+    p = Policy(_cfg(tmp_path), _profile())
     p.tick(_sig(-50.0, ts=1.0))
     p.tick(_sig(-50.0, ts=1.1))
     p.close()
     recs = _records(tmp_path)
-    assert recs[0]["promote_clean"] == 1
-    assert recs[1]["promote_clean"] == 2
+    assert recs[0]["clean_dwell"] == 1
+    assert recs[1]["clean_dwell"] == 2
 
 
 def test_logged_slope_is_least_squares_not_single_tick(tmp_path):
@@ -272,30 +264,21 @@ def test_proactive_snr_demote_before_loss(tmp_path):
     p.close()
 
 
-def _clean_probe():
-    # every rung reads dead-clean + fresh (probe wants to climb)
-    return {
-        "running": True,
-        "streams": 1,
-        "mcs": {str(m): {"per": 0.0, "ageMs": 0.0} for m in range(8)},
-    }
-
-
 def test_promote_explores_cold_frontier_rung(tmp_path):
     # DEADLOCK regression (the live "maxMcs=5 never reaches 5"): the SNR prior is
     # confident for rung4 ONLY (the link only ever settled there). Healthy SNR +
-    # clean probe rung5. rung5 is UNKNOWN (cold), not unviable, so the probe must
-    # be allowed to promote to it AND the proactive SNR demote must NOT yank it
-    # back before its knee can warm.
+    # cold rung5 (explore route). rung5 is UNKNOWN (cold), not unviable, so the
+    # selector must be allowed to explore it AND the proactive SNR demote must NOT
+    # yank it back before its knee can warm.
     from fpvdgs.dynlink.signals import Signals
 
     cfg = _cfg(tmp_path, min_samples=3)
     cfg.selector.max_mcs = 5
-    cfg.selector.promote_debounce_windows = 1
+    cfg.selector.promote_dwell_ticks = 1  # fast promote for this regression test
     cfg.selector.hold_modes_down_ms = 0
     cfg.selector.min_between_changes_ms = 0
     cfg.selector.snr_demote_debounce = 2
-    p = Policy(cfg, _profile(), probe_status=_clean_probe)
+    p = Policy(cfg, _profile())
     for _ in range(12):  # rung4 confident, viable at snr >= ~27
         p.learned_prior.ingest(snr=27.0, operating_mcs=4, operating_clean=True, settled=True)
     p.leading.state.current_mcs = 4

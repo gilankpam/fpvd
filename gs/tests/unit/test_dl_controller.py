@@ -241,28 +241,20 @@ class _RepeatStatsClient:
         self._stop = True
 
 
-def test_controller_forwards_probe_snapshot_to_policy():
-    # The controller must pull the probe snapshot each policy tick (so the
-    # selector can promote). With the sync-gate gone, Policy.tick() runs from
-    # the first stats event — no HELLO handshake required.
-    seen = {}
-
-    def fake_probe_status():
-        seen["called"] = seen.get("called", 0) + 1
-        return {"running": True, "streams": 1, "mcs": {}}
-
+def test_controller_ticks_policy_on_stats_events():
+    # Policy.tick() runs from the first stats event — no HELLO handshake
+    # required; the probe-less selector promotes on SNR without a probe callback.
     drone_sock, drone_port = _free_udp_port()
     c = DynamicLinkController(
         _snapshot(drone_port),
         stats_client_factory=_RepeatStatsClient,
-        probe_status=fake_probe_status,
     )
     c.start()
     try:
         deadline = time.monotonic() + 1.5
-        while seen.get("called", 0) < 1 and time.monotonic() < deadline:
+        while c.status().get("emitSeq", 0) < 1 and time.monotonic() < deadline:
             time.sleep(0.02)
-        assert seen.get("called", 0) >= 1  # tick loop pulled the probe snapshot
+        assert c.status().get("emitSeq", 0) >= 1  # at least one decision emitted
     finally:
         c.stop()
         drone_sock.close()

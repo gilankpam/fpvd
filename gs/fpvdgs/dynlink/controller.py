@@ -131,7 +131,7 @@ class DynamicLinkController:
     async def _run(self):
         with self._lock:
             snap = dict(self._snapshot)
-        policy = Policy(build_policy_config(snap), probe_status=self._probe_status)
+        policy = Policy(build_policy_config(snap))
         with self._lock:
             self._policy = policy
         aggregator = build_aggregator(snap)
