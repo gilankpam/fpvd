@@ -45,6 +45,12 @@ def render_cfg(effective: dict) -> str:
     if not link.get("videoEncryption", True):
         # plaintext video: override the gs.key inherited from the gs_base profile.
         lines.append(f"keypair = {_lit(None)}")
+    # wfb_rx dynlink tap: video stream only (mavlink/tunnel rx never tap).
+    # Emitted whenever tap.enabled — independent of dynamicLink.enabled, so
+    # toggling DL itself stays bounce-free (same precedent as log_interval).
+    tap = (effective.get("dynamicLink", {}) or {}).get("tap", {}) or {}
+    if tap.get("enabled", True):
+        lines.append(f"dynlink_tap_port = {_lit(int(tap.get('port', 8110)))}")
 
     lines.append("")
     lines.append("[gs_mavlink]")
