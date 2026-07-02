@@ -44,10 +44,6 @@ class SelectorConfig:
     link_starved feeds the emergency demote.
     """
 
-    # Probe knobs — kept until Task 3 (unused; config plumbing stays green)
-    probe_viable_threshold: float = 0.99
-    probe_freshness_ms: float = 500.0
-    promote_debounce_windows: int = 3
     # Reactive demote
     video_demote_per: float = 0.05
     emergency_fec_pressure: float = 0.80

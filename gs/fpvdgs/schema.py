@@ -30,9 +30,6 @@ DYNAMIC_LINK_KEYS = {
 }
 DRONE_KEYS = {"host", "apiPort"}  # the drone's address; reused by HTTP/IDR/DL
 SELECTOR_KEYS = {
-    "probeViableThreshold",
-    "probeFreshnessMs",
-    "promoteDebounceWindows",
     "videoDemotePer",
     "emergencyFecPressure",
     "holdModesDownMs",
@@ -44,6 +41,14 @@ SELECTOR_KEYS = {
     "flapBackoffMult",
     "flapBackoffCapMs",
     "flapResetCleanDwellTicks",
+    "trialWindowMs",
+    "promoteDwellTicks",
+    "promoteSlopeMin",
+    "collapseDeltaDb",
+    "snapbackRecoverMarginDb",
+    "confirmTtlMs",
+    "flapSnrReleaseDb",
+    "flapDecayMs",
 }
 SMOOTHING_KEYS = {"ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst", "starvationThresholdPps"}
 LEARNED_PRIOR_KEYS = {
@@ -175,18 +180,26 @@ def _validate_dynamic_link(dl: dict) -> None:
     sel = dl.get("selector")
     if sel is not None:
         _validate_block_keys("dynamicLink.selector", sel, SELECTOR_KEYS)
-        for k in ("probeViableThreshold", "videoDemotePer", "emergencyFecPressure"):
+        for k in ("videoDemotePer", "emergencyFecPressure"):
             _validate_prob(f"dynamicLink.selector.{k}", sel.get(k))
-        for k in ("promoteDebounceWindows", "starvationWindows"):
+        for k in ("starvationWindows", "promoteDwellTicks"):
             _validate_pos_int(f"dynamicLink.selector.{k}", sel.get(k))
         for k in (
-            "probeFreshnessMs",
             "holdModesDownMs",
             "minBetweenChangesMs",
             "snrPromoteMarginDb",
             "snrDemoteMarginDb",
+            "trialWindowMs",
+            "collapseDeltaDb",
+            "snapbackRecoverMarginDb",
+            "confirmTtlMs",
+            "flapSnrReleaseDb",
+            "flapDecayMs",
         ):
             _validate_non_neg_num(f"dynamicLink.selector.{k}", sel.get(k))
+        v = sel.get("promoteSlopeMin")
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))):
+            raise SchemaError("dynamicLink.selector.promoteSlopeMin must be a number")
         # Invariant: the proactive-demote margin must exceed the promote margin or
         # the SNR-knee gates collapse to a single oscillating edge (no dead-band).
         # Fallbacks track SelectorConfig defaults; both are validated numeric above.

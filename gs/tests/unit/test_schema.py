@@ -272,7 +272,7 @@ def _dl(**over):
 def test_validate_effective_accepts_flat_dynamic_link():
     schema.validate_effective(
         _dl(
-            selector={"probeViableThreshold": 0.9},
+            selector={"videoDemotePer": 0.05},
             smoothing={"ewmaAlphaRssi": 0.3},
             flightlog={"enabled": True},
         )
@@ -281,7 +281,7 @@ def test_validate_effective_accepts_flat_dynamic_link():
 
 def test_selector_probability_out_of_range_rejected():
     with pytest.raises(schema.SchemaError):
-        schema.validate_effective(_dl(selector={"probeViableThreshold": 1.5}))
+        schema.validate_effective(_dl(selector={"videoDemotePer": 1.5}))
 
 
 def test_smoothing_alpha_out_of_range_rejected():
@@ -405,3 +405,11 @@ def test_connection_monitor_rejects_bad_grace():
     cfg["connectionMonitor"]["disconnectGraceS"] = 0  # must be a positive number
     with pytest.raises(SchemaError):
         validate_effective(cfg)
+
+
+def test_selector_accepts_new_knobs_rejects_probe_knobs():
+    schema.validate_effective(
+        _dl(selector={"trialWindowMs": 8000, "collapseDeltaDb": 3.0})
+    )  # must not raise
+    with pytest.raises(SchemaError):
+        schema.validate_effective(_dl(selector={"probeViableThreshold": 0.9}))

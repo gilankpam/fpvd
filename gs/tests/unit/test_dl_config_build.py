@@ -20,8 +20,6 @@ def test_selector_block_overrides_defaults():
     cfg = build_policy_config(
         _block(
             selector={
-                "probeViableThreshold": 0.95,
-                "promoteDebounceWindows": 2,
                 "holdModesDownMs": 1000,
                 "minBetweenChangesMs": 100,
                 "starvationWindows": 9,
@@ -30,8 +28,6 @@ def test_selector_block_overrides_defaults():
         )
     )
     s = cfg.selector
-    assert s.probe_viable_threshold == 0.95
-    assert s.promote_debounce_windows == 2
     assert s.hold_modes_down_ms == 1000
     assert s.min_between_changes_ms == 100
     assert s.starvation_windows == 9
@@ -43,8 +39,6 @@ def test_selector_block_overrides_defaults():
 def test_selector_defaults_when_absent():
     cfg = build_policy_config(_block())
     s = cfg.selector
-    assert s.probe_viable_threshold == 0.99
-    assert s.probe_freshness_ms == 500.0
     assert s.hold_modes_down_ms == 2000
     assert s.starvation_windows == 5
     assert s.demote_cooldown_windows == 3
@@ -168,3 +162,29 @@ def test_link_width_maps_into_policy_config():
 
 def test_link_width_defaults_to_20_when_absent():
     assert build_policy_config(_block()).link_width == 20
+
+
+def test_selector_new_knobs_map_and_probe_knobs_gone():
+    block = {
+        "selector": {
+            "trialWindowMs": 5000,
+            "promoteDwellTicks": 10,
+            "promoteSlopeMin": -0.1,
+            "collapseDeltaDb": 5.0,
+            "snapbackRecoverMarginDb": 2.0,
+            "confirmTtlMs": 30000,
+            "flapSnrReleaseDb": 4.0,
+            "flapDecayMs": 120000,
+        }
+    }
+    cfg = build_policy_config(block)
+    sel = cfg.selector
+    assert sel.trial_window_ms == 5000
+    assert sel.promote_dwell_ticks == 10
+    assert sel.promote_slope_min == -0.1
+    assert sel.collapse_delta_db == 5.0
+    assert sel.snapback_recover_margin_db == 2.0
+    assert sel.confirm_ttl_ms == 30000
+    assert sel.flap_snr_release_db == 4.0
+    assert sel.flap_decay_ms == 120000
+    assert not hasattr(sel, "probe_viable_threshold")
