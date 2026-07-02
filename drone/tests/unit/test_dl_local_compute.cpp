@@ -8,6 +8,7 @@ using namespace fpvd::dynlink;
 
 static DlRuntimeConfig cfgWithBitrate() {
     DlRuntimeConfig c{};
+    c.probeEnabled = true; // existing tests verify probe-on behaviour
     c.probeMcsCeiling = 7;
     c.bitrate = BitrateEngineConfig{0.5, 2.0, 2, 50, 1000, 24000, 1500, 60};
     return c;
@@ -143,4 +144,18 @@ TEST_CASE("applyLocalCompute at 10 MHz bills ~half the 20 MHz bitrate") {
     f.bandwidth = 20;
     applyLocalCompute(c10, f);
     CHECK(f.bitrateKbps >= c10.bitrate.minBitrateKbps);
+}
+
+TEST_CASE("local_compute: probe disabled reclaims the probe airtime reserve") {
+    DlRuntimeConfig cfg = cfgWithBitrate(); // probe already true from helper
+    cfg.probeEnabled = true;
+    Decision d{};
+    d.mcs = 3;
+    applyLocalCompute(cfg, d);
+    const uint16_t withProbe = d.bitrateKbps;
+    cfg.probeEnabled = false;
+    Decision d2{};
+    d2.mcs = 3;
+    applyLocalCompute(cfg, d2);
+    CHECK(d2.bitrateKbps > withProbe); // probe_util reserve returned to video
 }

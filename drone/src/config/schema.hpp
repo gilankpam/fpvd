@@ -138,6 +138,14 @@ struct DynamicLinkCompute {
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkCompute, minBitrateKbps, maxBitrateKbps,
                                                 baseRedundancyRatio, blocksPerFrame, kMin, kMax)
 
+// Observe-only probe link (wfb_tx/feeder children + retune + airtime reserve).
+// Default OFF: the 2026-07-02 probe-less selector does not consume it; the
+// subsystem is retained for experiments.
+struct DynamicLinkProbe {
+    bool enabled{false};
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkProbe, enabled)
+
 struct DynamicLink {
     bool enabled{false};
     int healthTimeoutMs{10000};
@@ -145,9 +153,11 @@ struct DynamicLink {
     int applySubPaceMs{5};
     DynamicLinkRoiQp roiQp{};
     DynamicLinkCompute compute{};
+    DynamicLinkProbe probe{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled, healthTimeoutMs,
-                                                applyStaggerMs, applySubPaceMs, roiQp, compute)
+                                                applyStaggerMs, applySubPaceMs, roiQp, compute,
+                                                probe)
 
 // OSD overlay (msposd message file). Top-level: the OSD is rendered whether or
 // not the dynamic link is enabled, so its enable flag lives outside dynamicLink.

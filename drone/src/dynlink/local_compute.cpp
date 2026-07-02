@@ -9,9 +9,11 @@ namespace fpvd::dynlink {
 
 void applyLocalCompute(const DlRuntimeConfig& cfg, Decision& d) {
     const BitrateEngineConfig& b = cfg.bitrate;
-    // The probe runs FEC-off at a fixed rate; its true on-air kbps.
-    double probeKbps =
-        static_cast<double>(fpvd::kProbePps) * fpvd::kProbePacketBytes * 8.0 / 1000.0;
+    // The probe runs FEC-off at a fixed rate; its true on-air kbps. Zero when
+    // the probe is disabled — the airtime reserve returns to video.
+    double probeKbps = cfg.probeEnabled ? static_cast<double>(fpvd::kProbePps) *
+                                              fpvd::kProbePacketBytes * 8.0 / 1000.0
+                                        : 0.0;
     // Channel width (10/20/40) drives the rate table — NOT d.bandwidth, which is
     // the modulation width (20 for a 10 MHz link) and would mis-bill 10 MHz as 20.
     double wireTarget =

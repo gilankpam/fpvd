@@ -481,10 +481,13 @@ TEST_CASE("apply: enabled false->true starts controller; true->false stops it") 
     CHECK_FALSE(d.dynamicLinkStatus().running);
     auto namesBefore = d.orchestrator().names();
 
-    // false -> true: starts the controller, no full rebuild. The only orchestrator
-    // delta is the targeted probe pair add (probe-tx + probe-feed) — every other
-    // supervised process keeps its identity (no stopAll/startAll).
-    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})")).ok);
+    // false -> true (with probe also enabled): starts the controller, no full
+    // rebuild. The only orchestrator delta is the targeted probe pair add
+    // (probe-tx + probe-feed) — every other supervised process keeps its identity
+    // (no stopAll/startAll).
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+                               R"({"dynamicLink":{"enabled":true,"probe":{"enabled":true}}})"))
+                .ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     CHECK(d.dynamicLinkStatus().running);
     {
@@ -819,9 +822,11 @@ TEST_CASE("daemon: probe stream seeded only when dynamicLink is enabled") {
     CHECK(d.orchestrator().get("probe-tx") == nullptr);
     CHECK(d.orchestrator().get("probe-feed") == nullptr);
 
-    // Enabling dynamicLink adds the probe pair WITHOUT a full rebuild: the video
-    // tx keeps its identity (no stopAll/startAll).
-    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})")).ok);
+    // Enabling dynamicLink + probe adds the probe pair WITHOUT a full rebuild:
+    // the video tx keeps its identity (no stopAll/startAll).
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+                               R"({"dynamicLink":{"enabled":true,"probe":{"enabled":true}}})"))
+                .ok);
     auto ar = d.apply(/*reallyRestart=*/true);
     REQUIRE(ar.ok);
     CHECK(d.orchestrator().get("probe-tx") != nullptr);
@@ -845,7 +850,9 @@ TEST_CASE("status: probe summary reflects dynamicLink + running tx") {
     REQUIRE(j0.contains("probe"));
     CHECK(j0["probe"]["enabled"] == false); // dynamicLink off
 
-    REQUIRE(d.patchPending(nlohmann::json::parse(R"({"dynamicLink":{"enabled":true}})")).ok);
+    REQUIRE(d.patchPending(nlohmann::json::parse(
+                               R"({"dynamicLink":{"enabled":true,"probe":{"enabled":true}}})"))
+                .ok);
     REQUIRE(d.apply(/*reallyRestart=*/true).ok);
     auto j1 = fpvd::buildStatus(d);
     CHECK(j1["probe"]["enabled"] == true);

@@ -3,6 +3,7 @@
 #include "doctest.h"
 #include "dynlink/runtime_config.hpp"
 #include "link_width.hpp"
+#include "probe/probe_constants.hpp"
 using namespace fpvd;
 using namespace fpvd::dynlink;
 
@@ -143,4 +144,20 @@ TEST_CASE("buildDlSnapshot maps dynamicLink.compute -> BitrateEngineConfig") {
     CHECK(s.bitrate.blocksPerFrame == doctest::Approx(3.0));
     CHECK(s.bitrate.kMin == 4);
     CHECK(s.bitrate.kMax == 40);
+}
+
+TEST_CASE("buildDlSnapshot: probe disabled -> probeCtlPort==0, probeEnabled==false") {
+    fpvd::Config c{};
+    c.dynamicLink.probe.enabled = false;
+    auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    CHECK(s.probeCtlPort == 0);
+    CHECK(s.probeEnabled == false);
+}
+
+TEST_CASE("buildDlSnapshot: probe enabled -> probeCtlPort==kProbeControlPort, probeEnabled==true") {
+    fpvd::Config c{};
+    c.dynamicLink.probe.enabled = true;
+    auto s = fpvd::dynlink::buildDlSnapshot(c, "wlan0");
+    CHECK(s.probeCtlPort == static_cast<uint16_t>(fpvd::kProbeControlPort));
+    CHECK(s.probeEnabled == true);
 }
