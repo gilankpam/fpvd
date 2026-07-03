@@ -316,3 +316,27 @@ def test_tap_capture_roundtrip(tmp_path):
     assert len(micros) == 1 and len(losses) == 1
     assert micros[0] == micro
     assert losses[0] == loss
+
+
+def test_rebuild_resets_stale_tap_active_status():
+    """set_config keeps the controller object (and its _status) — a rebuilt
+    loop with the tap disabled must not inherit tapActive=True from the
+    previous incarnation (bench-caught 2026-07-03)."""
+    drone, drone_port = _drone_sock()
+    tap_port = _free_udp_port()
+    snap = {
+        "enabled": True,
+        "maxMcs": 5,
+        "droneAddr": "127.0.0.1",
+        "dronePort": drone_port,
+        "tap": {"enabled": False, "port": tap_port, "staleMs": 500, "captureRaw": False},
+    }
+    ctl = DynamicLinkController(snap, stats_client_factory=_IdleStatsClient)
+    ctl._status["tapActive"] = True  # poison: simulate a prior tap-mode run
+    ctl.start()
+    try:
+        time.sleep(0.3)
+        assert ctl.status()["tapActive"] is False
+    finally:
+        ctl.stop()
+        drone.close()

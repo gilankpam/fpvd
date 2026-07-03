@@ -156,6 +156,10 @@ class DynamicLinkController:
         tap_port = int(tap_cfg.get("port", 8110))
         tap_stale_s = float(tap_cfg.get("staleMs", 500)) / 1000.0
         tap_state = {"last_rx": None, "micros": 0}
+        # _status survives a set_config rebuild (same controller object), so a
+        # fresh loop must not inherit the previous incarnation's tapActive —
+        # e.g. tap.enabled=false would otherwise report tapActive=true forever.
+        self._set(tapActive=False)
         tap_capture = None
         if tap_enabled and bool(tap_cfg.get("captureRaw", False)):
             from .tap_client import TapCapture
