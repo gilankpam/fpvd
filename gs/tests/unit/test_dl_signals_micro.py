@@ -111,3 +111,16 @@ def test_micro_timestamp_uses_gs_clock():
 def test_signals_has_tap_active_default_false():
     agg = SignalAggregator()
     assert agg.signals.tap_active is False
+
+
+def test_reset_micro_window_clears_stale_state():
+    agg = SignalAggregator()
+    for i in range(MICROS_PER_WINDOW):
+        agg.consume_micro(_micro(1000 + i * 10, lost=5, out=5), now_s=1.0 + i * 0.01)
+    agg.consume_loss(
+        TapLoss(seq=1, timestamp_ms=1101, lost_count=10, last_seq=0, new_seq=0), now_s=1.101
+    )
+    assert agg.signals.residual_loss_w > 0.0
+    agg.reset_micro_window()
+    agg.consume_micro(_micro(2000, lost=0, out=10), now_s=2.0)
+    assert agg.signals.residual_loss_w == 0.0

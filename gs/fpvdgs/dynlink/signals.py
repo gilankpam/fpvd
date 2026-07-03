@@ -120,6 +120,14 @@ class SignalAggregator:
         self.signals.rssi_raw = None
         self.signals.snr = None
 
+    def reset_micro_window(self) -> None:
+        """Drop the tap rolling window + pending losses. Called on the tap's
+        stale->alive transition: pre-outage slots and an orphaned pending
+        LOSS count must not leak into the revived feed's first windows
+        (they could fire a spurious fast demote off ancient losses)."""
+        self._micro.clear()
+        self._pending_lost = 0
+
     def _fold_ants(self, ants) -> None:
         """Antenna-derived raw signals from one window's rx_ant_stats
         (shared by the 100 ms :8103 path and the 10 ms tap path)."""
@@ -265,7 +273,11 @@ class SignalAggregator:
     def consume_loss(self, rec, now_s: float) -> Signals:
         """Fold an immediate LOSS record: these losses are not yet in any
         completed micro window, so hold them as pending (added to the rolling
-        loss sum) until the next MICRO — which contains them — arrives."""
+        loss sum) until the next MICRO — which contains them — arrives. A loss
+        coalesced across the fork's 2 ms holdoff can arrive just AFTER the
+        MICRO that already contains it, double-counting those losses for
+        <=10 ms — acceptable (the loss was real; demote stays one-step +
+        cooldown-gated)."""
         s = self.signals
         s.timestamp = now_s
         self._pending_lost += int(rec.lost_count)

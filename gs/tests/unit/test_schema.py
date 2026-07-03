@@ -445,3 +445,14 @@ def test_tap_port_and_stale_range_rejected():
         schema._validate_dynamic_link({"tap": {"port": 80}})
     with pytest.raises(schema.SchemaError):
         schema._validate_dynamic_link({"tap": {"staleMs": 0}})
+
+
+def test_tap_bool_fields_type_checked():
+    import pytest
+
+    from fpvdgs import schema
+
+    with pytest.raises(schema.SchemaError):
+        schema._validate_dynamic_link({"tap": {"enabled": "false"}})
+    with pytest.raises(schema.SchemaError):
+        schema._validate_dynamic_link({"tap": {"captureRaw": 1}})

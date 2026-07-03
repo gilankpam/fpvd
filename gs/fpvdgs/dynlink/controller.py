@@ -180,6 +180,7 @@ class DynamicLinkController:
             tap_state["last_rx"] = time.monotonic()
             if not was:
                 tap_state["micros"] = 0
+                aggregator.reset_micro_window()
                 aggregator.signals.tap_active = True
                 self._set(tapActive=True)
                 log.info("dynlink: tap feed live — micro-window mode")
@@ -201,6 +202,10 @@ class DynamicLinkController:
             _mark_tap_rx()
             if tap_capture is not None:
                 tap_capture.write("loss", rec)
+            # Latency here is GS receive->decision only; the fork-side 2 ms
+            # coalesce holdoff and datagram transit are not included, so the
+            # flightlog's loss_latency_ms underreports true loss->decision
+            # latency by ~1-3 ms.
             t0 = time.monotonic()
             signals = aggregator.consume_loss(rec, now_s=time.time())
             d = policy.loss_event(signals, latency_ms=(time.monotonic() - t0) * 1000.0)

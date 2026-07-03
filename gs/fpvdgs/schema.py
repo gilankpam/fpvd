@@ -184,8 +184,18 @@ def _validate_dynamic_link(dl: dict) -> None:
         unknown_tap = set(tap) - TAP_KEYS
         if unknown_tap:
             raise SchemaError(f"unknown dynamicLink.tap keys: {sorted(unknown_tap)}")
-        port = tap.get("port", 8110)
-        if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+        enabled = tap.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise SchemaError("dynamicLink.tap.enabled must be a bool")
+        capture = tap.get("captureRaw", False)
+        if not isinstance(capture, bool):
+            raise SchemaError("dynamicLink.tap.captureRaw must be a bool")
+        tap_port = tap.get("port", 8110)
+        if (
+            isinstance(tap_port, bool)
+            or not isinstance(tap_port, int)
+            or not 1024 <= tap_port <= 65535
+        ):
             raise SchemaError("dynamicLink.tap.port must be an int in 1024..65535")
         stale = tap.get("staleMs", 500)
         if isinstance(stale, bool) or not isinstance(stale, (int, float)) or stale <= 0:
