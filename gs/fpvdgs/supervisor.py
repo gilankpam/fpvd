@@ -108,15 +108,28 @@ def build_app(
 
     profile = effective.get("wfb", {}).get("profile", "gs")
     wlans = resolve_wlans(effective)
-    runner = RunnerSupervisor(
-        runner_cmd,
-        cfg_out=cfg_out,
-        profile=profile,
-        wlans=wlans,
-        ready_port=ready_port,
-        ready_timeout=ready_timeout,
-        log_path=log_path,
-    )
+
+    engine_kind = effective.get("wfb", {}).get("engine", "wfbng")
+    if engine_kind == "native":
+        from .wfb.engine import WfbEngine
+
+        runner = WfbEngine(
+            config_provider=store.effective,
+            wlans_resolver=resolve_wlans,
+            stats_port=ready_port,
+        )
+        stats_client_factory = runner.client_factory()
+    else:
+        runner = RunnerSupervisor(
+            runner_cmd,
+            cfg_out=cfg_out,
+            profile=profile,
+            wlans=wlans,
+            ready_port=ready_port,
+            ready_timeout=ready_timeout,
+            log_path=log_path,
+        )
+        stats_client_factory = None  # default TCP StatsClient
 
     drone_cfg = effective.get("drone", {})
     drone_host = drone_cfg.get("host", "10.5.0.10")
@@ -137,12 +150,18 @@ def build_app(
     mon_drone = DroneClient(
         f"http://{drone_host}:{int(drone_cfg.get('apiPort', 8080))}", timeout=mon_cfg.http_timeout_s
     )
-    connection_monitor = ConnectionMonitor(bus, mon_drone, mon_cfg)
+    cm_kwargs = {}
+    if stats_client_factory is not None:
+        cm_kwargs["stats_client_factory"] = stats_client_factory
+    connection_monitor = ConnectionMonitor(bus, mon_drone, mon_cfg, **cm_kwargs)
 
     idr_cfg = effective.get("idrForward", {})
     idr_relay = IdrRelay(drone_host, port=int(idr_cfg.get("port", 11223)))
 
-    dynlink = DynamicLinkController(make_dl_snapshot(effective), bus=bus)
+    dl_kwargs = {}
+    if stats_client_factory is not None:
+        dl_kwargs["stats_client_factory"] = stats_client_factory
+    dynlink = DynamicLinkController(make_dl_snapshot(effective), bus=bus, **dl_kwargs)
 
     pixelpilot = ProcessSupervisor(
         argv=render_pixelpilot_argv(effective),
