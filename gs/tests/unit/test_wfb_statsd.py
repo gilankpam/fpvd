@@ -1,11 +1,12 @@
 import asyncio
+import json
 import time
 
 from fpvdgs.dynlink.stats_client import (
     RxEvent,
     SessionEvent,
     SettingsEvent,
-    iter_events_from_reader,
+    parse_record,
 )
 from fpvdgs.wfb.aggregator import StatsHub
 from fpvdgs.wfb.statsd import StatsServer
@@ -45,9 +46,10 @@ async def _wait_until(cond, timeout=2.0):
 
 def test_round_trip_through_real_tcp_stats_feed():
     # No StatsClient anymore (native mode uses an in-process factory) — drive
-    # the wire contract directly with a raw TCP connection + the shared
-    # newline-JSON decoder, which is still the real e2e path an external
-    # consumer (fpvd-stats CLI, `ss -tln` health check) would use.
+    # the wire contract directly with a raw TCP connection, decoding each
+    # line the same way fpvd-stats' CLI does (fpvdgs/wfb/cli.py `main`):
+    # strip, `json.loads`, then the shared `parse_record` decoder. The CLI
+    # reads via a blocking socket; here we use an asyncio StreamReader.
     h = hub()
     settings_fn = lambda: {"common": {"log_interval": 100}}  # noqa: E731
     server = StatsServer(h, settings_fn, host="127.0.0.1", port=0)
@@ -60,8 +62,20 @@ def test_round_trip_through_real_tcp_stats_feed():
             reader, writer = await asyncio.open_connection("127.0.0.1", server.port)
 
             async def _consume():
-                async for ev in iter_events_from_reader(reader):
-                    got.append(ev)
+                while True:
+                    raw_line = await reader.readline()
+                    if not raw_line:
+                        return
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        raw = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    ev = parse_record(raw)
+                    if ev is not None:
+                        got.append(ev)
 
             consume_task = asyncio.ensure_future(_consume())
             try:

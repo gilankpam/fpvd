@@ -88,8 +88,9 @@ class Api:
 
     @staticmethod
     def _tap_render_view(cfg):
-        """The (enabled, port) pair the rendered wfb cfg depends on — a
-        change here needs a runner bounce, unlike the rest of dynamicLink."""
+        """The (enabled, port) pair the native engine bakes into its
+        `wfb_rx -D` argv at spawn time — a change here needs a full engine
+        restart, unlike the rest of dynamicLink."""
         tap = ((cfg.get("dynamicLink") or {}).get("tap")) or {}
         return (bool(tap.get("enabled", True)), int(tap.get("port", 8110)))
 
@@ -159,11 +160,11 @@ class Api:
         """Apply the GS-local link delta: live retune when possible, else bounce.
         No drone push (client orchestrates). Returns True on success.
 
-        `new_config` is the full pending config handed to `runner.restart()` so a
-        restart-class runner (the native WfbEngine) rebuilds from exactly the
-        config being applied. The store is not committed until after this call
-        returns, so the engine cannot read it from `store.effective()` yet; the
-        wfbng runner ignores the arg and reads the freshly-rendered cfg file."""
+        `new_config` is the full pending config handed to `runner.restart()` so
+        the native WfbEngine rebuilds from exactly the config being applied.
+        The store is not committed until after this call returns, so the
+        engine cannot read it from `store.effective()` yet — it needs
+        `new_config` passed explicitly instead."""
         non_bf_changed = any(
             k != "beamforming" and old_link.get(k) != new_link.get(k)
             for k in set(old_link) | set(new_link)

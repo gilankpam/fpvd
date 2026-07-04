@@ -19,7 +19,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
@@ -211,31 +211,6 @@ def parse_record(raw: dict) -> Event | None:
         )
     log.debug("ignoring unknown record type: %r", rtype)
     return None
-
-
-async def iter_lines(reader: asyncio.StreamReader) -> AsyncIterator[bytes]:
-    while True:
-        line = await reader.readline()
-        if not line:
-            return
-        yield line
-
-
-async def iter_events_from_reader(
-    reader: asyncio.StreamReader,
-) -> AsyncIterator[Event]:
-    async for line in iter_lines(reader):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            raw = json.loads(line)
-        except json.JSONDecodeError as e:
-            log.warning("skipping malformed JSON line: %s", e)
-            continue
-        ev = parse_record(raw)
-        if ev is not None:
-            yield ev
 
 
 def _parse_endpoint(url: str) -> tuple[str, int]:

@@ -63,11 +63,7 @@ remote '
     chmod +x /usr/bin/fpvd /usr/bin/fpvd-stats /etc/init.d/S99fpvd
 
     mkdir -p /root/fpvd-gs-rollback
-    # back up the stock cfg + init script ONCE; never clobber on re-deploy
-    # (the live /etc/wifibroadcast.cfg is fpvd-generated after the first install).
-    if [ ! -e /root/fpvd-gs-rollback/wifibroadcast.cfg.orig ]; then
-        cp -a /etc/wifibroadcast.cfg /root/fpvd-gs-rollback/wifibroadcast.cfg.orig 2>/dev/null || true
-    fi
+    # back up the stock init script ONCE; never clobber on re-deploy
     if [ -f /etc/init.d/S98wifibroadcast ] && [ ! -e /root/fpvd-gs-rollback/S98wifibroadcast ]; then
         cp -a /etc/init.d/S98wifibroadcast /root/fpvd-gs-rollback/
     fi
