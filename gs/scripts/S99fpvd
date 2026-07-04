@@ -2,7 +2,7 @@
 DAEMON=fpvd
 PIDFILE=/var/run/fpvd.pid
 LOG=/tmp/fpvd.log
-ARGS="--config /etc/fpvd/config.json --cfg-out /etc/wifibroadcast.cfg --port 8080 --log $LOG"
+ARGS="--config /etc/fpvd/config.json --port 8080 --log $LOG"
 
 start() {
     printf 'Starting %s: ' "$DAEMON"

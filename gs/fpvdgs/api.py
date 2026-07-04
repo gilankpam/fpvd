@@ -18,11 +18,9 @@ class Api:
         self,
         store,
         schema,
-        render_mod,
         runner,
         drone,
         status_fn,
-        cfg_out,
         dynlink=None,
         pixelpilot=None,
         probe=None,
@@ -34,11 +32,9 @@ class Api:
     ):
         self.store = store
         self.schema = schema
-        self.render_mod = render_mod
         self.runner = runner
         self.drone = drone
         self.status_fn = status_fn
-        self.cfg_out = cfg_out
         self.dynlink = dynlink
         self.pixelpilot = pixelpilot
         self.probe = probe
@@ -72,9 +68,6 @@ class Api:
                 return self._apply_gs()
             if key == ("POST", "/gs/reset"):
                 self.store.reset()
-                self.render_mod.write_cfg(
-                    self.cfg_out, self.render_mod.render_cfg(self.store.effective())
-                )
                 self.runner.restart()
                 return 200, {"reset": True}
             if key == ("GET", "/gs/status"):
@@ -113,15 +106,12 @@ class Api:
         ) or self._tap_render_view(pending) != self._tap_render_view(effective)
 
         if link_changed or wfb_changed:
-            # Render the cfg the runner reads on a (re)start, before applying.
-            self.render_mod.write_cfg(self.cfg_out, self.render_mod.render_cfg(pending))
             if not self._apply_link_local(
                 effective.get("link", {}),
                 pending.get("link", {}),
                 pending,
                 force_bounce=wfb_changed,
             ):
-                self.render_mod.write_cfg(self.cfg_out, self.render_mod.render_cfg(effective))
                 self.runner.restart(effective)
                 return 500, {
                     "applied": False,

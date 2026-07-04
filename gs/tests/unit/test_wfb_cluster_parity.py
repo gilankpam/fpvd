@@ -104,10 +104,11 @@ import pytest
 
 from fpvdgs.config import deep_merge
 from fpvdgs.config_defaults import default_config
-from fpvdgs.render import render_cfg, write_cfg
 from fpvdgs.wfb.cards import Card
 from fpvdgs.wfb.cluster import DEFAULT_STREAMS, SERVICE_ORDER, cluster_wlan_id, plan_cluster
 from fpvdgs.wfb.graph import build_graph_remote
+
+from ._wfb_ng_cfg_render import render_cfg, write_cfg
 
 WFB_NG_SRC = os.environ.get("WFB_NG_SRC")
 pytestmark = pytest.mark.skipif(

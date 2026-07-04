@@ -1,8 +1,5 @@
 import json
-import os
-import tempfile
 
-from fpvdgs import render as render_mod
 from fpvdgs import schema
 from fpvdgs.api import Api
 from fpvdgs.config import ConfigStore
@@ -44,7 +41,6 @@ class FakeDrone:
 
 
 def _api(retune_ok=True, nodes_status_fn=None):
-    cfg_out = os.path.join(tempfile.mkdtemp(), "wifibroadcast.cfg")
     store = ConfigStore(
         {
             "link": {"channel": 132, "width": 40, "region": "US"},
@@ -65,17 +61,24 @@ def _api(retune_ok=True, nodes_status_fn=None):
     api = Api(
         store=store,
         schema=schema,
-        render_mod=render_mod,
         runner=runner,
         drone=drone,
         status_fn=lambda: {"ok": True},
-        cfg_out=cfg_out,
         retune=retune,
         wlans_resolver=lambda cfg: ["wlan0"],
         armer_tick=lambda: ticks.append(1),
         nodes_status_fn=nodes_status_fn,
     )
-    return api, store, drone, runner, retunes, ticks, cfg_out
+    return api, store, drone, runner, retunes, ticks
+
+
+def test_apply_does_not_touch_any_cfg_renderer():
+    # Native engine reads no /etc/wifibroadcast.cfg; apply must not render one.
+    api, *_ = _api()
+    api.handle("PATCH", "/gs/config", {}, b'{"link":{"channel":140}}')
+    status, _ = api.handle("POST", "/gs/apply", {}, b"")
+    assert status == 200
+    assert not hasattr(api, "render_mod")
 
 
 def test_gs_routes_answer_under_gs_prefix():
@@ -136,7 +139,7 @@ def test_status_never_touches_nodes_status_fn():
 
 
 def test_link_change_retunes_live_no_bounce():
-    api, store, _, runner, retunes, ticks, _ = _api()
+    api, store, _, runner, retunes, ticks = _api()
     api.handle("PATCH", "/gs/config", {}, json.dumps({"link": {"channel": 100}}).encode())
     code, obj = api.handle("POST", "/gs/apply", {}, b"")
     assert code == 200 and obj["applied"] is True
@@ -145,21 +148,21 @@ def test_link_change_retunes_live_no_bounce():
 
 
 def test_link_change_bounces_on_wlans():
-    api, store, _, runner, retunes, ticks, _ = _api()
+    api, store, _, runner, retunes, ticks = _api()
     api.handle("PATCH", "/gs/config", {}, json.dumps({"link": {"wlans": ["wlan1"]}}).encode())
     code, obj = api.handle("POST", "/gs/apply", {}, b"")
     assert code == 200 and runner.restarts == 1 and retunes == []
 
 
 def test_failed_retune_falls_back_to_bounce():
-    api, store, _, runner, retunes, ticks, _ = _api(retune_ok=False)
+    api, store, _, runner, retunes, ticks = _api(retune_ok=False)
     api.handle("PATCH", "/gs/config", {}, json.dumps({"link": {"channel": 100}}).encode())
     code, obj = api.handle("POST", "/gs/apply", {}, b"")
     assert code == 200 and runner.restarts == 1  # retune failed -> bounced
 
 
 def test_video_encryption_change_bounces_no_live_retune():
-    api, store, _, runner, retunes, ticks, _ = _api()
+    api, store, _, runner, retunes, ticks = _api()
     api.handle("PATCH", "/gs/config", {}, json.dumps({"link": {"videoEncryption": False}}).encode())
     code, obj = api.handle("POST", "/gs/apply", {}, b"")
     assert code == 200 and obj["applied"] is True
@@ -173,7 +176,7 @@ def test_apply_bounce_hands_new_config_to_runner_restart():
     # 2026-07-04: a link.cards/videoEncryption change applied cleanly but the
     # engine kept the OLD wiring because _apply_gs calls runner.restart() before
     # store.commit(), and the engine reads store.effective() (still old).
-    api, store, _, runner, retunes, ticks, _ = _api()
+    api, store, _, runner, retunes, ticks = _api()
     api.handle("PATCH", "/gs/config", {}, json.dumps({"link": {"videoEncryption": False}}).encode())
     code, obj = api.handle("POST", "/gs/apply", {}, b"")
     assert code == 200 and runner.restarts == 1
@@ -184,7 +187,6 @@ def test_apply_bounce_hands_new_config_to_runner_restart():
 def test_apply_rollback_hands_old_config_to_runner_restart():
     # On a failed apply-bounce the engine must rebuild from the OLD config so the
     # rollback restores the last-good wiring.
-    cfg_out = os.path.join(tempfile.mkdtemp(), "wifibroadcast.cfg")
     store = ConfigStore(
         {"link": {"channel": 132, "width": 40, "region": "US", "videoEncryption": True}},
         config_path=None,
@@ -194,11 +196,9 @@ def test_apply_rollback_hands_old_config_to_runner_restart():
     api = Api(
         store=store,
         schema=schema,
-        render_mod=render_mod,
         runner=runner,
         drone=FakeDrone(),
         status_fn=lambda: {"ok": True},
-        cfg_out=cfg_out,
         retune=lambda link: False,
         wlans_resolver=lambda cfg: ["wlan0"],
         armer_tick=lambda: None,
@@ -212,13 +212,13 @@ def test_apply_rollback_hands_old_config_to_runner_restart():
 
 
 def test_apply_fires_armer_tick():
-    api, store, drone, runner, retunes, ticks, cfg_out = _api()
+    api, store, drone, runner, retunes, ticks = _api()
     api.handle("POST", "/gs/apply", {}, b"")
     assert ticks == [1]
 
 
 def test_apply_tap_port_change_bounces_runner():
-    api, store, _, runner, retunes, ticks, _ = _api()
+    api, store, _, runner, retunes, ticks = _api()
     code, _ = api.handle("PATCH", "/gs/config", {}, b'{"dynamicLink": {"tap": {"port": 8111}}}')
     assert code == 200
     code, body = api.handle("POST", "/gs/apply", {}, b"")
@@ -226,7 +226,7 @@ def test_apply_tap_port_change_bounces_runner():
 
 
 def test_apply_tap_stale_ms_change_is_hot():
-    api, store, _, runner, retunes, ticks, _ = _api()
+    api, store, _, runner, retunes, ticks = _api()
     code, _ = api.handle("PATCH", "/gs/config", {}, b'{"dynamicLink": {"tap": {"staleMs": 250}}}')
     assert code == 200
     code, body = api.handle("POST", "/gs/apply", {}, b"")
@@ -258,7 +258,7 @@ class _FakeRunner:
 
 
 def _api_with_dynlink(tmp_path):
-    from fpvdgs import render, schema
+    from fpvdgs import schema
     from fpvdgs.api import Api
     from fpvdgs.config import ConfigStore
     from fpvdgs.drone_client import DroneClient
@@ -276,15 +276,12 @@ def _api_with_dynlink(tmp_path):
     store = ConfigStore(defaults)
     ctrl = _FakeController()
     runner = _FakeRunner()
-    cfg_out = str(tmp_path / "wfb.cfg")
     api = Api(
         store=store,
         schema=schema,
-        render_mod=render,
         runner=runner,
         drone=DroneClient("http://127.0.0.1:1"),
         status_fn=lambda: {},
-        cfg_out=cfg_out,
         dynlink=ctrl,
     )
     return api, store, ctrl, runner
@@ -375,15 +372,12 @@ def _api_with_pp(tmp_path):
     store = ConfigStore(defaults)
     runner = _FakeRunner()  # defined earlier in this file
     pp = _FakePP()
-    cfg_out = str(tmp_path / "wfb.cfg")
     api = Api(
         store=store,
         schema=schema,
-        render_mod=render_mod,
         runner=runner,
         drone=DroneClient("http://127.0.0.1:1"),
         status_fn=lambda: {},
-        cfg_out=cfg_out,
         pixelpilot=pp,
     )
     return api, store, pp, runner
@@ -490,15 +484,12 @@ def _api_with_dl_and_probe(tmp_path):
     ctrl = _FakeController()  # existing fake dynlink controller in this file
     probe = _FakeProbe()
     runner = _FakeRunner()
-    cfg_out = str(tmp_path / "wfb.cfg")
     api = Api(
         store=store,
         schema=schema,
-        render_mod=render_mod,
         runner=runner,
         drone=DroneClient("http://127.0.0.1:1"),
         status_fn=lambda: {},
-        cfg_out=cfg_out,
         dynlink=ctrl,
         probe=probe,
     )
@@ -562,7 +553,6 @@ class FakeRelay:
 
 
 def test_idr_forward_apply_starts_and_stops():
-    cfg_out = os.path.join(tempfile.mkdtemp(), "wifibroadcast.cfg")
     store = ConfigStore(
         {
             "link": {"channel": 132, "width": 40, "region": "US"},
@@ -576,11 +566,9 @@ def test_idr_forward_apply_starts_and_stops():
     api = Api(
         store=store,
         schema=schema,
-        render_mod=render_mod,
         runner=FakeRunner(),
         drone=FakeDrone(),
         status_fn=lambda: {},
-        cfg_out=cfg_out,
         retune=lambda _link: True,
         wlans_resolver=lambda c: ["wlan0"],
         armer_tick=lambda: None,

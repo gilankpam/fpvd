@@ -1,14 +1,18 @@
 """Argv-parity golden test: `fpvdgs.wfb.graph.build_graph` vs REAL wfb-ng.
 
 This is the keystone regression net for the native wfb data-plane port: it
-renders an fpvd effective config to a scratch `wifibroadcast.cfg` via
-`fpvdgs.render.render_cfg`, feeds it to the actual `wfb_ng` package (the
-fpvd fork, `swfec` branch) via `WIFIBROADCAST_CFG`, and compares the five
-child argv lists `build_graph` produces against argvs re-rendered from
-`wfb_ng.services`'s *own* format strings, filled from `parse_services`'s
-real per-service cfg (all profile inheritance applied exactly as wfb-ng
-resolves it). This catches argv drift between the native port and upstream
-that hand-transcribed golden tests (`test_wfb_graph.py`) cannot.
+renders an fpvd effective config to a scratch `wifibroadcast.cfg` via the
+test-only `_wfb_ng_cfg_render.render_cfg` helper (fpvd's own `render.py` was
+deleted -- the native `WfbEngine` builds its own child argv and never reads
+this file at runtime; this helper is kept alive purely so this test can
+still hand wfb-ng a config to parse), feeds it to the actual `wfb_ng`
+package (the fpvd fork, `swfec` branch) via `WIFIBROADCAST_CFG`, and
+compares the five child argv lists `build_graph` produces against argvs
+re-rendered from `wfb_ng.services`'s *own* format strings, filled from
+`parse_services`'s real per-service cfg (all profile inheritance applied
+exactly as wfb-ng resolves it). This catches argv drift between the native
+port and upstream that hand-transcribed golden tests (`test_wfb_graph.py`)
+cannot.
 
 Run (needs the wfb-ng checkout; deps `twisted`/`msgpack`/`pyserial`/
 `pyroute2` are test-time only, never shipped by fpvdgs):
@@ -38,8 +42,8 @@ Assumes / does not prove:
     from.
   - `render_cfg`'s uplink bandwidth cap (`min(link.width, 20)` on
     `gs_mavlink`/`gs_tunnel`) is an intentional fpvd override, documented
-    in `render.py`; the reference cfg is rendered by `render_cfg` too, so
-    `parse_services` already resolves the capped value and this test
+    in `_wfb_ng_cfg_render.py`; the reference cfg is rendered by `render_cfg`
+    too, so `parse_services` already resolves the capped value and this test
     cannot distinguish "fpvd's cap is correct" from "fpvd's cap is
     self-consistent" -- the cap's *rationale* is validated elsewhere
     (bench/flight logs), not here.
@@ -64,8 +68,9 @@ import pytest
 
 from fpvdgs.config import deep_merge
 from fpvdgs.config_defaults import default_config
-from fpvdgs.render import render_cfg, write_cfg
 from fpvdgs.wfb.graph import build_graph
+
+from ._wfb_ng_cfg_render import render_cfg, write_cfg
 
 WFB_NG_SRC = os.environ.get("WFB_NG_SRC")
 pytestmark = pytest.mark.skipif(

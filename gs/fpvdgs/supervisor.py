@@ -8,7 +8,6 @@ import sys
 import time
 
 from . import __version__, radio, schema
-from . import render as render_mod
 from . import status as status_mod
 from .api import Api, make_http_server
 from .beamforming import BeamformingController
@@ -92,9 +91,9 @@ class App:
 
 def build_app(
     config_path,
-    cfg_out,
     host,
     port,
+    *,
     ready_port=8103,
     ready_timeout=10.0,
     log_path=None,
@@ -103,9 +102,6 @@ def build_app(
     store = ConfigStore.load(config_path)
     effective = store.effective()
     schema.validate_effective(effective)
-
-    # Render the cfg the runner will read.
-    render_mod.write_cfg(cfg_out, render_mod.render_cfg(effective))
 
     from .wfb.engine import WfbEngine, reap_stale_wfb
 
@@ -229,11 +225,9 @@ def build_app(
     api = Api(
         store=store,
         schema=schema,
-        render_mod=render_mod,
         runner=runner,
         drone=drone,
         status_fn=status_fn,
-        cfg_out=cfg_out,
         dynlink=dynlink,
         pixelpilot=pixelpilot,
         probe=None,
@@ -265,7 +259,6 @@ def main(argv=None):
     p.add_argument(
         "--dump-config", action="store_true", help="print the full default config as JSON and exit"
     )
-    p.add_argument("--cfg-out", default="/etc/wifibroadcast.cfg")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--log", default=None)
@@ -285,7 +278,7 @@ def main(argv=None):
         filename=args.log,
     )
 
-    app = build_app(args.config, args.cfg_out, args.host, args.port, log_path=args.log)
+    app = build_app(args.config, args.host, args.port, log_path=args.log)
 
     def _on_sigterm(signum, frame):
         raise KeyboardInterrupt

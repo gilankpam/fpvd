@@ -172,11 +172,8 @@ def test_build_app_always_constructs_wfb_engine_without_starting(tmp_path, monke
     always constructs a WfbEngine, never a RunnerSupervisor."""
     import fpvdgs.supervisor as sup
 
-    monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
-    monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
-
     config = _write_config(tmp_path)
-    app = sup.build_app(config, str(tmp_path / "out.cfg"), "127.0.0.1", 0)
+    app = sup.build_app(config, "127.0.0.1", 0)
     assert isinstance(app.runner, WfbEngine)
     assert not isinstance(app.runner, RunnerSupervisor)
     # Never started: no thread, no children.

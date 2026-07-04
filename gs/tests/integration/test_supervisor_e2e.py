@@ -87,7 +87,6 @@ def _req(base, method, path, body=None):
 def daemon(tmp_path, fake_drone, monkeypatch):
     monkeypatch.setattr(engine_mod, "WfbEngine", _FakeWfbEngine)
     config_json = tmp_path / "config.json"
-    cfg_out = tmp_path / "wifibroadcast.cfg"
     api_port = _free_port()
     config_json.write_text(
         json.dumps(
@@ -107,7 +106,6 @@ def daemon(tmp_path, fake_drone, monkeypatch):
     )
     app = supervisor.build_app(
         str(config_json),
-        cfg_out=str(cfg_out),
         host="127.0.0.1",
         port=api_port,
         ready_timeout=5.0,
@@ -117,38 +115,32 @@ def daemon(tmp_path, fake_drone, monkeypatch):
     t.start()
     time.sleep(0.3)
     base = f"http://127.0.0.1:{api_port}"
-    yield base, cfg_out, fake_drone
+    yield base, fake_drone
     app.shutdown()
 
 
 def test_healthz_and_status(daemon):
-    base, _, _ = daemon
+    base, _ = daemon
     assert _req(base, "GET", "/healthz")[0] == 200
     code, st = _req(base, "GET", "/gs/status")
     assert code == 200
     assert st["runner"]["running"] is True
 
 
-def test_cfg_rendered_on_boot(daemon):
-    _, cfg_out, _ = daemon
-    text = cfg_out.read_text()
-    assert "wifi_channel = 132" in text
-
-
-def test_gs_apply_link_change_rerenders_cfg(daemon):
-    # A link change goes through /gs/config + /gs/apply and is a GS-local effect:
-    # the cfg is re-rendered (and the runner retunes/bounces). The drone push is
-    # now the client's job, not the GS's — so no drone /config call here.
-    base, cfg_out, fake_drone = daemon
+def test_gs_apply_link_change_applies_without_drone_push(daemon):
+    # A link change goes through /gs/config + /gs/apply and is a GS-local effect
+    # (the native engine retunes/bounces from its own config, no rendered cfg
+    # file involved). The drone push is now the client's job, not the GS's --
+    # so no drone /config call here.
+    base, fake_drone = daemon
     _req(base, "PATCH", "/gs/config", {"link": {"channel": 100}})
     code, _ = _req(base, "POST", "/gs/apply", {})
     assert code == 200
-    assert "wifi_channel = 100" in cfg_out.read_text()
     assert not any(p == "/config" for (_m, p, _b) in fake_drone["calls"])
 
 
 def test_air_proxy_roundtrip(daemon):
-    base, _, fake_drone = daemon
+    base, fake_drone = daemon
     code, _ = _req(base, "PATCH", "/air/config", {"video": {"bitrate": 9000}})
     assert code == 200
     assert any(p == "/config" for (_m, p, _b) in fake_drone["calls"])
@@ -207,9 +199,7 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
             }
         )
     )
-    cfg_out = tmp_path / "wfb.cfg"
-
-    app = supervisor.build_app(str(config_json), str(cfg_out), "127.0.0.1", 0)
+    app = supervisor.build_app(str(config_json), "127.0.0.1", 0)
     code, body = app.api.handle("GET", "/gs/status", {}, b"")
     assert code == 200
     assert "dynamicLink" in body
@@ -282,11 +272,9 @@ def test_status_probe_bypassed_with_dynamiclink_enabled(tmp_path, monkeypatch):
             }
         )
     )
-    cfg_out = tmp_path / "wfb.cfg"
     api_port = _free_port()
     app = supervisor.build_app(
         str(config_json),
-        str(cfg_out),
         "127.0.0.1",
         api_port,
         probe_spawn=fake_spawn,
