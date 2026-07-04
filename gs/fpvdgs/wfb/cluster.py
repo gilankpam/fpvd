@@ -155,6 +155,14 @@ def render_node_script(
         "",
         "export LC_ALL=C",
         "",
+        # Save the SSH stdin on fd 3 so the connection-loss watchdog below can
+        # read it. On a non-tty BusyBox/ash node `set -m` job control is off,
+        # and POSIX then redirects a background job's stdin to /dev/null — so a
+        # backgrounded `cat` reading fd 0 would hit instant EOF and tear the
+        # node down ~1s after start. Reading the saved fd 3 instead keeps the
+        # watchdog blocked until the SSH channel actually closes.
+        "exec 3<&0",
+        "",
         'PIDS=""',
         "",
         "_cleanup()",
@@ -214,8 +222,9 @@ def render_node_script(
         lines.append("")
 
     if ssh_mode:
-        lines.append("# Will fail in case of connection loss")
-        lines.append('(sleep 1; exec cat > /dev/null) & PIDS="$PIDS $!"')
+        lines.append("# Will fail in case of connection loss (reads fd 3 = the")
+        lines.append("# saved SSH stdin; see the `exec 3<&0` note above).")
+        lines.append('(sleep 1; exec cat <&3 > /dev/null) & PIDS="$PIDS $!"')
         lines.append("")
 
     lines.append('echo "WFB-ng init done"')

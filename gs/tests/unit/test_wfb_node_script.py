@@ -35,7 +35,7 @@ def test_golden_forwarder_and_injector_lines():
     assert "wfb_tx -I 11001 -R 2097152 wlan0 &" in script  # mavlink injector
     assert "iw dev wlan0 set channel 132 HT20" in script
     assert "iw dev wlan0 set txpower" not in script  # "off" card: no txpower line
-    assert "(sleep 1; exec cat > /dev/null) &" in script  # ssh watchdog
+    assert "(sleep 1; exec cat <&3 > /dev/null) &" in script  # ssh watchdog
 
 
 def test_no_bashisms():
@@ -44,6 +44,21 @@ def test_no_bashisms():
     assert "wait -n" not in script
     assert "set -b" not in script
     assert "set -emb" not in script
+
+
+def test_watchdog_reads_saved_stdin_fd_not_fd0():
+    # On a non-tty BusyBox/ash node, `set -m` job control is off and POSIX
+    # redirects a background job's fd 0 to /dev/null — so a watchdog reading
+    # fd 0 would EOF instantly and tear the node down ~1s after start
+    # (bench-observed 2026-07-04). The script must save the SSH stdin on fd 3
+    # (`exec 3<&0`) BEFORE spawning any background job, and the watchdog must
+    # read fd 3, so it stays blocked until the SSH channel actually closes.
+    script = _remote_script()
+    lines = script.splitlines()
+    save_idx = next(i for i, ln in enumerate(lines) if ln.strip() == "exec 3<&0")
+    watchdog_idx = next(i for i, ln in enumerate(lines) if "exec cat <&3" in ln)
+    assert save_idx < watchdog_idx  # fd saved before any background job reads it
+    assert "exec cat > /dev/null" not in script  # the broken fd-0 form is gone
 
 
 def test_sh_syntax_check(tmp_path):
