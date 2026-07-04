@@ -456,3 +456,78 @@ def test_tap_bool_fields_type_checked():
         schema._validate_dynamic_link({"tap": {"enabled": "false"}})
     with pytest.raises(schema.SchemaError):
         schema._validate_dynamic_link({"tap": {"captureRaw": 1}})
+
+
+def test_wfb_engine_accepts_known_values():
+    schema.validate_effective(
+        {"link": {"channel": 132, "region": "US"}, "wfb": {"engine": "wfbng"}}
+    )
+    schema.validate_effective(
+        {"link": {"channel": 132, "region": "US"}, "wfb": {"engine": "native"}}
+    )
+
+
+def test_wfb_engine_rejects_unknown_value():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {"link": {"channel": 132, "region": "US"}, "wfb": {"engine": "bogus"}}
+        )
+
+
+def test_wfb_tx_selector_valid_accepted():
+    schema.validate_effective(
+        {
+            "link": {"channel": 132, "region": "US"},
+            "wfb": {
+                "txSelector": {
+                    "rssiDeltaDb": 3,
+                    "counterRelDelta": 0.1,
+                    "counterAbsDelta": 3,
+                }
+            },
+        }
+    )
+
+
+def test_wfb_tx_selector_rejects_bad_rssi_delta():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"txSelector": {"rssiDeltaDb": -1}},
+            }
+        )
+
+
+def test_wfb_tx_selector_rejects_out_of_range_counter_rel_delta():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"txSelector": {"counterRelDelta": 1.5}},
+            }
+        )
+
+
+def test_wfb_tx_selector_rejects_negative_counter_abs_delta():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"txSelector": {"counterAbsDelta": -1}},
+            }
+        )
+
+
+def test_wfb_tx_selector_rejects_unknown_key():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"txSelector": {"bogus": 1}},
+            }
+        )
+
+
+def test_config_patch_accepts_sparse_wfb_engine():
+    validate_config_patch({"wfb": {"engine": "native"}})

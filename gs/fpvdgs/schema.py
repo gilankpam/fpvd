@@ -62,6 +62,8 @@ LEARNED_PRIOR_KEYS = {
 }
 TAP_KEYS = frozenset({"enabled", "port", "staleMs", "captureRaw"})
 VALID_WIDTHS = {10, 20, 40}  # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
+WFB_ENGINES = {"wfbng", "native"}
+TX_SELECTOR_KEYS = frozenset({"rssiDeltaDb", "counterRelDelta", "counterAbsDelta"})
 
 
 _bf_capable = None  # callable(cfg) -> bool; None => unknown => allow
@@ -144,6 +146,9 @@ def validate_effective(cfg: dict) -> None:
     dr = cfg.get("drone")
     if dr is not None:
         _validate_drone(dr)
+    wfb = cfg.get("wfb")
+    if wfb is not None:
+        _validate_wfb(wfb)
 
 
 def _validate_drone(dr: dict) -> None:
@@ -155,6 +160,24 @@ def _validate_drone(dr: dict) -> None:
     port = dr.get("apiPort", 8080)
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("drone.apiPort must be an int in 1..65535")
+
+
+def _validate_wfb(wfb: dict) -> None:
+    if not isinstance(wfb, dict):
+        raise SchemaError("wfb must be an object")
+    engine = wfb.get("engine", "wfbng")
+    if engine not in WFB_ENGINES:
+        raise SchemaError(f"wfb.engine must be one of {sorted(WFB_ENGINES)}")
+    txsel = wfb.get("txSelector")
+    if txsel is not None:
+        _validate_block_keys("wfb.txSelector", txsel, TX_SELECTOR_KEYS)
+        _validate_non_neg_num("wfb.txSelector.rssiDeltaDb", txsel.get("rssiDeltaDb"))
+        _validate_prob("wfb.txSelector.counterRelDelta", txsel.get("counterRelDelta"))
+        abs_delta = txsel.get("counterAbsDelta")
+        if abs_delta is not None and (
+            isinstance(abs_delta, bool) or not isinstance(abs_delta, int) or abs_delta < 0
+        ):
+            raise SchemaError("wfb.txSelector.counterAbsDelta must be a non-negative int")
 
 
 def _validate_beamforming(bf: dict) -> None:

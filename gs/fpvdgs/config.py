@@ -19,6 +19,7 @@ from .schema import (
     SELECTOR_KEYS,
     SMOOTHING_KEYS,
     TAP_KEYS,
+    TX_SELECTOR_KEYS,
 )
 
 log = logging.getLogger("fpvdgs.config")
@@ -26,11 +27,12 @@ log = logging.getLogger("fpvdgs.config")
 
 def _warn_unknown(loaded: dict, defaults: dict) -> dict:
     """Warn on AND strip keys absent from the code defaults — scoped to the
-    top level and the dynamicLink / drone subtrees. Returns a pruned copy so
-    stale / unknown keys never reach the effective config: this keeps an old
-    config.json from bricking boot (validate_effective is strict on those keys)
-    and matches the drone's drop-unknowns load. Other blocks (pixelpilot/wfb/link)
-    hold open maps and are left untouched."""
+    top level, the dynamicLink / drone subtrees, and wfb.txSelector. Returns a
+    pruned copy so stale / unknown keys never reach the effective config: this
+    keeps an old config.json from bricking boot (validate_effective is strict
+    on those keys) and matches the drone's drop-unknowns load. Other blocks
+    (pixelpilot/wfb's own top-level keys/link) hold open maps and are left
+    untouched."""
     pruned = copy.deepcopy(loaded)
     for key in sorted(set(pruned) - set(defaults)):
         log.warning("ignoring unknown config key: %s", key)
@@ -58,6 +60,15 @@ def _warn_unknown(loaded: dict, defaults: dict) -> dict:
                 for key in sorted(set(sub) - known):
                     log.warning("ignoring unknown dynamicLink.%s key: %s", block, key)
                     del sub[key]
+    # wfb itself stays an open map (profile/mavlink/raw), but txSelector is
+    # strict in validate_effective, so it needs the same nested pruning.
+    wfb = pruned.get("wfb")
+    if isinstance(wfb, dict):
+        txsel = wfb.get("txSelector")
+        if isinstance(txsel, dict):
+            for key in sorted(set(txsel) - TX_SELECTOR_KEYS):
+                log.warning("ignoring unknown wfb.txSelector key: %s", key)
+                del txsel[key]
     return pruned
 
 

@@ -87,7 +87,13 @@ def default_config() -> dict:
         },
         "wfb": {
             "profile": "gs",
+            "engine": "wfbng",
             "mavlink": {"peer": "connect://127.0.0.1:14550"},
+            "txSelector": {
+                "rssiDeltaDb": 3,
+                "counterRelDelta": 0.1,
+                "counterAbsDelta": 3,
+            },
             "raw": {},
         },
         "drone": {"host": "10.5.0.10", "apiPort": 8080},
