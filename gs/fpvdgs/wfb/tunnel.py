@@ -231,7 +231,9 @@ class TunnelService:
         old = dict(self._tx_socks)
         new: dict[str, socket.socket] = {}
         for name in names:
-            old.pop(name, None)
+            existing = old.pop(name, None)
+            if existing is not None:
+                existing.close()
             sock = self._connect_tx_socket(name)
             if sock is not None:
                 new[name] = sock
