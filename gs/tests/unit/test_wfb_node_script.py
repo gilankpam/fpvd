@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import time
@@ -171,3 +172,77 @@ def test_path_stub_fail_fast_on_child_death(tmp_path):
 
     assert rc != 0
     assert elapsed < 3.0
+
+
+_STUB_PID_SHORT = """#!/bin/sh
+echo $$ >> "{log}"
+sleep 0.2
+"""
+
+_STUB_PID_LONG = """#!/bin/sh
+echo $$ >> "{log}"
+exec sleep 5
+"""
+
+
+def test_path_stub_fail_fast_kills_sibling_children(tmp_path):
+    """Critical regression guard: the cleanup trap must fire on the
+    script's own fail-fast `exit 1` (i.e. `trap _cleanup EXIT`), not only
+    on an externally-delivered SIGTERM (`trap _cleanup TERM`). Otherwise,
+    when one child (wfb_rx) dies and the poll loop calls its own `exit 1`,
+    the trap never runs and the sibling (wfb_tx) is orphaned, still
+    holding the wlan.
+    """
+    script = _remote_script()
+    script_path = tmp_path / "node.sh"
+    script_path.write_text(script)
+    script_path.chmod(0o755)
+
+    log = tmp_path / "log.txt"
+    log.write_text("")
+    rx_pidfile = tmp_path / "rx_pids.txt"
+    rx_pidfile.write_text("")
+    tx_pidfile = tmp_path / "tx_pids.txt"
+    tx_pidfile.write_text("")
+
+    for name in ("iw", "ip", "nmcli"):
+        _write_stub(tmp_path / name, _STUB_ONESHOT, log)
+    _write_stub(tmp_path / "wfb_rx", _STUB_PID_SHORT, rx_pidfile)
+    _write_stub(tmp_path / "wfb_tx", _STUB_PID_LONG, tx_pidfile)
+
+    env = {"PATH": f"{tmp_path}:{shutil.os.environ['PATH']}"}
+    proc = subprocess.Popen(
+        ["sh", str(script_path)],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+        raise AssertionError("script did not exit after a child died (fail-fast broken?)")
+
+    tx_pids = [int(p) for p in tx_pidfile.read_text().split()]
+    assert tx_pids, "sibling wfb_tx stub never started"
+
+    # Allow a short grace period for SIGTERM delivery/reaping.
+    deadline = time.monotonic() + 2.0
+    alive = set(tx_pids)
+    while alive and time.monotonic() < deadline:
+        for pid in list(alive):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                alive.discard(pid)
+        if alive:
+            time.sleep(0.1)
+
+    assert not alive, (
+        f"sibling wfb_tx pid(s) {alive} still alive after the script exited "
+        "(cleanup trap did not fire on the internal fail-fast exit -- "
+        "must be `trap _cleanup EXIT`, not `trap _cleanup TERM`)"
+    )

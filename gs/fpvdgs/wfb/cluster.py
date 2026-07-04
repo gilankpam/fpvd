@@ -147,13 +147,12 @@ def render_node_script(
         "  exit 1",
         "}",
         "",
-        "trap _cleanup TERM",
+        "trap _cleanup EXIT",
         "",
     ]
 
-    if region:
-        lines.append(f"iw reg set {region}")
-        lines.append("")
+    lines.append(f"iw reg set {region}")
+    lines.append("")
 
     for card in cards:
         wlan = card.iface
