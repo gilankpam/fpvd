@@ -590,3 +590,67 @@ def test_wfb_no_mavlink_block_is_allowed():
     schema.validate_effective(
         {"link": {"channel": 132, "region": "US"}, "wfb": {"engine": "native"}}
     )
+
+
+# ---- link.cards / link.serverAddress (wfb.cards migration) ----------------
+
+
+def test_config_patch_accepts_cards_and_server_address():
+    schema.validate_config_patch({"link": {"cards": ["wlan0"]}})  # no raise
+    schema.validate_config_patch({"link": {"serverAddress": "10.0.0.5"}})  # no raise
+
+
+def test_config_patch_still_accepts_legacy_wlans():
+    # Deprecated but must keep working — old clients/overlays only know it.
+    schema.validate_config_patch({"link": {"wlans": ["wlan0"]}})  # no raise
+
+
+def test_validate_effective_accepts_string_and_object_cards():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    "wlan0",
+                    {"host": "192.168.1.10", "iface": "wlan1", "txPowerDbm": 20},
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_accepts_cards_auto():
+    schema.validate_effective({"link": {"channel": 132, "region": "US", "cards": "auto"}})
+
+
+def test_validate_effective_rejects_card_object_without_iface():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {"link": {"channel": 132, "region": "US", "cards": [{"host": "x"}]}}
+        )
+
+
+def test_validate_effective_rejects_unknown_card_key():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {"link": {"channel": 132, "region": "US", "cards": [{"iface": "w", "bogus": 1}]}}
+        )
+
+
+def test_validate_effective_rejects_non_string_server_address():
+    with pytest.raises(SchemaError):
+        schema.validate_effective({"link": {"channel": 132, "region": "US", "serverAddress": 5}})
+
+
+def test_validate_effective_accepts_null_server_address():
+    schema.validate_effective({"link": {"channel": 132, "region": "US", "serverAddress": None}})
+
+
+def test_defaults_have_cards_and_server_address_not_wlans():
+    from fpvdgs.config_defaults import default_config
+
+    link = default_config()["link"]
+    assert link["cards"] == "auto"
+    assert link["serverAddress"] is None
+    assert "wlans" not in link

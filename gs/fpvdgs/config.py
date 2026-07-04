@@ -32,7 +32,9 @@ def _warn_unknown(loaded: dict, defaults: dict) -> dict:
     keeps an old config.json from bricking boot (validate_effective is strict
     on those keys) and matches the drone's drop-unknowns load. Other blocks
     (pixelpilot/wfb's own top-level keys/link) hold open maps and are left
-    untouched."""
+    untouched — notably `link.wlans`, the pre-`cards` legacy overlay key
+    (see schema.LINK_KEYS), which `wfb.cards.parse_cards` still consumes and
+    must never be stripped here."""
     pruned = copy.deepcopy(loaded)
     for key in sorted(set(pruned) - set(defaults)):
         log.warning("ignoring unknown config key: %s", key)

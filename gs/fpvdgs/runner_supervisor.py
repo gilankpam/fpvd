@@ -29,10 +29,14 @@ def _wfb_nics() -> list[str]:
 
 
 def resolve_wlans(cfg: dict) -> list[str]:
-    wlans = cfg.get("link", {}).get("wlans", "auto")
-    if wlans == "auto" or wlans is None:
-        return _wfb_nics()
-    return list(wlans)
+    """Thin shim over the card model: every existing caller (status,
+    beamforming, retune, the wfbng RunnerSupervisor) wants only LOCAL ifaces,
+    same as before Phase 2's remote cards. Local import avoids a circular
+    import (wfb.cards falls back to this module's `_wfb_nics` when no
+    detector is passed)."""
+    from .wfb.cards import local_ifaces, resolve_cards
+
+    return local_ifaces(resolve_cards(cfg, nic_detector=_wfb_nics))
 
 
 def _port_open(port: int, host: str = "127.0.0.1") -> bool:

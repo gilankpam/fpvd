@@ -7,6 +7,13 @@ LINK_KEYS = {
     "region",
     "linkId",
     "beamforming",
+    "cards",
+    "serverAddress",
+    # legacy overlay key, pre-dates `cards` (Phase 2 remote cards): a plain
+    # list of local iface name strings, or "auto". `wfb.cards.parse_cards`
+    # still consumes it as a back-compat fallback — keep accepting it here
+    # (and never strip it in the tolerant loader) so old overlays/PATCHes
+    # that only set `wlans` keep working. Deprecated; prefer `cards`.
     "wlans",
     "videoEncryption",
 }
@@ -61,6 +68,7 @@ LEARNED_PRIOR_KEYS = {
     "recencyDecay",
 }
 TAP_KEYS = frozenset({"enabled", "port", "staleMs", "captureRaw"})
+CARD_KEYS = frozenset({"host", "iface", "sshUser", "sshPort", "sshKey", "txPowerDbm"})
 VALID_WIDTHS = {10, 20, 40}  # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 WFB_ENGINES = {"wfbng", "native"}
 TX_SELECTOR_KEYS = frozenset({"rssiDeltaDb", "counterRelDelta", "counterAbsDelta"})
@@ -125,6 +133,12 @@ def validate_effective(cfg: dict) -> None:
     bf = link.get("beamforming")
     if bf is not None:
         _validate_beamforming(bf)
+    cards = link.get("cards")
+    if cards is not None and cards != "auto":
+        _validate_cards(cards)
+    server_addr = link.get("serverAddress")
+    if server_addr is not None and not isinstance(server_addr, str):
+        raise SchemaError("link.serverAddress must be a string or null")
     if bf is not None and bf.get("enabled") and _bf_capable is not None:
         if not _bf_capable(cfg):
             raise SchemaError(
@@ -204,6 +218,21 @@ def _validate_beamforming(bf: dict) -> None:
         raise SchemaError(f"unknown link.beamforming keys: {sorted(unknown)}")
     if not isinstance(bf.get("enabled", False), bool):
         raise SchemaError("link.beamforming.enabled must be a bool")
+
+
+def _validate_cards(cards) -> None:
+    if not isinstance(cards, list):
+        raise SchemaError("link.cards must be a list or 'auto'")
+    for c in cards:
+        if isinstance(c, str):
+            continue
+        if not isinstance(c, dict):
+            raise SchemaError("link.cards entries must be a string or an object")
+        if "iface" not in c:
+            raise SchemaError("link.cards object entries require 'iface'")
+        unknown = set(c) - CARD_KEYS
+        if unknown:
+            raise SchemaError(f"unknown link.cards keys: {sorted(unknown)}")
 
 
 def _validate_dynamic_link(dl: dict) -> None:

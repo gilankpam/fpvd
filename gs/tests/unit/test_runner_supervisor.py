@@ -17,6 +17,20 @@ def test_resolve_wlans_auto_uses_wfb_nics(monkeypatch):
     assert resolve_wlans({"link": {"wlans": "auto"}}) == ["wlxAAA", "wlxBBB"]
 
 
+def test_resolve_wlans_sees_only_local_cards():
+    # resolve_wlans is a shim over the flat card model (Phase 2 remote
+    # cards): every existing caller must keep seeing only LOCAL ifaces.
+    cfg = {
+        "link": {
+            "cards": [
+                "wlan0",
+                {"host": "10.0.0.5", "iface": "wlan1"},
+            ]
+        }
+    }
+    assert resolve_wlans(cfg) == ["wlan0"]
+
+
 def _free_port():
     s = socket.socket()
     s.bind(("127.0.0.1", 0))

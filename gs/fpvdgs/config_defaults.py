@@ -82,7 +82,8 @@ def default_config() -> dict:
             "region": "US",
             "linkId": 7669206,
             "beamforming": {"enabled": False},
-            "wlans": "auto",
+            "cards": "auto",
+            "serverAddress": None,
             "videoEncryption": True,
         },
         "wfb": {
