@@ -1,5 +1,15 @@
+import asyncio
+import socket
+import time
+
 from fpvdgs.wfb.cards import Card
-from fpvdgs.wfb.cluster import cluster_wlan_id, plan_cluster
+from fpvdgs.wfb.cluster import (
+    NodeSession,
+    cluster_wlan_id,
+    derive_server_address,
+    plan_cluster,
+    ssh_argv,
+)
 
 LOCAL = [Card(host=None, iface="wlan1"), Card(host=None, iface="wlan2")]
 REMOTE = [Card(host="192.168.1.10", iface="wlan0", txpower_dbm="off")]
@@ -23,3 +33,167 @@ def test_rx_only_ids():
 
 def test_cluster_wlan_id_encoding():
     assert cluster_wlan_id("127.0.0.1", 1) == ((0x7F000001) << 24) | 1
+
+
+# -- derive_server_address ----------------------------------------------------
+
+
+def test_derive_server_address_override_wins():
+    assert derive_server_address("127.0.0.1", "10.9.9.9") == "10.9.9.9"
+
+
+def test_derive_server_address_derives_local_ip():
+    addr = derive_server_address("127.0.0.1", None)
+    socket.inet_aton(addr)  # raises OSError if not a dotted-quad
+    assert addr == "127.0.0.1"
+
+
+# -- ssh_argv -------------------------------------------------------------------
+
+
+def test_ssh_argv_shape_with_key():
+    card = Card(
+        host="10.0.0.5",
+        iface="wlan0",
+        ssh_user="root",
+        ssh_port=2222,
+        ssh_key="/root/.ssh/id_ed25519",
+    )
+    assert ssh_argv(card) == [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ServerAliveInterval=5",
+        "-o",
+        "ServerAliveCountMax=3",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-p",
+        "2222",
+        "-i",
+        "/root/.ssh/id_ed25519",
+        "root@10.0.0.5",
+        "exec sh -s",
+    ]
+
+
+def test_ssh_argv_no_key_uses_defaults():
+    card = Card(host="10.0.0.5", iface="wlan0")
+    argv = ssh_argv(card)
+    assert "-i" not in argv
+    assert "-p" in argv and argv[argv.index("-p") + 1] == "22"
+    assert argv[-2:] == ["root@10.0.0.5", "exec sh -s"]
+
+
+# -- NodeSession ----------------------------------------------------------------
+
+
+def run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
+def _bash(cmd: str) -> list[str]:
+    return ["bash", "-c", cmd]
+
+
+def test_node_session_start_delivers_script(tmp_path):
+    capture = tmp_path / "captured.txt"
+
+    def argv_builder(_node):
+        # cat writes what it reads as it arrives; it then blocks on the
+        # next read() since NodeSession never closes stdin.
+        return _bash(f"cat > {capture}")
+
+    async def main():
+        session = NodeSession(
+            "n1",
+            "hello from the node script\n",
+            argv_builder=argv_builder,
+            backoff=0.01,
+            max_backoff=0.05,
+        )
+        try:
+            ok = await session.start()
+            assert ok is True
+            assert session.alive is True
+
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and not capture.exists():
+                await asyncio.sleep(0.02)
+
+            assert capture.read_text() == "hello from the node script\n"
+        finally:
+            await session.stop()
+
+    run(main())
+
+
+def test_node_session_respawns_with_backoff_then_stays_up():
+    calls: list[int] = []
+    states: list[tuple[str, bool]] = []
+
+    def argv_builder(_node):
+        calls.append(1)
+        if len(calls) <= 2:
+            return _bash("exit 0")
+        return _bash("sleep 5")
+
+    async def main():
+        session = NodeSession(
+            "n1",
+            "script\n",
+            argv_builder=argv_builder,
+            backoff=0.01,
+            max_backoff=0.02,
+            on_state=lambda node, up: states.append((node, up)),
+        )
+        try:
+            await session.start()
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and not (
+                len(calls) >= 3 and states and states[-1] == ("n1", True)
+            ):
+                await asyncio.sleep(0.02)
+
+            assert len(calls) >= 3
+            assert states.count(("n1", False)) >= 2
+            assert states[-1] == ("n1", True)
+            assert session.alive is True
+
+            # Give it a moment more to make sure the "stays up" run really
+            # does stay up (no further flapping).
+            settled = len(states)
+            await asyncio.sleep(0.3)
+            assert len(states) == settled
+        finally:
+            await session.stop()
+
+    run(main())
+
+
+def test_node_session_stop_terminates_and_stops_respawning():
+    calls: list[int] = []
+
+    def argv_builder(_node):
+        calls.append(1)
+        return _bash("sleep 5")
+
+    async def main():
+        session = NodeSession("n1", "x\n", argv_builder=argv_builder, backoff=0.01)
+        assert await session.start() is True
+        assert session.alive is True
+
+        t0 = time.monotonic()
+        await session.stop()
+        elapsed = time.monotonic() - t0
+
+        assert elapsed < 2.0
+        assert session.alive is False
+        assert session.state() == {"alive": False, "restarts": 0}
+
+        calls_at_stop = len(calls)
+        await asyncio.sleep(0.2)
+        assert len(calls) == calls_at_stop  # no respawn after stop()
+
+    run(main())
