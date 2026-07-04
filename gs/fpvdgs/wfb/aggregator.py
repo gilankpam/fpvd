@@ -216,7 +216,10 @@ class StatsHub:
             tx_sel = self._txsel.select(stats_agg)
             if tx_sel is not None:
                 for cb in ant_sel_cbs:
-                    cb(tx_sel)
+                    try:
+                        cb(tx_sel)
+                    except Exception:
+                        log.exception("wfb: ant_sel callback failed")
 
         flags = 0
         bad_packets = sum(p["dec_err"][0] + p["bad"][0] for p in pkts_by_rx.values())
@@ -236,7 +239,10 @@ class StatsHub:
 
         rssi = (mav_rssi, mav_noise, rx_errors, rx_fec, flags)
         for cb in rssi_cbs:
-            cb(*rssi)
+            try:
+                cb(*rssi)
+            except Exception:
+                log.exception("wfb: rssi callback failed")
 
         return {"stats_agg": stats_agg, "rssi": rssi, "tx_sel": tx_sel}
 
@@ -262,7 +268,10 @@ class StatsHub:
         with self._lock:
             self._ant_sel_cbs.append(cb)
             current = self._txsel.current
-        cb(current)  # wfb-ng contract: fire once at registration with the current value
+        try:
+            cb(current)  # wfb-ng contract: fire once at registration with the current value
+        except Exception:
+            log.exception("wfb: ant_sel callback failed")
 
     def client_factory(self):
         hub = self

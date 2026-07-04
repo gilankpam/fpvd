@@ -165,3 +165,50 @@ def test_native_stats_source_delivers_events_and_replays_session():
     assert any(isinstance(ev, SessionEvent) for ev in got)  # replay on connect
     assert any(isinstance(ev, RxEvent) for ev in got)
     assert any(isinstance(ev, TxEvent) for ev in got)
+
+
+# (h) aggregate_window completes and returns its dict even if ant_sel_cb raises.
+def test_aggregate_window_completes_despite_raising_ant_sel_cb():
+    h = hub()
+    calls = []
+
+    def failing_cb(tx_sel):
+        calls.append(tx_sel)
+        raise ValueError("callback failure")
+
+    h.add_ant_sel_cb(failing_cb)
+    assert len(calls) == 1  # fired at registration with None
+
+    ant = {((5660, 5, 20), 0): (10, -60, -55, -50, 20, 22, 25, -1, -1, -1)}
+    h.update_rx_stats("video rx", dict(PKTS), ant, None)
+
+    # aggregate_window must return a dict and not raise, even though ant_sel_cb raises
+    out = h.aggregate_window()
+
+    assert isinstance(out, dict)
+    assert "stats_agg" in out
+    assert "rssi" in out
+    assert "tx_sel" in out
+    assert len(calls) == 2  # callback fired again on ant_sel even though it raised
+
+
+# (i) dead-loop auto-unsubscribe: when subscriber loop is closed, push's
+# call_soon_threadsafe raises RuntimeError and triggers unsubscribe.
+def test_dead_loop_auto_unsubscribe_on_closed_event_loop():
+    h = hub()
+    loop = asyncio.new_event_loop()
+    loop.close()  # loop is now dead
+    sub = h.subscribe(loop, lambda ev: None)
+
+    # subscriber should be in the hub's list before update
+    with h._lock:
+        assert sub in h._subs
+
+    # update_rx_stats will try to push to the dead loop, triggering auto-unsubscribe
+    ant = {((5660, 5, 20), 0): (10, -60, -55, -50, 20, 22, 25, -1, -1, -1)}
+    h.update_rx_stats("video rx", dict(PKTS), ant, None)
+
+    # subscriber should now be removed from the hub's list
+    with h._lock:
+        assert sub not in h._subs
+        assert len(h._subs) == 0
