@@ -84,7 +84,7 @@ def test_build_app_wires_api_collaborators(tmp_path, monkeypatch):
         '{"link": {"region": "US", "channel": 132, "width": 20, ' '"wlans": ["wlan0"]}}'
     )
 
-    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0)
     assert app.api.retune is not None
     assert app.api.wlans_resolver is not None
     assert app.api.armer_tick is not None
@@ -133,7 +133,7 @@ def test_build_app_wires_connection_monitor_and_bus(tmp_path, monkeypatch):
     config.write_text(
         '{"link": {"region": "US", "channel": 132, "width": 20, ' '"wlans": ["wlan0"]}}'
     )
-    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0)
     assert app.connection_monitor is not None
     assert app.bus is not None
 
@@ -156,7 +156,7 @@ def test_build_app_retune_calls_radio_retune_when_all_local(tmp_path, monkeypatc
 
     config = tmp_path / "config.json"
     config.write_text('{"link": {"region": "US", "channel": 132, "width": 20, "wlans": ["wlan0"]}}')
-    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0)
 
     new_link = {"region": "US", "channel": 149, "width": 20}
     assert app.api.retune(new_link) is True
@@ -191,7 +191,7 @@ def test_build_app_retune_returns_false_when_remote_card_present(tmp_path, monke
             }
         )
     )
-    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0)
 
     assert app.api.retune({"region": "US", "channel": 149, "width": 20}) is False
     assert calls == []
@@ -209,6 +209,6 @@ def test_build_app_probe_is_bypassed(tmp_path, monkeypatch):
         '{"link": {"region": "US", "channel": 132, "width": 20, "wlans": ["wlan0"]}, '
         '"dynamicLink": {"enabled": true}}'
     )
-    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0)
     assert app.probe is None, "probe bypass: no ProbeController must be constructed"
     assert app.api.probe is None

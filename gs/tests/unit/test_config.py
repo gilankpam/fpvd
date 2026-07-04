@@ -187,9 +187,8 @@ def test_stale_tap_key_stripped_on_load():
     assert "removedKnob" not in pruned["dynamicLink"]["tap"]
 
 
-def test_wfb_engine_and_tx_selector_defaults_present():
+def test_wfb_tx_selector_defaults_present():
     cfg = default_config()["wfb"]
-    assert cfg["engine"] == "wfbng"
     assert cfg["txSelector"] == {
         "rssiDeltaDb": 3,
         "counterRelDelta": 0.1,

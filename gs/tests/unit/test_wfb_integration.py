@@ -10,9 +10,8 @@ Two things are load-bearing here:
    `tunnel_service_cls` are faked (the mavlink/tunnel legs are irrelevant
    to the video-stats path this test exercises, and the real ones open
    real unix sockets / tun devices).
-2. `build_app`'s `wfb.engine` switch: default/"wfbng" must still construct
-   a `RunnerSupervisor` (today's bit-identical behavior); "native" must
-   construct a `WfbEngine` instead, without starting it.
+2. `build_app` always constructs a `WfbEngine` (native is the sole engine;
+   the `wfb.engine` flag is gone), without starting it.
 """
 
 from __future__ import annotations
@@ -168,26 +167,17 @@ def _write_config(tmp_path, extra=""):
     return str(config)
 
 
-def test_build_app_default_engine_constructs_runner_supervisor(tmp_path, monkeypatch):
+def test_build_app_always_constructs_wfb_engine_without_starting(tmp_path, monkeypatch):
+    """Native is the sole engine (the `wfb.engine` flag is gone): build_app
+    always constructs a WfbEngine, never a RunnerSupervisor."""
     import fpvdgs.supervisor as sup
 
     monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
     monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
 
     config = _write_config(tmp_path)
-    app = sup.build_app(config, str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
-    assert isinstance(app.runner, RunnerSupervisor)
-    assert not isinstance(app.runner, WfbEngine)
-
-
-def test_build_app_native_engine_constructs_wfb_engine_without_starting(tmp_path, monkeypatch):
-    import fpvdgs.supervisor as sup
-
-    monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
-    monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
-
-    config = _write_config(tmp_path, extra=', "wfb": {"engine": "native"}')
-    app = sup.build_app(config, str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+    app = sup.build_app(config, str(tmp_path / "out.cfg"), "127.0.0.1", 0)
     assert isinstance(app.runner, WfbEngine)
+    assert not isinstance(app.runner, RunnerSupervisor)
     # Never started: no thread, no children.
     assert app.runner.state()["running"] is False

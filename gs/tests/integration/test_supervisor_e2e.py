@@ -1,3 +1,4 @@
+import asyncio
 import json
 import socket
 import threading
@@ -7,6 +8,7 @@ import urllib.request
 import pytest
 
 from fpvdgs import supervisor
+from fpvdgs.wfb import engine as engine_mod
 
 
 def _free_port():
@@ -15,6 +17,61 @@ def _free_port():
     p = s.getsockname()[1]
     s.close()
     return p
+
+
+class _StubStatsSource:
+    """A `client_factory()`-compatible stand-in that just idles until stopped
+    -- these HTTP-wiring tests don't exercise the stats/dynlink data path."""
+
+    def __init__(self, *a, **k):
+        self._stop = None
+
+    async def run(self):
+        self._stop = asyncio.Event()
+        await self._stop.wait()
+
+    def stop(self):
+        if self._stop is not None:
+            self._stop.set()
+
+
+class _FakeWfbEngine:
+    """Stand-in for the real `WfbEngine` so these HTTP/wiring tests don't
+    need real wfb_rx/wfb_tx binaries or a real wireless nic -- only the
+    App/Api plumbing around the runner is under test here."""
+
+    def __init__(self, config_provider=None, wlans_resolver=None, stats_port=None, reap_fn=None):
+        self._running = False
+        self.restarts = 0
+
+    def start(self) -> bool:
+        self._running = True
+        return True
+
+    def restart(self, config=None) -> bool:
+        self.restarts += 1
+        self._running = True
+        return True
+
+    def stop(self) -> None:
+        self._running = False
+
+    def shutdown(self) -> None:
+        self._running = False
+
+    def state(self) -> dict:
+        return {
+            "running": self._running,
+            "pid": None,
+            "restarts": self.restarts,
+            "autoRestarts": 0,
+            "lastExit": None,
+            "fault": False,
+            "nodes": {},
+        }
+
+    def client_factory(self):
+        return _StubStatsSource
 
 
 def _req(base, method, path, body=None):
@@ -27,10 +84,10 @@ def _req(base, method, path, body=None):
 
 
 @pytest.fixture
-def daemon(tmp_path, fake_drone):
+def daemon(tmp_path, fake_drone, monkeypatch):
+    monkeypatch.setattr(engine_mod, "WfbEngine", _FakeWfbEngine)
     config_json = tmp_path / "config.json"
     cfg_out = tmp_path / "wifibroadcast.cfg"
-    ready_port = _free_port()
     api_port = _free_port()
     config_json.write_text(
         json.dumps(
@@ -48,22 +105,11 @@ def daemon(tmp_path, fake_drone):
             }
         )
     )
-    fake_runner = [
-        "python3",
-        "-c",
-        (
-            "import socket,time;s=socket.socket();"
-            "s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);"
-            f"s.bind(('127.0.0.1',{ready_port}));s.listen(1);time.sleep(30)"
-        ),
-    ]
     app = supervisor.build_app(
         str(config_json),
         cfg_out=str(cfg_out),
         host="127.0.0.1",
         port=api_port,
-        runner_cmd=fake_runner,
-        ready_port=ready_port,
         ready_timeout=5.0,
     )
     app.start()
@@ -163,7 +209,7 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
     )
     cfg_out = tmp_path / "wfb.cfg"
 
-    app = supervisor.build_app(str(config_json), str(cfg_out), "127.0.0.1", 0, runner_cmd=["true"])
+    app = supervisor.build_app(str(config_json), str(cfg_out), "127.0.0.1", 0)
     code, body = app.api.handle("GET", "/gs/status", {}, b"")
     assert code == 200
     assert "dynamicLink" in body
@@ -243,7 +289,6 @@ def test_status_probe_bypassed_with_dynamiclink_enabled(tmp_path, monkeypatch):
         str(cfg_out),
         "127.0.0.1",
         api_port,
-        runner_cmd=["true"],
         probe_spawn=fake_spawn,
     )
     app.start()

@@ -23,7 +23,7 @@ from .events import EventBus
 from .idr_relay import IdrRelay
 from .node_radio import nodes_status
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
-from .runner_supervisor import ProcessSupervisor, RunnerSupervisor, _wfb_nics, resolve_wlans
+from .runner_supervisor import ProcessSupervisor, _wfb_nics, resolve_wlans
 from .wfb.cards import has_remote, resolve_cards
 
 log = logging.getLogger(__name__)
@@ -95,7 +95,6 @@ def build_app(
     cfg_out,
     host,
     port,
-    runner_cmd,
     ready_port=8103,
     ready_timeout=10.0,
     log_path=None,
@@ -108,31 +107,15 @@ def build_app(
     # Render the cfg the runner will read.
     render_mod.write_cfg(cfg_out, render_mod.render_cfg(effective))
 
-    profile = effective.get("wfb", {}).get("profile", "gs")
-    wlans = resolve_wlans(effective)
+    from .wfb.engine import WfbEngine, reap_stale_wfb
 
-    engine_kind = effective.get("wfb", {}).get("engine", "wfbng")
-    if engine_kind == "native":
-        from .wfb.engine import WfbEngine, reap_stale_wfb
-
-        runner = WfbEngine(
-            config_provider=store.effective,
-            wlans_resolver=resolve_wlans,
-            stats_port=ready_port,
-            reap_fn=reap_stale_wfb,
-        )
-        stats_client_factory = runner.client_factory()
-    else:
-        runner = RunnerSupervisor(
-            runner_cmd,
-            cfg_out=cfg_out,
-            profile=profile,
-            wlans=wlans,
-            ready_port=ready_port,
-            ready_timeout=ready_timeout,
-            log_path=log_path,
-        )
-        stats_client_factory = None  # default TCP StatsClient
+    runner = WfbEngine(
+        config_provider=store.effective,
+        wlans_resolver=resolve_wlans,
+        stats_port=ready_port,
+        reap_fn=reap_stale_wfb,
+    )
+    stats_client_factory = runner.client_factory()
 
     drone_cfg = effective.get("drone", {})
     drone_host = drone_cfg.get("host", "10.5.0.10")
@@ -153,18 +136,16 @@ def build_app(
     mon_drone = DroneClient(
         f"http://{drone_host}:{int(drone_cfg.get('apiPort', 8080))}", timeout=mon_cfg.http_timeout_s
     )
-    cm_kwargs = {}
-    if stats_client_factory is not None:
-        cm_kwargs["stats_client_factory"] = stats_client_factory
-    connection_monitor = ConnectionMonitor(bus, mon_drone, mon_cfg, **cm_kwargs)
+    connection_monitor = ConnectionMonitor(
+        bus, mon_drone, mon_cfg, stats_client_factory=stats_client_factory
+    )
 
     idr_cfg = effective.get("idrForward", {})
     idr_relay = IdrRelay(drone_host, port=int(idr_cfg.get("port", 11223)))
 
-    dl_kwargs = {}
-    if stats_client_factory is not None:
-        dl_kwargs["stats_client_factory"] = stats_client_factory
-    dynlink = DynamicLinkController(make_dl_snapshot(effective), bus=bus, **dl_kwargs)
+    dynlink = DynamicLinkController(
+        make_dl_snapshot(effective), bus=bus, stats_client_factory=stats_client_factory
+    )
 
     pixelpilot = ProcessSupervisor(
         argv=render_pixelpilot_argv(effective),
@@ -288,9 +269,6 @@ def main(argv=None):
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--log", default=None)
-    p.add_argument(
-        "--runner", default=None, help="runner command (default: this python -m fpvdgs.runner)"
-    )
     args = p.parse_args(argv)
 
     if args.dump_config:
@@ -307,8 +285,7 @@ def main(argv=None):
         filename=args.log,
     )
 
-    runner_cmd = args.runner.split() if args.runner else [sys.executable, "-m", "fpvdgs.runner"]
-    app = build_app(args.config, args.cfg_out, args.host, args.port, runner_cmd, log_path=args.log)
+    app = build_app(args.config, args.cfg_out, args.host, args.port, log_path=args.log)
 
     def _on_sigterm(signum, frame):
         raise KeyboardInterrupt

@@ -88,7 +88,6 @@ def default_config() -> dict:
         },
         "wfb": {
             "profile": "gs",
-            "engine": "wfbng",
             "mavlink": {"peer": "connect://127.0.0.1:14550"},
             "txSelector": {
                 "rssiDeltaDb": 3,

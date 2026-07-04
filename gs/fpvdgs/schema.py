@@ -72,7 +72,6 @@ LEARNED_PRIOR_KEYS = {
 TAP_KEYS = frozenset({"enabled", "port", "staleMs", "captureRaw"})
 CARD_KEYS = frozenset({"host", "iface", "sshUser", "sshPort", "sshKey", "txPowerDbm", "initScript"})
 VALID_WIDTHS = {10, 20, 40}  # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
-WFB_ENGINES = {"wfbng", "native"}
 TX_SELECTOR_KEYS = frozenset({"rssiDeltaDb", "counterRelDelta", "counterAbsDelta"})
 
 
@@ -182,9 +181,6 @@ def _validate_drone(dr: dict) -> None:
 def _validate_wfb(wfb: dict) -> None:
     if not isinstance(wfb, dict):
         raise SchemaError("wfb must be an object")
-    engine = wfb.get("engine", "wfbng")
-    if engine not in WFB_ENGINES:
-        raise SchemaError(f"wfb.engine must be one of {sorted(WFB_ENGINES)}")
     txsel = wfb.get("txSelector")
     if txsel is not None:
         _validate_block_keys("wfb.txSelector", txsel, TX_SELECTOR_KEYS)

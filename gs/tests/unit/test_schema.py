@@ -458,20 +458,13 @@ def test_tap_bool_fields_type_checked():
         schema._validate_dynamic_link({"tap": {"captureRaw": 1}})
 
 
-def test_wfb_engine_accepts_known_values():
-    schema.validate_effective(
-        {"link": {"channel": 132, "region": "US"}, "wfb": {"engine": "wfbng"}}
-    )
-    schema.validate_effective(
-        {"link": {"channel": 132, "region": "US"}, "wfb": {"engine": "native"}}
-    )
+def test_wfb_engine_key_is_gone_from_defaults_and_not_required():
+    from fpvdgs.config_defaults import default_config
+    from fpvdgs.schema import validate_effective
 
-
-def test_wfb_engine_rejects_unknown_value():
-    with pytest.raises(SchemaError):
-        schema.validate_effective(
-            {"link": {"channel": 132, "region": "US"}, "wfb": {"engine": "bogus"}}
-        )
+    cfg = default_config()
+    assert "engine" not in cfg["wfb"]
+    validate_effective(cfg)  # no engine key, still valid
 
 
 def test_wfb_tx_selector_valid_accepted():
@@ -529,10 +522,6 @@ def test_wfb_tx_selector_rejects_unknown_key():
         )
 
 
-def test_config_patch_accepts_sparse_wfb_engine():
-    validate_config_patch({"wfb": {"engine": "native"}})
-
-
 def test_wfb_mavlink_peer_null_rejected():
     with pytest.raises(SchemaError):
         schema.validate_effective(
@@ -587,9 +576,7 @@ def test_wfb_mavlink_peer_valid_schemes_accepted():
 
 def test_wfb_no_mavlink_block_is_allowed():
     # wfb.mavlink is optional at the block level; only required WHEN present.
-    schema.validate_effective(
-        {"link": {"channel": 132, "region": "US"}, "wfb": {"engine": "native"}}
-    )
+    schema.validate_effective({"link": {"channel": 132, "region": "US"}, "wfb": {}})
 
 
 # ---- link.cards / link.serverAddress (wfb.cards migration) ----------------
