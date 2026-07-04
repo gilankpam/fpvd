@@ -30,9 +30,9 @@ TARGET="${GS_USER}@${GS_HOST}"
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o LogLevel=error)
 remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 
-# Install into the GS's real site-packages (where wfb_ng already lives) so that
-# both `python3 -m fpvdgs.supervisor` and the spawned `python3 -m fpvdgs.runner`
-# import without any sys.path/PYTHONPATH hacks.
+# Install into the GS's real site-packages (where the wfb_rx/wfb_tx binaries'
+# support libs already live) so that `python3 -m fpvdgs.supervisor` imports
+# without any sys.path/PYTHONPATH hacks.
 SITE="$(remote 'python3 -c "import site; print(site.getsitepackages()[0])"')"
 echo "[push] fpvdgs -> $TARGET:$SITE/fpvdgs  (+ init)"
 remote "mkdir -p /etc/fpvd '$SITE/fpvdgs' '$SITE/fpvdgs/dynlink' '$SITE/fpvdgs/probe' '$SITE/fpvdgs/wfb'"
