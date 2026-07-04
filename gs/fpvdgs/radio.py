@@ -52,6 +52,45 @@ def retune_commands(wlans, link: dict) -> list[list[str]]:
     return cmds
 
 
+def init_commands(wlans, link: dict) -> list[list[str]]:
+    """Ordered `iw` commands to initialize monitor-mode cards, matching wfb_ng's
+    init_wlans sequence: regulatory domain first, then per-interface down/monitor/up,
+    then channel/width and txpower (reused from retune_commands).
+    """
+    cmds: list[list[str]] = []
+    region = link.get("region")
+    if region:
+        cmds.append(["iw", "reg", "set", region])
+
+    # Per-interface monitor-mode initialization (down/monitor/up)
+    for wlan in wlans:
+        cmds.append(["ip", "link", "set", wlan, "down"])
+        cmds.append(["iw", "dev", wlan, "set", "monitor", "otherbss"])
+        cmds.append(["ip", "link", "set", wlan, "up"])
+
+    # Append retune commands (channel/txpower), but skip the leading reg set
+    # to avoid emitting it twice.
+    retune_cmds = retune_commands(wlans, link)
+    for cmd in retune_cmds:
+        # Skip the first reg set command if it exists
+        if cmd == ["iw", "reg", "set", region]:
+            continue
+        cmds.append(cmd)
+
+    return cmds
+
+
+def init_cards(wlans, link: dict) -> bool:
+    """Apply every init command sequentially. Returns True only if all succeed."""
+    ok = True
+    for cmd in init_commands(wlans, link):
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+    return ok
+
+
 def retune(wlans, link: dict) -> bool:
     """Apply every retune command live. Returns True only if all succeed."""
     ok = True

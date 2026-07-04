@@ -82,3 +82,30 @@ def test_retune_commands_multi_wlan_sets_region_once():
     assert cmds.count(["iw", "reg", "set", "US"]) == 1
     assert ["iw", "dev", "a", "set", "channel", "132", "HT20"] in cmds
     assert ["iw", "dev", "b", "set", "channel", "132", "HT20"] in cmds
+
+
+def test_init_commands_full_sequence_two_wlans():
+    """Test exact command list for 2 wlans, channel 132, width 20, region US, txPowerDbm None.
+    Expected order: reg set, per-wlan down/monitor/up, then per-wlan channel/txpower."""
+    cmds = radio.init_commands(
+        ["wlan0", "wlan1"], {"region": "US", "channel": 132, "width": 20, "txPowerDbm": None}
+    )
+    assert cmds == [
+        ["iw", "reg", "set", "US"],
+        ["ip", "link", "set", "wlan0", "down"],
+        ["iw", "dev", "wlan0", "set", "monitor", "otherbss"],
+        ["ip", "link", "set", "wlan0", "up"],
+        ["ip", "link", "set", "wlan1", "down"],
+        ["iw", "dev", "wlan1", "set", "monitor", "otherbss"],
+        ["ip", "link", "set", "wlan1", "up"],
+        ["iw", "dev", "wlan0", "set", "channel", "132", "HT20"],
+        ["iw", "dev", "wlan0", "set", "txpower", "auto"],
+        ["iw", "dev", "wlan1", "set", "channel", "132", "HT20"],
+        ["iw", "dev", "wlan1", "set", "txpower", "auto"],
+    ]
+
+
+def test_init_commands_reg_set_appears_once():
+    """Verify reg set command appears exactly once."""
+    cmds = radio.init_commands(["wlan0", "wlan1"], {"region": "US", "channel": 132, "width": 20})
+    assert cmds.count(["iw", "reg", "set", "US"]) == 1
