@@ -114,6 +114,7 @@ def _render(tmp_path, overlay: dict):
 # (base -> gs_base -> {video,mavlink,tunnel} -> {gs_video,gs_mavlink,
 # gs_tunnel}, plus our rendered overrides) is the genuine wfb-ng resolver,
 # not a hand-copied guess.
+# Note: %(cluster)s template branch in wfb-ng is intentionally omitted; fpvd never runs cluster mode on this path.
 
 
 def _rx_argv(settings, key_arg_fn, cfg, stream, conn_str, wlans, link_id, *, tap=False):
