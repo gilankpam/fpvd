@@ -108,6 +108,15 @@ class StatsHub:
         # raw window mirrors for statsd (Task 9): child_id -> last raw payloads
         self.last_rx_raw: dict[str, tuple] = {}
         self.last_tx_raw: dict[str, tuple] = {}
+        # raw listener hook for statsd (Task 9): fired synchronously, on the
+        # engine (producer) thread, with ("rx"|"tx"|"new_session", child_id,
+        # raw_payload) -- the pre-flattened shapes update_*/process_new_session
+        # receive, which is what the :8103 JSON wire needs (Event objects only
+        # carry window values; the wire needs raw (window, cumulative) pairs
+        # and the raw ant dict). Only safe to consume from the same loop the
+        # engine drives the hub from -- unlike subscribe(), there is no
+        # cross-thread marshalling here.
+        self.raw_listeners: list = []
 
     # -- producer side (engine loop thread) --------------------------------
     def update_rx_stats(self, child_id, packets, ant, session):
@@ -118,22 +127,35 @@ class StatsHub:
                 self._sessions[child_id] = session
             tx_wlan = self._txsel.current
             subs = list(self._subs)
+            raw_listeners = list(self.raw_listeners)
         ev = _to_rx_event(self._time(), child_id, packets, ant, session, tx_wlan)
         for sub in subs:
             sub._push(ev)
+        for cb in raw_listeners:
+            try:
+                cb("rx", child_id, (packets, ant, session, tx_wlan))
+            except Exception:
+                log.exception("wfb: raw listener failed")
 
     def process_new_session(self, child_id, session):
         with self._lock:
             self._sessions[child_id] = session
             subs = list(self._subs)
+            raw_listeners = list(self.raw_listeners)
         ev = SessionEvent(timestamp=self._time(), id=child_id, session=_to_session_info(session))
         for sub in subs:
             sub._push(ev)
+        for cb in raw_listeners:
+            try:
+                cb("new_session", child_id, (session,))
+            except Exception:
+                log.exception("wfb: raw listener failed")
 
     def update_tx_stats(self, child_id, packets, ant_latency):
         with self._lock:
             self.last_tx_raw[child_id] = (packets, ant_latency)
             subs = list(self._subs)
+            raw_listeners = list(self.raw_listeners)
         ev = TxEvent(
             timestamp=self._time(),
             id=child_id,
@@ -141,6 +163,11 @@ class StatsHub:
         )
         for sub in subs:
             sub._push(ev)
+        for cb in raw_listeners:
+            try:
+                cb("tx", child_id, (packets, ant_latency))
+            except Exception:
+                log.exception("wfb: raw listener failed")
 
     @staticmethod
     def _stats_agg_by_freq_and_rxid(ant_stats_by_rx: dict) -> dict[int, tuple]:
@@ -259,6 +286,17 @@ class StatsHub:
                 self._subs.remove(sub)
             except ValueError:
                 pass  # already removed — double-close is a harmless no-op
+
+    def add_raw_listener(self, cb) -> None:
+        with self._lock:
+            self.raw_listeners.append(cb)
+
+    def remove_raw_listener(self, cb) -> None:
+        with self._lock:
+            try:
+                self.raw_listeners.remove(cb)
+            except ValueError:
+                pass  # already removed — double-remove is a harmless no-op
 
     def add_rssi_cb(self, cb) -> None:
         with self._lock:
