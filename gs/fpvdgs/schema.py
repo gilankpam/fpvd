@@ -70,7 +70,7 @@ LEARNED_PRIOR_KEYS = {
     "recencyDecay",
 }
 TAP_KEYS = frozenset({"enabled", "port", "staleMs", "captureRaw"})
-CARD_KEYS = frozenset({"host", "iface", "sshUser", "sshPort", "sshKey", "txPowerDbm"})
+CARD_KEYS = frozenset({"host", "iface", "sshUser", "sshPort", "sshKey", "txPowerDbm", "initScript"})
 VALID_WIDTHS = {10, 20, 40}  # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 WFB_ENGINES = {"wfbng", "native"}
 TX_SELECTOR_KEYS = frozenset({"rssiDeltaDb", "counterRelDelta", "counterAbsDelta"})
@@ -257,6 +257,10 @@ def _validate_cards(cards) -> None:
                 and (isinstance(txp, bool) or not isinstance(txp, (int, float)))
             ):
                 raise SchemaError("link.cards.txPowerDbm must be a number, 'off', or null")
+        if "initScript" in c:
+            s = c["initScript"]
+            if s is not None and not isinstance(s, str):
+                raise SchemaError("link.cards.initScript must be a string or null")
 
 
 def _validate_single_remote_host(link: dict) -> None:

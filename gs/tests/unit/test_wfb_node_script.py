@@ -97,6 +97,93 @@ def test_sh_syntax_check(tmp_path):
         assert result.returncode == 0, result.stderr
 
 
+def test_init_script_emitted_before_iw_reg_set_and_iface_down():
+    cards = [
+        Card(
+            host=REMOTE_HOST,
+            iface="wlan0",
+            init_script="iw phy phy0 interface add wlan0 type monitor || true",
+        )
+    ]
+    plan = plan_cluster(cards)
+    script = render_node_script(
+        REMOTE_HOST,
+        cards,
+        plan,
+        link=LINK,
+        link_id=LINK_ID,
+        server_address=SERVER_ADDRESS,
+    )
+    lines = script.splitlines()
+    assert "iw phy phy0 interface add wlan0 type monitor || true" in lines
+    init_idx = lines.index("iw phy phy0 interface add wlan0 type monitor || true")
+    reg_idx = next(i for i, ln in enumerate(lines) if ln.startswith("iw reg set"))
+    down_idx = next(i for i, ln in enumerate(lines) if ln.startswith("ip link set"))
+    assert init_idx < reg_idx
+    assert init_idx < down_idx
+
+
+def test_no_init_script_back_compat_no_marker():
+    # No card carries initScript -> no marker/behavior change (back-compat with
+    # the existing golden/order tests, which build cards without initScript).
+    script = _remote_script()
+    assert "# custom init" not in script
+
+
+def test_init_script_deduped_across_cards_on_same_node():
+    cards = [
+        Card(
+            host=REMOTE_HOST,
+            iface="wlan0",
+            init_script="iw phy phy0 interface add wlan0 type monitor || true",
+        ),
+        Card(
+            host=REMOTE_HOST,
+            iface="wlan1",
+            init_script="iw phy phy0 interface add wlan0 type monitor || true",
+        ),
+    ]
+    plan = plan_cluster(cards)
+    script = render_node_script(
+        REMOTE_HOST,
+        cards,
+        plan,
+        link=LINK,
+        link_id=LINK_ID,
+        server_address=SERVER_ADDRESS,
+    )
+    assert script.count("iw phy phy0 interface add wlan0 type monitor || true") == 1
+
+
+def test_init_script_sh_syntax_check(tmp_path):
+    cards = [
+        Card(
+            host=REMOTE_HOST,
+            iface="wlan0",
+            init_script="iw phy phy0 interface add wlan0 type monitor || true",
+        )
+    ]
+    plan = plan_cluster(cards)
+    script = render_node_script(
+        REMOTE_HOST,
+        cards,
+        plan,
+        link=LINK,
+        link_id=LINK_ID,
+        server_address=SERVER_ADDRESS,
+    )
+    path = tmp_path / "node.sh"
+    path.write_text(script)
+
+    result = subprocess.run(["sh", "-n", str(path)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    dash = shutil.which("dash")
+    if dash:
+        result = subprocess.run([dash, "-n", str(path)], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+
+
 def test_txpower_line_in_mbm():
     cards = [Card(host=REMOTE_HOST, iface="wlan0", txpower_dbm=20)]
     plan = plan_cluster(cards)

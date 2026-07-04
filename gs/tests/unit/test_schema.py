@@ -787,6 +787,49 @@ def test_validate_effective_rejects_bool_txpower():
         )
 
 
+def test_validate_effective_accepts_string_init_script():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    {
+                        "host": "x",
+                        "iface": "w",
+                        "initScript": "iw phy phy0 interface add wlan0 type monitor || true",
+                    }
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_accepts_null_init_script():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [{"host": "x", "iface": "w", "initScript": None}],
+            }
+        }
+    )
+
+
+def test_validate_effective_rejects_non_string_init_script():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "initScript": 123}],
+                }
+            }
+        )
+
+
 # ---- link.cards single-remote-host guard (final-review fold-in) -----------
 #
 # The engine derives ONE server_address from the first remote card's host and

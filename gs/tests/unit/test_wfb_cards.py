@@ -73,3 +73,28 @@ def test_is_local_and_is_rx_only_defaults():
     c = Card(host=None, iface="wlan0")
     assert c.is_local
     assert not c.is_rx_only
+
+
+def test_init_script_parses_from_remote_card():
+    cards = parse_cards(
+        {
+            "cards": [
+                {
+                    "host": "192.168.1.10",
+                    "iface": "wlan0",
+                    "initScript": "iw phy phy0 interface add wlan0 type monitor || true",
+                }
+            ]
+        }
+    )
+    assert cards[0].init_script == "iw phy phy0 interface add wlan0 type monitor || true"
+
+
+def test_init_script_defaults_to_none_without_key():
+    cards = parse_cards({"cards": [{"host": "192.168.1.10", "iface": "wlan0"}]})
+    assert cards[0].init_script is None
+
+
+def test_init_script_defaults_to_none_for_string_shorthand():
+    cards = parse_cards({"cards": ["wlan1"]})
+    assert cards[0].init_script is None

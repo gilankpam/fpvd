@@ -18,6 +18,7 @@ class Card:
     ssh_port: int = 22
     ssh_key: str | None = None
     txpower_dbm: float | str | None = None  # "off" => RX-only, no TX child
+    init_script: str | None = None  # verbatim node-init snippet, emitted before iw reg set
 
     @property
     def is_local(self) -> bool:
@@ -38,6 +39,7 @@ def _card_from_dict(d: dict) -> Card:
         ssh_port=int(d.get("sshPort", 22)),
         ssh_key=d.get("sshKey"),
         txpower_dbm=d.get("txPowerDbm"),
+        init_script=d.get("initScript"),
     )
 
 

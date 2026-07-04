@@ -190,6 +190,25 @@ def render_node_script(
         "",
     ]
 
+    # Operator-supplied per-card node-init hook (mirrors wfb-ng's
+    # custom_init_script): emitted verbatim, EARLY (before `iw reg set` /
+    # any per-wlan `ip link set ... down`), so a remote OpenWrt/BusyBox node
+    # can self-provision a monitor interface that doesn't survive a reboot
+    # (e.g. `iw phy phy0 interface add wlan0 type monitor`). The script runs
+    # under `set -e`; the operator is responsible for making their snippet
+    # idempotent/non-fatal (canonical form ends `|| true`) — never wrapped or
+    # appended here. Deduped: a node's cards typically share one phy-init
+    # snippet and it must not run twice.
+    seen: set[str] = set()
+    for card in cards:
+        s = (card.init_script or "").strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        lines.append("# custom init (per link.cards initScript)")
+        lines.extend(s.splitlines())
+        lines.append("")
+
     lines.append(f"iw reg set {region}")
     lines.append("")
 
