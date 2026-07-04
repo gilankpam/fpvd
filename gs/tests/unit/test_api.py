@@ -43,7 +43,7 @@ class FakeDrone:
         return 200, json.dumps({"proxied": path}).encode()
 
 
-def _api(retune_ok=True):
+def _api(retune_ok=True, nodes_status_fn=None):
     cfg_out = os.path.join(tempfile.mkdtemp(), "wifibroadcast.cfg")
     store = ConfigStore(
         {
@@ -73,6 +73,7 @@ def _api(retune_ok=True):
         retune=retune,
         wlans_resolver=lambda cfg: ["wlan0"],
         armer_tick=lambda: ticks.append(1),
+        nodes_status_fn=nodes_status_fn,
     )
     return api, store, drone, runner, retunes, ticks, cfg_out
 
@@ -99,6 +100,39 @@ def test_air_still_proxies():
     api, _, drone, *_ = _api()
     code, obj = api.handle("GET", "/air/config", {}, b"")
     assert code == 200 and ("GET", "/config", None) in drone.calls
+
+
+def test_nodes_endpoint_returns_injected_payload():
+    calls = []
+
+    def nodes_status_fn():
+        calls.append(1)
+        return {"nodes": [{"iface": "wlan0", "reachable": True}]}
+
+    api, *_ = _api(nodes_status_fn=nodes_status_fn)
+    code, obj = api.handle("GET", "/gs/nodes", {}, b"")
+    assert code == 200
+    assert obj == {"nodes": [{"iface": "wlan0", "reachable": True}]}
+    assert calls == [1]
+
+
+def test_nodes_endpoint_404_when_not_wired():
+    api, *_ = _api()  # nodes_status_fn defaults to None: back-compat
+    code, obj = api.handle("GET", "/gs/nodes", {}, b"")
+    assert code == 404
+
+
+def test_status_never_touches_nodes_status_fn():
+    calls = []
+
+    def nodes_status_fn():
+        calls.append(1)
+        return {"nodes": []}
+
+    api, *_ = _api(nodes_status_fn=nodes_status_fn)
+    code, obj = api.handle("GET", "/gs/status", {}, b"")
+    assert code == 200
+    assert calls == []  # the whole point: /gs/status never calls the node querier
 
 
 def test_link_change_retunes_live_no_bounce():

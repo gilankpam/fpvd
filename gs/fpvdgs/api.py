@@ -30,6 +30,7 @@ class Api:
         wlans_resolver=None,
         armer_tick=None,
         idr_relay=None,
+        nodes_status_fn=None,
     ):
         self.store = store
         self.schema = schema
@@ -45,6 +46,7 @@ class Api:
         self.wlans_resolver = wlans_resolver
         self.armer_tick = armer_tick
         self.idr_relay = idr_relay
+        self.nodes_status_fn = nodes_status_fn
 
     def _json(self, body: bytes) -> dict:
         return json.loads(body or b"{}")
@@ -77,6 +79,10 @@ class Api:
                 return 200, {"reset": True}
             if key == ("GET", "/gs/status"):
                 return 200, self.status_fn()
+            if key == ("GET", "/gs/nodes"):
+                if self.nodes_status_fn is None:
+                    return 404, {"error": "not found"}
+                return 200, self.nodes_status_fn()
             return 404, {"error": "not found"}
         except SchemaError as e:
             return 400, {"error": str(e)}

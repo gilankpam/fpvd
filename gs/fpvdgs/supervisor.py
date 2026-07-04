@@ -21,8 +21,9 @@ from .dynlink.config_build import make_dl_snapshot
 from .dynlink.controller import DynamicLinkController
 from .events import EventBus
 from .idr_relay import IdrRelay
+from .node_radio import nodes_status
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
-from .runner_supervisor import ProcessSupervisor, RunnerSupervisor, resolve_wlans
+from .runner_supervisor import ProcessSupervisor, RunnerSupervisor, _wfb_nics, resolve_wlans
 from .wfb.cards import has_remote, resolve_cards
 
 log = logging.getLogger(__name__)
@@ -238,6 +239,12 @@ def build_app(
             return False
         return radio.retune(resolve_wlans(eff), lnk)
 
+    def _nodes_status_fn():
+        # On-demand + slow (SSH); never called from status_fn/the /gs/status
+        # hot path. Same nic_detector as resolve_wlans so an all-local "auto"
+        # config expands to the same local cards.
+        return nodes_status(store.effective(), nic_detector=_wfb_nics)
+
     api = Api(
         store=store,
         schema=schema,
@@ -253,6 +260,7 @@ def build_app(
         wlans_resolver=resolve_wlans,
         armer_tick=armer.tick,
         idr_relay=idr_relay,
+        nodes_status_fn=_nodes_status_fn,
     )
 
     http_server = make_http_server(api, host, port)
