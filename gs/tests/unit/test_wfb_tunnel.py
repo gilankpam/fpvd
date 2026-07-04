@@ -15,9 +15,12 @@ code under test actually calls.
 """
 
 import asyncio
+import errno
 import os
 import socket
 import struct
+
+import pytest
 
 from fpvdgs.wfb.tunnel import (
     TunnelConfig,
@@ -184,6 +187,57 @@ async def _recv_one(sock, timeout=2.0):
             if loop.time() > deadline:
                 raise TimeoutError("no data arrived") from None
             await asyncio.sleep(0.005)
+
+
+def test_tun_open_retries_on_transient_ebusy_then_succeeds():
+    # A non-persistent tun netdev is torn down asynchronously by the kernel
+    # after the old fd closes, so a fast engine restart can reach TUNSETIFF for
+    # the same ifname while the old netdev still exists -> EBUSY. start() must
+    # ride out that transient rather than fail engine setup (and crash-loop).
+    async def main():
+        cfg = TunnelConfig(keepalive_s=10.0)
+        service = TunnelService(cfg)
+        fake_tun = _FakeTun(cfg.ifname, cfg.ifaddr, cfg.mtu)
+        calls = []
+
+        def factory(name, addr_cidr, mtu):
+            calls.append((name, addr_cidr, mtu))
+            if len(calls) < 3:
+                raise OSError(errno.EBUSY, "Device or resource busy")
+            return fake_tun
+
+        rx_unix_path = "fpvd-test-tunnel-rx-" + os.urandom(4).hex()
+        loop = asyncio.get_running_loop()
+        await service.start(loop, rx_unix_path, tun_factory=factory)
+        try:
+            assert len(calls) == 3  # two EBUSY retries, third open succeeds
+            assert service._tun is fake_tun
+        finally:
+            await service.stop()
+
+    run(main())
+
+
+def test_tun_open_does_not_retry_non_ebusy_errors():
+    # A non-EBUSY failure is a real error (missing /dev/net/tun, bad perms) —
+    # fail fast, do not spin on the retry budget.
+    async def main():
+        cfg = TunnelConfig(keepalive_s=10.0)
+        service = TunnelService(cfg)
+        calls = []
+
+        def factory(name, addr_cidr, mtu):
+            calls.append(1)
+            raise OSError(errno.EPERM, "Operation not permitted")
+
+        rx_unix_path = "fpvd-test-tunnel-rx-" + os.urandom(4).hex()
+        loop = asyncio.get_running_loop()
+        with pytest.raises(OSError) as ei:
+            await service.start(loop, rx_unix_path, tun_factory=factory)
+        assert ei.value.errno == errno.EPERM
+        assert len(calls) == 1  # raised on the first attempt, no retry
+
+    run(main())
 
 
 def test_tun_read_batches_through_agg_and_forwards_to_current_tx_socket():

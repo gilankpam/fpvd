@@ -31,6 +31,7 @@ otherwise ignored.
 from __future__ import annotations
 
 import asyncio
+import errno
 import fcntl
 import logging
 import os
@@ -46,6 +47,12 @@ log = logging.getLogger("fpvdgs.wfb")
 TUNSETIFF = 0x400454CA
 IFF_TUN = 0x0001
 IFF_NO_PI = 0x1000
+
+# Bounded retry for the tun open on EBUSY (see `_open_tun_retrying`): rides out
+# the kernel's async teardown of the previous same-named netdev on a restart.
+TUN_OPEN_RETRY_DELAY_S = 0.05
+TUN_OPEN_RETRY_MAX_DELAY_S = 0.5
+TUN_OPEN_RETRY_BUDGET_S = 5.0
 
 
 # -- pure wire framing --------------------------------------------------------
@@ -173,7 +180,7 @@ class TunnelService:
 
     async def start(self, loop, rx_unix_path: str, tun_factory=TunTap) -> None:
         self._loop = loop
-        self._tun = tun_factory(self.cfg.ifname, self.cfg.ifaddr, self.cfg.mtu)
+        self._tun = await self._open_tun_retrying(loop, tun_factory)
         self._agg = AggQueue(self.cfg.mtu, self.cfg.agg_timeout, self._send_to_current_tx)
 
         loop.add_reader(self._tun.fd, self._on_tun_readable)
@@ -187,6 +194,31 @@ class TunnelService:
         )
 
         self._schedule_keepalive()
+
+    async def _open_tun_retrying(self, loop, tun_factory):
+        # A non-persistent TUN netdev is destroyed by the kernel ASYNCHRONOUSLY
+        # after its last fd closes. On a fast engine restart the new setup can
+        # reach TUNSETIFF for the same ifname (`gs-wfb`) before the old netdev
+        # is gone, which fails with EBUSY. Retry the open (bounded) to ride out
+        # that teardown window instead of failing engine setup and crash-looping
+        # the whole data plane until the netdev happens to clear. Only EBUSY is
+        # retried; any other error (missing /dev/net/tun, bad perms) fails fast.
+        delay = TUN_OPEN_RETRY_DELAY_S
+        deadline = loop.time() + TUN_OPEN_RETRY_BUDGET_S
+        while True:
+            try:
+                return tun_factory(self.cfg.ifname, self.cfg.ifaddr, self.cfg.mtu)
+            except OSError as e:
+                if e.errno != errno.EBUSY or loop.time() >= deadline:
+                    raise
+                log.warning(
+                    "tunnel: %s busy (EBUSY — kernel still tearing down the "
+                    "previous netdev) — retrying tun open in %dms",
+                    self.cfg.ifname,
+                    int(delay * 1000),
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 1.5, TUN_OPEN_RETRY_MAX_DELAY_S)
 
     async def stop(self) -> None:
         # Stop anything that can call agg.put()/write to the tun fd before
