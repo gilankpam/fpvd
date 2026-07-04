@@ -349,6 +349,8 @@ class WfbEngine:
         except Exception:
             log.exception("wfb engine: service wiring failed")
             with contextlib.suppress(Exception):
+                await stats_server.stop()
+            with contextlib.suppress(Exception):
                 await tunnel_service.stop()
             with contextlib.suppress(Exception):
                 await mav_service.stop()
@@ -410,6 +412,7 @@ class WfbEngine:
         with self._lock:
             self._children = {}
             self._tx_selector = None
+            self.hub = None
         self._tx_parser_ids = {}
 
     # ---- TX antenna wiring (engine loop thread only) -------------------------

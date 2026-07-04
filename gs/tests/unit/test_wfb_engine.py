@@ -367,6 +367,50 @@ def test_ant_sel_retargets_services_after_simulated_tx_respawn():
         engine.shutdown()
 
 
+# -- (f2) same-name tx respawn: the realistic case where a respawned
+# wfb_tx reuses the SAME argv, so the fresh TxLineParser re-advertises the
+# IDENTICAL socket name as the dead incarnation. The engine must still
+# re-invoke set_tx_socket/set_all_tx_sockets on respawn detection (parser
+# object identity changed) rather than skipping the re-wire because the
+# name value didn't change -- that identity-based re-invocation is what
+# lets TunnelService actually reconnect on a same-name respawn (see
+# test_wfb_tunnel.py's dedicated reconnect test). -----------------------
+
+
+def test_ant_sel_retargets_services_after_same_name_tx_respawn():
+    mav_set_tx, tun_set_tx, tun_set_all = [], [], []
+    engine, rec = make_engine(mav_set_tx=mav_set_tx, tun_set_tx=tun_set_tx, tun_set_all=tun_set_all)
+    try:
+        assert engine.start() is True
+
+        assert mav_set_tx[-1] == "mavlink_tx-sock-0"
+        assert tun_set_tx[-1] == "tunnel_tx-sock-0"
+        assert tun_set_all[-1] == ["tunnel_tx-sock-0"]
+        mav_calls_before = len(mav_set_tx)
+        tun_calls_before = len(tun_set_tx)
+        tun_all_calls_before = len(tun_set_all)
+
+        # Simulate a same-argv tx respawn: a fresh TxLineParser (new object
+        # identity -> respawn detected) but the IDENTICAL socket name (the
+        # realistic case, since a respawn reuses the same argv).
+        mav_tx_child = engine._children["mavlink_tx"]
+        tun_tx_child = engine._children["tunnel_tx"]
+        mav_tx_child.tx_parser = FakeTxParser({0: "mavlink_tx-sock-0"})
+        tun_tx_child.tx_parser = FakeTxParser({0: "tunnel_tx-sock-0"})
+
+        assert _wait_until(lambda: len(mav_set_tx) > mav_calls_before, timeout=3.0)
+        assert _wait_until(lambda: len(tun_set_tx) > tun_calls_before, timeout=3.0)
+        assert _wait_until(lambda: len(tun_set_all) > tun_all_calls_before, timeout=3.0)
+
+        # Values are unchanged (same name) but the calls were genuinely
+        # RE-INVOKED, not skipped as a no-op re-target.
+        assert mav_set_tx[-1] == "mavlink_tx-sock-0"
+        assert tun_set_tx[-1] == "tunnel_tx-sock-0"
+        assert tun_set_all[-1] == ["tunnel_tx-sock-0"]
+    finally:
+        engine.shutdown()
+
+
 # -- tx respawn mid-handshake: an empty-sockets parser must not be "wired
 # up" as if it were the final state; the engine must keep retrying until
 # the new parser's handshake actually completes. --------------------------
@@ -446,5 +490,39 @@ def test_radio_init_failure_stops_before_any_child_starts():
     try:
         assert engine.start() is False
         assert rec["order"] == []
+    finally:
+        engine.shutdown()
+
+
+# -- _teardown clears self.hub so a held client_factory() class takes the
+# documented `if hub is None` early-out instead of subscribing to the dead
+# hub from before the stop. -------------------------------------------------
+
+
+def test_teardown_clears_hub_for_dead_hub_early_out():
+    import asyncio
+
+    engine, rec = make_engine()
+    try:
+        assert engine.start() is True
+        assert engine.hub is not None
+        # Mimic DynamicLinkController/ConnectionMonitor: call client_factory()
+        # ONCE and hold the returned class long-term, across stop/restart.
+        factory_cls = engine.client_factory()
+
+        engine.stop()
+        assert engine.hub is None
+
+        got = []
+
+        async def _drive():
+            client = factory_cls("tcp://ignored:0", got.append)
+            await asyncio.wait_for(client.run(), timeout=2.0)
+
+        # run() must hit the `if hub is None: return` early-out and come
+        # back promptly, rather than subscribing to the now-dead hub (or
+        # hanging waiting on it).
+        asyncio.run(_drive())
+        assert got == []
     finally:
         engine.shutdown()

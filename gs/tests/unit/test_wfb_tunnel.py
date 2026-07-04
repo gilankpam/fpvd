@@ -289,6 +289,45 @@ def test_rx_empty_batch_is_ignored_as_keepalive():
     run(main())
 
 
+def test_set_tx_socket_reconnects_after_same_name_wfb_tx_respawn():
+    """The realistic wfb_tx respawn case: a respawned child reuses the SAME
+    argv, so it re-advertises the IDENTICAL abstract socket name as its dead
+    predecessor. `set_tx_socket` must not reuse the cached (now-orphaned)
+    connected socket -- a connected AF_UNIX DGRAM socket whose peer died
+    keeps failing (ECONNREFUSED) and never rebinds on its own. It must
+    close the stale cached socket and reconnect to the NEW listener bound
+    at that name, mirroring MavlinkService.set_tx_socket's unconditional
+    close+reconnect."""
+    service = TunnelService(TunnelConfig())
+    name = "fpvd-test-tunnel-tx-respawn-" + os.urandom(4).hex()
+
+    listener1 = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    listener1.settimeout(2.0)
+    listener1.bind("\0" + name)
+    try:
+        service.set_tx_socket(name)
+        service._send_to_current_tx(b"first")
+        assert listener1.recv(65536) == b"first"
+    finally:
+        listener1.close()
+
+    # listener1 is gone: the old connected socket's peer is now dead.
+    # Bind a BRAND NEW listener at the SAME abstract name -- simulating the
+    # respawned wfb_tx's fresh handshake advertising an identical name.
+    listener2 = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    listener2.settimeout(2.0)
+    listener2.bind("\0" + name)
+    try:
+        service.set_tx_socket(name)  # same name, re-fired by the engine
+        service._send_to_current_tx(b"second")
+        got = listener2.recv(65536)
+        assert got == b"second"
+    finally:
+        listener2.close()
+        for sock in service._tx_socks.values():
+            sock.close()
+
+
 def test_set_all_tx_sockets_updates_broadcast_set_and_reuses_current():
     async def main():
         cfg = TunnelConfig(agg_timeout=0.01, keepalive_s=10.0)

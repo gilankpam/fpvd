@@ -216,14 +216,23 @@ class TunnelService:
 
     def set_all_tx_sockets(self, names) -> None:
         """(Re)establish the full set of connected wfb_tx unix sockets used
-        for the keepalive broadcast route (send-to-all when idle)."""
+        for the keepalive broadcast route (send-to-all when idle).
+
+        ALWAYS closes any previously-cached socket for a given name and
+        connects a fresh one, even if the name was already cached — a
+        respawned wfb_tx reuses the SAME argv, so it re-advertises the
+        IDENTICAL abstract socket name as its dead predecessor. A
+        connected AF_UNIX DGRAM socket whose peer died keeps failing
+        (ECONNREFUSED) and never rebinds to the new same-name listener on
+        its own, so reuse-by-name would leave the tunnel blackholed after
+        a same-name respawn. Mirrors `MavlinkService.set_tx_socket`'s
+        unconditional close+reconnect."""
         names = list(names)
         old = dict(self._tx_socks)
         new: dict[str, socket.socket] = {}
         for name in names:
-            sock = old.pop(name, None)
-            if sock is None:
-                sock = self._connect_tx_socket(name)
+            old.pop(name, None)
+            sock = self._connect_tx_socket(name)
             if sock is not None:
                 new[name] = sock
 
@@ -231,24 +240,31 @@ class TunnelService:
             sock.close()
 
         self._tx_socks = new
-        if self._tx_sock_name is not None and self._tx_sock_name not in new:
-            self._tx_sock_name = None
-            self._tx_sock = None
+        if self._tx_sock_name is not None:
+            self._tx_sock = new.get(self._tx_sock_name)
+            if self._tx_sock is None:
+                self._tx_sock_name = None
 
     def set_tx_socket(self, name: str | None) -> None:
         """Select the CURRENT tx socket (the ant-sel callback's active
-        card) used for uplink data and directed keepalives."""
+        card) used for uplink data and directed keepalives.
+
+        ALWAYS closes any cached socket for `name` and connects a fresh
+        one — see `set_all_tx_sockets` for why a same-name respawn must
+        not reuse a cached socket."""
         if name is None:
             self._tx_sock_name = None
             self._tx_sock = None
             return
 
-        sock = self._tx_socks.get(name)
+        old = self._tx_socks.pop(name, None)
+        if old is not None:
+            old.close()
+
+        sock = self._connect_tx_socket(name)
         if sock is None:
-            sock = self._connect_tx_socket(name)
-            if sock is None:
-                return
-            self._tx_socks[name] = sock
+            return
+        self._tx_socks[name] = sock
 
         self._tx_sock_name = name
         self._tx_sock = sock
