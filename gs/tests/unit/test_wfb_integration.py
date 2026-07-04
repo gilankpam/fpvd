@@ -25,7 +25,6 @@ import pytest
 
 import fpvdgs.dynlink.controller as controller_mod
 from fpvdgs.dynlink.controller import DynamicLinkController
-from fpvdgs.runner_supervisor import RunnerSupervisor
 from fpvdgs.wfb.children import WfbChild
 from fpvdgs.wfb.engine import WfbEngine
 from tests.unit.test_wfb_children import make_spec, write_fake_rx, write_fake_tx
@@ -168,13 +167,13 @@ def _write_config(tmp_path, extra=""):
 
 
 def test_build_app_always_constructs_wfb_engine_without_starting(tmp_path, monkeypatch):
-    """Native is the sole engine (the `wfb.engine` flag is gone): build_app
-    always constructs a WfbEngine, never a RunnerSupervisor."""
+    """Native is the sole engine (the `wfb.engine` flag is gone, and the
+    legacy wfbng process supervisor is deleted): build_app always constructs
+    a WfbEngine."""
     import fpvdgs.supervisor as sup
 
     config = _write_config(tmp_path)
     app = sup.build_app(config, "127.0.0.1", 0)
     assert isinstance(app.runner, WfbEngine)
-    assert not isinstance(app.runner, RunnerSupervisor)
     # Never started: no thread, no children.
     assert app.runner.state()["running"] is False

@@ -1,9 +1,8 @@
 import os
 import signal
-import socket
 import time
 
-from fpvdgs.runner_supervisor import RunnerSupervisor, resolve_wlans
+from fpvdgs.runner_supervisor import ProcessSupervisor, resolve_wlans
 
 
 def test_resolve_wlans_explicit_list():
@@ -31,41 +30,25 @@ def test_resolve_wlans_sees_only_local_cards():
     assert resolve_wlans(cfg) == ["wlan0"]
 
 
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    p = s.getsockname()[1]
-    s.close()
-    return p
-
-
-def _listener_cmd(port):
-    code = (
-        "import socket,time;"
-        "s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);"
-        f"s.bind(('127.0.0.1',{port}));s.listen(1);"
-        "time.sleep(30)"
-    )
-    return ["python3", "-c", code]
-
-
-def _mk(port, **kw):
-    return RunnerSupervisor(
-        _listener_cmd(port),
-        cfg_out="/tmp/ignored.cfg",
-        profile="gs",
-        wlans=["wlan0"],
-        ready_port=port,
-        ready_timeout=5.0,
+def _fake_supervisor(tmp_path, ready=True, **kw):
+    # A tiny child that stays alive; readiness is a toggled flag, not a TCP port.
+    script = tmp_path / "child.sh"
+    script.write_text("#!/bin/sh\nsleep 30\n")
+    script.chmod(0o755)
+    state = {"ready": ready}
+    return ProcessSupervisor(
+        argv=["/bin/sh", str(script)],
+        ready_check=lambda: state["ready"],
+        ready_timeout=2.0,
+        ready_on_timeout=False,
         poll_interval=0.05,
         backoff=0.05,
         **kw,
-    )
+    ), state
 
 
-def test_start_reaches_ready_then_stop():
-    port = _free_port()
-    sup = _mk(port)
+def test_start_reaches_ready_then_stop(tmp_path):
+    sup, state = _fake_supervisor(tmp_path)
     try:
         assert sup.start() is True
         assert sup.state()["running"] is True
@@ -77,9 +60,8 @@ def test_start_reaches_ready_then_stop():
         sup.shutdown()
 
 
-def test_restart_increments_counter():
-    port = _free_port()
-    sup = _mk(port)
+def test_restart_increments_counter(tmp_path):
+    sup, state = _fake_supervisor(tmp_path)
     try:
         sup.start()
         sup.restart()
@@ -88,9 +70,8 @@ def test_restart_increments_counter():
         sup.shutdown()
 
 
-def test_watcher_auto_restarts_on_crash():
-    port = _free_port()
-    sup = _mk(port)
+def test_watcher_auto_restarts_on_crash(tmp_path):
+    sup, state = _fake_supervisor(tmp_path)
     try:
         assert sup.start() is True
         pid1 = sup.state()["pid"]
@@ -109,9 +90,8 @@ def test_watcher_auto_restarts_on_crash():
         sup.shutdown()
 
 
-def test_operator_restart_does_not_trip_fault():
-    port = _free_port()
-    sup = _mk(port, max_restarts=2)
+def test_operator_restart_does_not_trip_fault(tmp_path):
+    sup, state = _fake_supervisor(tmp_path, max_restarts=2)
     try:
         sup.start()
         for _ in range(5):
@@ -124,19 +104,17 @@ def test_operator_restart_does_not_trip_fault():
 
 
 def test_crash_loop_sets_fault():
-    sup = RunnerSupervisor(
-        ["python3", "-c", "import sys; sys.exit(1)"],
-        cfg_out="/tmp/ignored.cfg",
-        profile="gs",
-        wlans=["wlan0"],
-        ready_port=_free_port(),
+    sup = ProcessSupervisor(
+        argv=["python3", "-c", "import sys; sys.exit(1)"],
+        ready_check=lambda: False,
         ready_timeout=0.5,
+        ready_on_timeout=False,
         poll_interval=0.05,
         backoff=0.05,
         max_restarts=2,
     )
     try:
-        sup.start()  # exits immediately; never binds the port
+        sup.start()  # exits immediately; never becomes ready
         deadline = time.time() + 6
         while time.time() < deadline and not sup.state()["fault"]:
             time.sleep(0.05)
@@ -145,9 +123,8 @@ def test_crash_loop_sets_fault():
         sup.shutdown()
 
 
-def test_shutdown_stops_watcher():
-    port = _free_port()
-    sup = _mk(port)
+def test_shutdown_stops_watcher(tmp_path):
+    sup, state = _fake_supervisor(tmp_path)
     sup.start()
     sup.shutdown()
     assert sup.state()["running"] is False

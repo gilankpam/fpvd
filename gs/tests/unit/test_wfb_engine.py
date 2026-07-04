@@ -1,5 +1,5 @@
 """Tests for WfbEngine — the loop-in-a-thread orchestrator tying every wfb/
-module together into one RunnerSupervisor-compatible object.
+module together into one ProcessSupervisor-compatible object.
 
 Everything is faked: `child_cls` is a stub recording start/stop order (and
 optionally failing by name), `radio_init` is a recorder, `graph_builder`

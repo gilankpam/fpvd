@@ -1,6 +1,6 @@
 """WfbEngine — loop-in-a-thread orchestrator tying together every native wfb
 data-plane module (`graph`/`children`/`aggregator`/`txsel`/`mavproxy`/
-`tunnel`/`statsd`) into one `RunnerSupervisor`-compatible object.
+`tunnel`/`statsd`) into one `ProcessSupervisor`-compatible object.
 
 Lifecycle pattern is copied from `dynlink.controller.DynamicLinkController`:
 a daemon thread owns a fresh `asyncio` event loop per `start()`, a
@@ -189,7 +189,7 @@ class WfbEngine:
         self._restarts = 0
         self._engine_fault = False
 
-    # ---- RunnerSupervisor-compatible surface (thread-safe) ---------------
+    # ---- ProcessSupervisor-compatible surface (thread-safe) ---------------
     def start(self) -> bool:
         with self._lifecycle:
             with self._lock:
