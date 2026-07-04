@@ -103,18 +103,6 @@ class TunTap:
     def __init__(self, name: str, addr_cidr: str, mtu: int, dev: str = "/dev/net/tun"):
         self.name = name
         self.mtu = mtu - 2
-        # fpvd is the SOLE owner of this ifname, so any netdev already present
-        # at (re)create time is stale — typically a prior engine incarnation
-        # whose tunnel fd outlived its teardown across an in-process restart,
-        # which would make the TUNSETIFF below fail EBUSY and crash-loop the
-        # data plane. Remove it best-effort first (a no-op "Cannot find device"
-        # on a clean boot) so the create is deterministic.
-        subprocess.run(
-            ["ip", "link", "delete", name],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
         self.fd = os.open(dev, os.O_RDWR | os.O_NONBLOCK)
         try:
             fcntl.ioctl(

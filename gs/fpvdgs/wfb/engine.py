@@ -651,10 +651,23 @@ class WfbEngine:
         # cancelled below and is always suspended at its own `asyncio.sleep`
         # when `_teardown` runs (single-threaded event loop), so it cannot
         # observe this hub again before that cancellation lands.
-        # Node sessions FIRST, ahead of everything else: a remote node's own
-        # script tears down its wfb_rx/wfb_tx children the moment its ssh
-        # session dies (trap on stdin close -- see cluster.py's NodeSession
-        # docstring), so stopping the session before the local
+        # Tunnel service FIRST: it owns the `gs-wfb` TUN netdev, and the very
+        # next incarnation's _setup reopens that same-named device. Node-session
+        # teardown below is a network round-trip (SSH) that can take seconds, so
+        # releasing the tun (remove_reader + close fd) up front means the netdev
+        # starts its async kernel teardown immediately instead of after that
+        # wait -- otherwise the restart's tun open races a still-open gs-wfb and
+        # fails EBUSY (TunnelService.start's retry rides out only the brief
+        # kernel-teardown window, not a multi-second node-teardown hold).
+        if self._tunnel_service is not None:
+            with contextlib.suppress(Exception):
+                await self._tunnel_service.stop()
+            self._tunnel_service = None
+
+        # Node sessions next, before the local aggregators/distributors: a
+        # remote node's own script tears down its wfb_rx/wfb_tx children the
+        # moment its ssh session dies (trap on stdin close -- see cluster.py's
+        # NodeSession docstring), so stopping the session before the local
         # aggregators/distributors vanish avoids a brief window where a
         # still-alive remote injector/forwarder is talking to a GS side that
         # has already torn down.
@@ -682,11 +695,6 @@ class WfbEngine:
             with contextlib.suppress(Exception):
                 await self._stats_server.stop()
             self._stats_server = None
-
-        if self._tunnel_service is not None:
-            with contextlib.suppress(Exception):
-                await self._tunnel_service.stop()
-            self._tunnel_service = None
 
         if self._mav_service is not None:
             with contextlib.suppress(Exception):
