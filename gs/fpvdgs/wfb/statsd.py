@@ -120,24 +120,27 @@ class StatsServer:
 
     async def stop(self) -> None:
         self._hub.remove_raw_listener(self._on_raw)
-        # Close client connections FIRST. `Server.close()` does not close active
-        # connections, and on Python 3.13 `Server.wait_closed()` blocks until
-        # every connection's handler task finishes -- but each `_handle_client`
-        # is parked at `reader.read()`, which returns only once its transport
-        # closes. Closing the writer here shuts that transport (both ways) so the
-        # reader EOFs and the handler exits. Doing it AFTER `wait_closed()` (the
-        # previous order) deadlocked: teardown hung here for the full 30 s engine
-        # stop-join timeout, so the old engine thread never exited and the next
-        # `start()` spawned a SECOND concurrent engine whose reaper + the stale
-        # engine's child watchers fought, leaking a duplicate wfb process set.
+        # ABORT every client connection BEFORE awaiting wait_closed().
+        #
+        # asyncio.Server.wait_closed() (3.12.1+) returns only once the server is
+        # closed AND every client transport has detached, which happens on each
+        # transport's connection_lost. A *graceful* writer.close() flushes the
+        # write buffer first, so a client that has stopped reading (its socket
+        # buffer full) never flushes -> never fires connection_lost -> never
+        # detaches -> wait_closed() blocks forever. That is precisely what wedged
+        # engine teardown for the full 30 s stop-join timeout, leaving the old
+        # engine thread alive so the next start() spawned a second concurrent
+        # engine and leaked a duplicate wfb process set. transport.abort() drops
+        # the connection immediately (buffer discarded), so connection_lost fires
+        # on the next loop turn and wait_closed() returns promptly -- we are
+        # discarding these clients anyway. The wait_for() is a hard backstop that
+        # should never actually elapse.
         for writer in list(self._writers):
             with contextlib.suppress(Exception):
-                writer.close()
+                writer.transport.abort()
         self._writers.clear()
         if self._server is not None:
             self._server.close()
-            # Bounded backstop: never let teardown hang here regardless of what
-            # a slow/uncooperative client transport does.
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(
                     self._server.wait_closed(), timeout=STOP_WAIT_CLOSED_TIMEOUT_S

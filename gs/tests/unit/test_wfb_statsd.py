@@ -36,12 +36,13 @@ def hub():
     return StatsHub(TxSelector(TxSelectorConfig()))
 
 
-def test_stop_returns_promptly_with_a_client_still_connected():
-    # A connected client parks _handle_client at reader.read(); stop() must
-    # close that connection and return, NOT block on Server.wait_closed()
-    # (Python 3.13 waits for open connections there). A hang wedges engine
-    # teardown for the full 30 s stop-join, spawning a concurrent engine whose
-    # duplicate wfb set leaks -- so stop() must finish well under that.
+def test_stop_returns_promptly_with_an_idle_client_connected():
+    # An IDLE client (connected, never reads) is the hang case: Server.close()
+    # doesn't drop it, and Server.wait_closed() blocks until its transport
+    # detaches (connection_lost). A graceful close would flush first and could
+    # wait forever on a non-draining client; stop() must abort it so wait_closed
+    # returns. If it blocks, engine teardown wedges for the 30 s stop-join and a
+    # concurrent engine leaks a duplicate wfb set -- so stop() must finish fast.
     settings_fn = lambda: {"common": {"log_interval": 100}}  # noqa: E731
     server = StatsServer(hub(), settings_fn, host="127.0.0.1", port=0)
 
@@ -50,11 +51,12 @@ def test_stop_returns_promptly_with_a_client_still_connected():
         await server.start(loop)
         reader, writer = await asyncio.open_connection("127.0.0.1", server.port)
         try:
-            # The server sends a settings record on connect; reading it confirms
-            # the handler is registered (client genuinely connected) before stop.
-            await asyncio.wait_for(reader.readline(), timeout=2.0)
+            # The client stays idle (never reads). Wait until the server has
+            # registered the connection, then stop() must not block on it.
+            await _wait_until(lambda: len(server._writers) == 1, timeout=2.0)
             await asyncio.wait_for(server.stop(), timeout=5.0)  # must NOT hang
             assert server._server is None
+            assert len(server._writers) == 0
         finally:
             writer.close()
 
