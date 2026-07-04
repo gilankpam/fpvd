@@ -174,7 +174,19 @@ def render_node_script(
         "  exit 1",
         "}",
         "",
-        "trap _cleanup EXIT",
+        # Reap on a clean exit AND on the signals an abrupt SSH drop delivers
+        # (sshd sends SIGHUP when the channel closes ungracefully; without these
+        # the shell dies without running the EXIT trap and leaks the children).
+        "trap _cleanup EXIT HUP INT TERM",
+        "",
+        # Reap any wfb_rx/wfb_tx a prior session left behind before spawning our
+        # own: an abrupt drop (or overlapping reconnect) can orphan them, and
+        # duplicate forwarders/injectors on the same card destabilise the link
+        # (duplicate RX fragments, duplicate TX injection). We are the sole wfb
+        # owner on this node, so any pre-existing wfb process is a stale orphan.
+        "for _p in $(ps | grep -E 'wfb_(rx|tx)' | grep -v grep | awk '{print $1}'); do",
+        "  kill -9 $_p 2>/dev/null || true",
+        "done",
         "",
     ]
 

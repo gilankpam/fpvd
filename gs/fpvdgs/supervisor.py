@@ -112,12 +112,13 @@ def build_app(
 
     engine_kind = effective.get("wfb", {}).get("engine", "wfbng")
     if engine_kind == "native":
-        from .wfb.engine import WfbEngine
+        from .wfb.engine import WfbEngine, reap_stale_wfb
 
         runner = WfbEngine(
             config_provider=store.effective,
             wlans_resolver=resolve_wlans,
             stats_port=ready_port,
+            reap_fn=reap_stale_wfb,
         )
         stats_client_factory = runner.client_factory()
     else:
@@ -287,6 +288,16 @@ def main(argv=None):
     if args.dump_config:
         print(json.dumps(default_config(), indent=2))
         return
+
+    # Configure Python logging so the engine/dynlink loggers actually surface
+    # (previously --log only redirected child process stdout; our own INFO/
+    # WARNING went nowhere under start-stop-daemon -b, hiding start failures).
+    # filename=None -> stderr.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        filename=args.log,
+    )
 
     runner_cmd = args.runner.split() if args.runner else [sys.executable, "-m", "fpvdgs.runner"]
     app = build_app(args.config, args.cfg_out, args.host, args.port, runner_cmd, log_path=args.log)

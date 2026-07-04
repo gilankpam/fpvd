@@ -61,6 +61,28 @@ def test_watchdog_reads_saved_stdin_fd_not_fd0():
     assert "exec cat > /dev/null" not in script  # the broken fd-0 form is gone
 
 
+def test_cleanup_trap_catches_abrupt_signals():
+    # An abrupt SSH drop delivers SIGHUP; the EXIT trap alone doesn't fire on an
+    # unhandled signal, so the children would leak. Trap the signals too.
+    script = _remote_script()
+    assert "trap _cleanup EXIT HUP INT TERM" in script
+
+
+def test_reaps_stale_wfb_before_spawning():
+    # Each (re)connect must reap any wfb_rx/wfb_tx a prior session orphaned
+    # (abrupt drops / overlapping reconnect), else duplicate forwarders/injectors
+    # pile up on the card and destabilise the link. The reap must run BEFORE this
+    # session spawns its own forwarders/injectors.
+    script = _remote_script()
+    lines = script.splitlines()
+    reap_idx = next(
+        i for i, ln in enumerate(lines) if "grep -E 'wfb_(rx|tx)'" in ln and "kill" not in ln
+    )
+    first_spawn_idx = next(i for i, ln in enumerate(lines) if ln.startswith("wfb_rx -f"))
+    assert reap_idx < first_spawn_idx  # reap stale orphans before spawning ours
+    assert "kill -9 $_p 2>/dev/null || true" in script  # tolerant of already-dead pids
+
+
 def test_sh_syntax_check(tmp_path):
     script = _remote_script()
     path = tmp_path / "node.sh"

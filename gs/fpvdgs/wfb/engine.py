@@ -43,6 +43,8 @@ import asyncio
 import contextlib
 import functools
 import logging
+import os
+import signal
 import threading
 import time
 import uuid
@@ -73,6 +75,47 @@ def _rand_suffix() -> str:
     return uuid.uuid4().hex[:8]
 
 
+def _scan_wfb_pids() -> list[int]:
+    """PIDs of running wfb_rx/wfb_tx processes via a Linux /proc scan (returns
+    [] on any platform without a readable /proc)."""
+    pids: list[int] = []
+    try:
+        names = os.listdir("/proc")
+    except OSError:
+        return pids
+    for name in names:
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/cmdline", "rb") as fh:
+                argv0 = fh.read().split(b"\0", 1)[0]
+        except OSError:
+            continue  # process gone / permission — skip
+        if os.path.basename(argv0).decode("latin1", "replace") in ("wfb_rx", "wfb_tx"):
+            pids.append(int(name))
+    return pids
+
+
+def reap_stale_wfb(pids_fn=_scan_wfb_pids, kill=os.kill, self_pid=None) -> list[int]:
+    """SIGKILL every running wfb_rx/wfb_tx. The engine is the sole owner of the
+    GS wfb data plane, so at (re)start any surviving wfb process is an orphan
+    from a prior incarnation (ungraceful kill, deploy race, reboot-interrupted
+    apply) still holding our aggregator UDP ports / distributor unix sockets --
+    reap it so the fresh children can bind, instead of timing out and cascading.
+    Returns the reaped PIDs."""
+    me = os.getpid() if self_pid is None else self_pid
+    reaped: list[int] = []
+    for pid in pids_fn():
+        if pid == me:
+            continue
+        try:
+            kill(pid, signal.SIGKILL)
+            reaped.append(pid)
+        except OSError:
+            pass  # already gone
+    return reaped
+
+
 def _ssh_argv_for_card(card: Card, _node) -> list[str]:
     """`NodeSession.argv_builder` shape is `(node) -> argv`, but `node` here
     is the plain host string (see `_start_node_sessions`), not a `Card` --
@@ -97,6 +140,7 @@ class WfbEngine:
         stats_port=8103,
         mav_service_cls=MavlinkService,
         tunnel_service_cls=TunnelService,
+        reap_fn=None,
     ):
         self._config_provider = config_provider
         self._wlans_resolver = wlans_resolver
@@ -109,6 +153,9 @@ class WfbEngine:
         self._stats_port = stats_port
         self._mav_service_cls = mav_service_cls
         self._tunnel_service_cls = tunnel_service_cls
+        # Reap stale wfb children before (re)building. None = skip (tests);
+        # supervisor.build_app passes reap_stale_wfb in production.
+        self._reap_fn = reap_fn
 
         self.hub: StatsHub | None = None  # current incarnation; read by statsd/CLI/tests
 
@@ -350,6 +397,12 @@ class WfbEngine:
             with self._lock:
                 staged, self._staged_config = self._staged_config, None
             cfg = staged if staged is not None else self._config_provider()
+            # Reap orphaned wfb children before binding anything, so a prior
+            # incarnation's leftovers can't hold our ports and fail this start.
+            if self._reap_fn is not None:
+                reaped = await loop.run_in_executor(None, self._reap_fn)
+                if reaped:
+                    log.warning("wfb engine: reaped %d stale wfb pid(s): %s", len(reaped), reaped)
             link = cfg.get("link", {}) or {}
             # `parse_cards` is pure (no I/O): a concrete `link.cards`/`wlans`
             # list is returned as-is, and only the "auto" placeholder would

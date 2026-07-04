@@ -298,6 +298,50 @@ def test_restart_bumps_restarts_and_rebuilds_from_changed_config():
         engine.shutdown()
 
 
+def test_reap_stale_wfb_kills_all_but_self_tolerating_dead():
+    import signal as _sig
+
+    from fpvdgs.wfb.engine import reap_stale_wfb
+
+    killed = []
+
+    def fake_kill(pid, sig):
+        if pid == 999:
+            raise ProcessLookupError  # already gone
+        killed.append((pid, sig))
+
+    reaped = reap_stale_wfb(pids_fn=lambda: [10, 20, 42, 999], kill=fake_kill, self_pid=42)
+    assert reaped == [10, 20]  # 42 skipped (self), 999 tolerated (dead)
+    assert killed == [(10, _sig.SIGKILL), (20, _sig.SIGKILL)]
+
+
+def test_engine_reaps_stale_wfb_before_starting_children():
+    # A prior incarnation's orphaned wfb children hold our ports; the engine must
+    # reap them BEFORE spawning its own, or the new children fail to bind (bench-
+    # caught 2026-07-04 as a cascading apply 500).
+    cfg = make_config()
+    order = []
+    engine = WfbEngine(
+        config_provider=lambda: cfg,
+        wlans_resolver=lambda c: list(WLANS),
+        graph_builder=make_graph_builder(),
+        child_cls=make_child_cls(order),
+        radio_init=lambda wlans, link: order.append(("radio", None)) or True,
+        stats_port=0,
+        mav_service_cls=make_service_cls([], [], []),
+        tunnel_service_cls=make_service_cls([], [], [], []),
+        reap_fn=lambda: order.append(("reap", None)) or [],
+    )
+    try:
+        assert engine.start() is True
+        assert ("reap", None) in order
+        reap_i = order.index(("reap", None))
+        first_start_i = next(i for i, e in enumerate(order) if e[0] == "start")
+        assert reap_i < first_start_i  # reaped before any child started
+    finally:
+        engine.shutdown()
+
+
 def test_restart_with_config_builds_from_it_not_provider_and_consumes_once():
     # restart(config) must build from `config` — the pending config the api hands
     # in before store.commit() — NOT config_provider(), which still returns the
