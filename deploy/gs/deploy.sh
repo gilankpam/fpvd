@@ -58,7 +58,9 @@ remote '
     set -e
     # launcher: `fpvd` runs the now-importable package entrypoint
     printf "#!/bin/sh\nexec python3 -m fpvdgs.supervisor \"\$@\"\n" > /usr/bin/fpvd
-    chmod +x /usr/bin/fpvd /etc/init.d/S99fpvd
+    # launcher: `fpvd-stats` runs the wfb CLI entrypoint
+    printf "#!/bin/sh\nexec python3 -m fpvdgs.wfb.cli \"\$@\"\n" > /usr/bin/fpvd-stats
+    chmod +x /usr/bin/fpvd /usr/bin/fpvd-stats /etc/init.d/S99fpvd
 
     mkdir -p /root/fpvd-gs-rollback
     # back up the stock cfg + init script ONCE; never clobber on re-deploy
