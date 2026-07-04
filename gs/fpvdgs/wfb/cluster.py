@@ -16,9 +16,16 @@ import socket
 import struct
 from dataclasses import dataclass, field
 
+from .. import radio
 from .cards import Card
 
 SERVICE_ORDER = ("video", "mavlink", "tunnel")
+
+DEFAULT_STREAMS = {
+    "video": {"rx": 0, "tx": None},
+    "mavlink": {"rx": 16, "tx": 144},
+    "tunnel": {"rx": 32, "tx": 160},
+}
 
 
 def node_key(card: Card) -> str:
@@ -90,3 +97,116 @@ def plan_cluster(
         peers=peers,
         rx_only_wlan_ids=rx_only_wlan_ids,
     )
+
+
+def render_node_script(
+    node: str,
+    cards: list[Card],
+    plan: ClusterPlan,
+    *,
+    link: dict,
+    link_id: int,
+    server_address: str,
+    ssh_mode: bool = True,
+    streams: dict | None = None,
+) -> str:
+    """Render the POSIX-sh bootstrap script pushed to `node` over SSH (or run
+    locally): tunes each of `cards`' wlans, then spawns the wfb_rx/wfb_tx
+    children for every service this node participates in, sourced from
+    `plan` (port allocation) and `link` (channel/width/region).
+
+    A port of wfb-ng's `gen_cluster_scripts`/`script_template`, sh-adapted
+    (no bash on OpenWrt/BusyBox nodes or the GS bench box): `set -em`
+    (no `-b`), and a portable fail-fast poll loop in place of `wait -n`
+    (dash lacks it).
+    """
+    if streams is None:
+        streams = DEFAULT_STREAMS
+
+    width = link.get("width", 20)
+    region = link.get("region")
+    channel = link.get("channel")
+    wlans = [card.iface for card in cards]
+    wlans_str = " ".join(wlans)
+
+    lines: list[str] = [
+        "#!/bin/sh",
+        "set -em",
+        "",
+        "export LC_ALL=C",
+        "",
+        'PIDS=""',
+        "",
+        "_cleanup()",
+        "{",
+        "  plist=$(jobs -p)",
+        '  if [ -n "$plist" ]',
+        "  then",
+        "      kill -TERM $plist || true",
+        "  fi",
+        "  exit 1",
+        "}",
+        "",
+        "trap _cleanup TERM",
+        "",
+    ]
+
+    if region:
+        lines.append(f"iw reg set {region}")
+        lines.append("")
+
+    for card in cards:
+        wlan = card.iface
+        lines.append(f"# init {wlan}")
+        lines.append(
+            f"if which nmcli > /dev/null && " f"! nmcli device show {wlan} | grep -q '(unmanaged)'"
+        )
+        lines.append("then")
+        lines.append(f"  nmcli device set {wlan} managed no")
+        lines.append("  sleep 1")
+        lines.append("fi")
+        lines.append("")
+        lines.append(f"ip link set {wlan} down")
+        lines.append(f"iw dev {wlan} set monitor otherbss")
+        lines.append(f"ip link set {wlan} up")
+        if channel is not None:
+            lines.append(" ".join(radio.iw_args(wlan, channel, width)))
+        if card.txpower_dbm not in (None, "off"):
+            mbm = round(float(card.txpower_dbm) * 100)
+            lines.append(f"iw dev {wlan} set txpower fixed {mbm}")
+        lines.append("")
+
+    for service in SERVICE_ORDER:
+        svc_streams = streams.get(service, {})
+        rx_id = svc_streams.get("rx")
+        tx_id = svc_streams.get("tx")
+        if rx_id is None and tx_id is None:
+            continue
+        lines.append(f"# {service}")
+        if rx_id is not None:
+            port = plan.server_port[service]
+            lines.append(
+                f"wfb_rx -f -c {server_address} -u {port} -p {rx_id} "
+                f'-i {link_id} -R 2097152 {wlans_str} & PIDS="$PIDS $!"'
+            )
+        if tx_id is not None:
+            injector = plan.injector_base[(node, service)]
+            lines.append(f'wfb_tx -I {injector} -R 2097152 {wlans_str} & PIDS="$PIDS $!"')
+        lines.append("")
+
+    if ssh_mode:
+        lines.append("# Will fail in case of connection loss")
+        lines.append('(sleep 1; exec cat > /dev/null) & PIDS="$PIDS $!"')
+        lines.append("")
+
+    lines.append('echo "WFB-ng init done"')
+    lines.append("")
+    lines.append("while :; do")
+    lines.append("  for p in $PIDS; do")
+    lines.append("    kill -0 $p 2>/dev/null || exit 1")
+    lines.append("  done")
+    lines.append("  sleep 1")
+    lines.append("done")
+    lines.append("")
+
+    return "\n".join(lines)
