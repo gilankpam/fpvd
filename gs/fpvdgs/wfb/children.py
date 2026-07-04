@@ -161,6 +161,11 @@ class WfbChild:
             log.warning("wfb child %s: spawn failed: %s", self.spec.name, e)
             return False
 
+        if self._pump_task is not None and not self._pump_task.done():
+            # A respawn overwrites _pump_task below; cancel the previous
+            # incarnation first so it doesn't linger as an orphaned,
+            # never-awaited task ("Task was destroyed but it is pending").
+            self._pump_task.cancel()
         self._pump_task = asyncio.ensure_future(self._pump_stdout(self._proc, self._parser))
 
         if self.spec.kind == "tx":
@@ -250,6 +255,14 @@ class WfbChild:
 
     # -- crash watch --------------------------------------------------------
     async def _watch(self) -> None:
+        """Invariant: this loop may only end in one of two terminal states —
+        supervising a live process (a `return` with `self._proc` set and a
+        later iteration awaiting it), or `fault=True` with `on_fault` fired
+        (or an operator `stop()`, which cancels this task outright).
+        `running=False, fault=False` with the watch task dead must be
+        unreachable — a failed respawn is charged against the same
+        crash-loop budget as a live crash instead of returning silently.
+        """
         while True:
             proc = self._proc
             if proc is None:
@@ -259,29 +272,33 @@ class WfbChild:
                 return  # stop() already handled the kill; not a crash
 
             self._last_exit = rc
-            now = time.monotonic()
-            self._recent = [t for t in self._recent if now - t < self.restart_window]
-            self._recent.append(now)
-            if len(self._recent) > self.max_restarts:
-                self._fault = True
-                self._supervise = False
-                self._proc = None
-                if self._on_fault is not None:
-                    try:
-                        self._on_fault(self)
-                    except Exception:
-                        log.exception("wfb child %s: on_fault callback failed", self.spec.name)
-                return
 
-            self._auto_restarts += 1
-            await asyncio.sleep(self.backoff)
-            if not self._supervise:
-                return
+            # Keep attempting a respawn while under the crash-loop budget.
+            # A failed respawn attempt (spawn OSError, or a tx handshake
+            # timeout on the retry — self._proc left None) loops back here
+            # and is charged against the same budget as a live crash; only
+            # a successful respawn (break) or an exhausted budget (return)
+            # leaves this inner loop.
+            while True:
+                now = time.monotonic()
+                self._recent = [t for t in self._recent if now - t < self.restart_window]
+                self._recent.append(now)
+                if len(self._recent) > self.max_restarts:
+                    self._fault = True
+                    self._supervise = False
+                    self._proc = None
+                    if self._on_fault is not None:
+                        try:
+                            self._on_fault(self)
+                        except Exception:
+                            log.exception("wfb child %s: on_fault callback failed", self.spec.name)
+                    return
 
-            await self._spawn_and_wait()
-            if self._proc is None:
-                # Respawn attempt failed outright (spawn error, or a tx
-                # child killed for a handshake timeout) — nothing left to
-                # watch; stop rather than spin without a live process.
-                self._supervise = False
-                return
+                self._auto_restarts += 1
+                await asyncio.sleep(self.backoff)
+                if not self._supervise:
+                    return
+
+                await self._spawn_and_wait()
+                if self._proc is not None:
+                    break  # respawn succeeded; resume watching it above

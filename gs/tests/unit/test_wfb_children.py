@@ -208,6 +208,95 @@ def test_crash_loop_trips_fault_and_calls_on_fault(tmp_path):
     run(main())
 
 
+# -- (e2) failed respawn folds into the same crash budget --------------------
+#
+# Review-flagged hole: if the respawn attempt itself fails (OSError from
+# create_subprocess_exec, or a tx handshake timeout on the retry) _watch()
+# used to set _supervise=False and return WITHOUT setting _fault or calling
+# on_fault -- a zombie terminal state (running=False, fault=False, watch task
+# dead) that nothing retries and nothing alarms on.
+
+
+def test_failed_respawn_trips_fault_not_zombie(tmp_path, monkeypatch):
+    async def main():
+        spec = make_spec("video_rx", "rx", [write_fake_insta_exit(tmp_path)])
+        hub = StubHub()
+        faulted = []
+        child = WfbChild(spec, hub, max_restarts=1, backoff=0.02, on_fault=faulted.append)
+
+        real_create = asyncio.create_subprocess_exec
+        call_count = 0
+
+        async def flaky_create(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                raise OSError("respawn boom")
+            return await real_create(*args, **kwargs)
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", flaky_create)
+
+        try:
+            await child.start()
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline and not child.state()["fault"]:
+                await asyncio.sleep(0.05)
+
+            st = child.state()
+            # The hole: pre-fix, this ends running=False, fault=False (a
+            # dead watch task supervising nothing). The fix charges the
+            # failed respawn against the crash budget like a live crash.
+            assert st["fault"] is True
+            assert st["running"] is False
+            assert faulted == [child]
+        finally:
+            await child.stop()
+
+    run(main())
+
+
+def test_failed_respawn_retries_under_budget_then_recovers(tmp_path, monkeypatch):
+    async def main():
+        spec = make_spec("video_rx", "rx", [write_fake_insta_exit(tmp_path)])
+        good_argv = write_fake_rx(tmp_path)
+        hub = StubHub()
+        faulted = []
+        child = WfbChild(spec, hub, max_restarts=3, backoff=0.02, on_fault=faulted.append)
+
+        real_create = asyncio.create_subprocess_exec
+        call_count = 0
+
+        async def flaky_create(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                # The one respawn attempt that fails outright.
+                raise OSError("respawn boom")
+            if call_count >= 3:
+                # From here on, respawn a real, long-running good child.
+                args = (good_argv,)
+            return await real_create(*args, **kwargs)
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", flaky_create)
+
+        try:
+            await child.start()
+            deadline = time.monotonic() + 5.0
+            st = child.state()
+            while time.monotonic() < deadline and not (st["running"] and call_count >= 3):
+                await asyncio.sleep(0.05)
+                st = child.state()
+
+            assert st["running"] is True
+            assert st["fault"] is False
+            assert call_count >= 3
+            assert faulted == []
+        finally:
+            await child.stop()
+
+    run(main())
+
+
 # -- (f) stop() terminates the process group ---------------------------------
 
 
