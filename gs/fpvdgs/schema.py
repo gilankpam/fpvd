@@ -1,5 +1,7 @@
 """Validation rules. `link` is a normal mutable block in /config."""
 
+from .wfb.cards import parse_cards
+
 LINK_KEYS = {
     "channel",
     "width",
@@ -136,6 +138,7 @@ def validate_effective(cfg: dict) -> None:
     cards = link.get("cards")
     if cards is not None and cards != "auto":
         _validate_cards(cards)
+    _validate_single_remote_host(link)
     server_addr = link.get("serverAddress")
     if server_addr is not None and not isinstance(server_addr, str):
         raise SchemaError("link.serverAddress must be a string or null")
@@ -254,6 +257,32 @@ def _validate_cards(cards) -> None:
                 and (isinstance(txp, bool) or not isinstance(txp, (int, float)))
             ):
                 raise SchemaError("link.cards.txPowerDbm must be a number, 'off', or null")
+
+
+def _validate_single_remote_host(link: dict) -> None:
+    # The engine derives ONE server_address from the first remote card's
+    # host and uses it for every remote node — correct for a single remote
+    # host, silently wrong for 2+ DISTINCT remote hosts (a second node would
+    # be told to send video to the wrong GS source address -> video loss ->
+    # GS reboots on sustained video loss). Per-node server_address is a
+    # future enhancement; until then, reject a multi-remote-host config
+    # outright rather than mis-wire it. Remote cards are always explicit
+    # (never "auto"), so resolve_cards' auto-expansion isn't needed here.
+    try:
+        cards = parse_cards(link)
+    except ValueError as exc:
+        # parse_cards' own invariants (e.g. a remote entry hiding in the
+        # legacy `wlans` list) — surface as a clean SchemaError rather than
+        # an uncaught ValueError.
+        raise SchemaError(str(exc)) from exc
+    if cards == "auto":
+        return
+    hosts = {c.host for c in cards if c.host is not None}
+    if len(hosts) > 1:
+        raise SchemaError(
+            "multiple remote-card hosts not yet supported (per-node server "
+            "address pending); use at most one remote host"
+        )
 
 
 def _validate_dynamic_link(dl: dict) -> None:

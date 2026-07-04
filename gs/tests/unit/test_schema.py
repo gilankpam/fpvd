@@ -785,3 +785,73 @@ def test_validate_effective_rejects_bool_txpower():
                 }
             }
         )
+
+
+# ---- link.cards single-remote-host guard (final-review fold-in) -----------
+#
+# The engine derives ONE server_address from the first remote card's host and
+# uses it for every remote node. Correct for a single remote host; silently
+# wrong for 2+ DISTINCT remote hosts (a second node gets told to send video
+# to the wrong GS source address -> video loss -> GS reboots on sustained
+# video loss). Per-node server_address is a future enhancement; until then,
+# reject multi-remote-host configs outright.
+
+
+def test_validate_effective_accepts_two_remote_cards_same_host():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    {"host": "192.168.1.10", "iface": "wlan0"},
+                    {"host": "192.168.1.10", "iface": "wlan1"},
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_rejects_two_remote_cards_different_hosts():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [
+                        {"host": "192.168.1.10", "iface": "wlan0"},
+                        {"host": "192.168.1.11", "iface": "wlan1"},
+                    ],
+                }
+            }
+        )
+
+
+def test_validate_effective_accepts_one_remote_host_with_local_cards():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    "wlan0",
+                    "wlan1",
+                    {"host": "192.168.1.10", "iface": "wlan2"},
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_accepts_cards_auto_with_remote_host_guard():
+    # "auto" only ever auto-detects local NICs, so zero remote hosts.
+    schema.validate_effective({"link": {"channel": 132, "region": "US", "cards": "auto"}})
+
+
+def test_validate_effective_accepts_legacy_wlans_with_remote_host_guard():
+    # Legacy wlans is local-only (parse_cards raises if it ever isn't), so
+    # zero remote hosts; the guard must not trip on it.
+    schema.validate_effective(
+        {"link": {"channel": 132, "region": "US", "wlans": ["wlan0", "wlan1"]}}
+    )
