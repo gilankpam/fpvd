@@ -36,6 +36,31 @@ def hub():
     return StatsHub(TxSelector(TxSelectorConfig()))
 
 
+def test_stop_returns_promptly_with_a_client_still_connected():
+    # A connected client parks _handle_client at reader.read(); stop() must
+    # close that connection and return, NOT block on Server.wait_closed()
+    # (Python 3.13 waits for open connections there). A hang wedges engine
+    # teardown for the full 30 s stop-join, spawning a concurrent engine whose
+    # duplicate wfb set leaks -- so stop() must finish well under that.
+    settings_fn = lambda: {"common": {"log_interval": 100}}  # noqa: E731
+    server = StatsServer(hub(), settings_fn, host="127.0.0.1", port=0)
+
+    async def _drive():
+        loop = asyncio.get_running_loop()
+        await server.start(loop)
+        reader, writer = await asyncio.open_connection("127.0.0.1", server.port)
+        try:
+            # The server sends a settings record on connect; reading it confirms
+            # the handler is registered (client genuinely connected) before stop.
+            await asyncio.wait_for(reader.readline(), timeout=2.0)
+            await asyncio.wait_for(server.stop(), timeout=5.0)  # must NOT hang
+            assert server._server is None
+        finally:
+            writer.close()
+
+    asyncio.new_event_loop().run_until_complete(_drive())
+
+
 async def _wait_until(cond, timeout=2.0):
     start = time.monotonic()
     while not cond():

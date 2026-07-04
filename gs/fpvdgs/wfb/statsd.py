@@ -39,12 +39,17 @@ hook directly.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
 from typing import Callable
 
 log = logging.getLogger("fpvdgs.wfb.statsd")
+
+# Hard bound on `Server.wait_closed()` during stop() so a lingering client can
+# never wedge engine teardown (see stop()).
+STOP_WAIT_CLOSED_TIMEOUT_S = 2.0
 
 DEFAULT_MAX_WRITE_BUFFER = 256 * 1024
 
@@ -115,13 +120,29 @@ class StatsServer:
 
     async def stop(self) -> None:
         self._hub.remove_raw_listener(self._on_raw)
+        # Close client connections FIRST. `Server.close()` does not close active
+        # connections, and on Python 3.13 `Server.wait_closed()` blocks until
+        # every connection's handler task finishes -- but each `_handle_client`
+        # is parked at `reader.read()`, which returns only once its transport
+        # closes. Closing the writer here shuts that transport (both ways) so the
+        # reader EOFs and the handler exits. Doing it AFTER `wait_closed()` (the
+        # previous order) deadlocked: teardown hung here for the full 30 s engine
+        # stop-join timeout, so the old engine thread never exited and the next
+        # `start()` spawned a SECOND concurrent engine whose reaper + the stale
+        # engine's child watchers fought, leaking a duplicate wfb process set.
+        for writer in list(self._writers):
+            with contextlib.suppress(Exception):
+                writer.close()
+        self._writers.clear()
         if self._server is not None:
             self._server.close()
-            await self._server.wait_closed()
+            # Bounded backstop: never let teardown hang here regardless of what
+            # a slow/uncooperative client transport does.
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(
+                    self._server.wait_closed(), timeout=STOP_WAIT_CLOSED_TIMEOUT_S
+                )
             self._server = None
-        for writer in list(self._writers):
-            writer.close()
-        self._writers.clear()
 
     # -- client connection handling -----------------------------------------
     async def _handle_client(
