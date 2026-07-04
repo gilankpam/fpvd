@@ -333,6 +333,7 @@ TEST_CASE("controller staggers an UP decision across the gap timer") {
     snap.applySubPaceMs = 0;
     snap.debug = false;
     snap.roiQp = RoiCurve{6000, 2000, -24, 3};
+    snap.probeEnabled = true; // expected bitrate values (8739/18501) assume probe reserve
     snap.iface = "wlan-test-nonexistent";
 
     DynamicLinkController c(ep);

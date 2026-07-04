@@ -22,8 +22,6 @@ from .dynlink.controller import DynamicLinkController
 from .events import EventBus
 from .idr_relay import IdrRelay
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
-from .probe.config_build import make_probe_snapshot
-from .probe.controller import ProbeController
 from .runner_supervisor import ProcessSupervisor, RunnerSupervisor, resolve_wlans
 
 log = logging.getLogger(__name__)
@@ -72,8 +70,6 @@ class App:
             self.idr_relay.start()
         if self.store.effective().get("dynamicLink", {}).get("enabled"):
             self.dynlink.start()
-        if self.probe is not None and self.store.effective().get("dynamicLink", {}).get("enabled"):
-            self.probe.start()
 
     def serve_forever(self):
         self.http.serve_forever()
@@ -89,8 +85,6 @@ class App:
             self.pixelpilot.shutdown()
         if self.idr_relay is not None:
             self.idr_relay.stop()
-        if self.probe is not None:
-            self.probe.stop()
         self.runner.shutdown()
 
 
@@ -148,11 +142,7 @@ def build_app(
     idr_cfg = effective.get("idrForward", {})
     idr_relay = IdrRelay(drone_host, port=int(idr_cfg.get("port", 11223)))
 
-    probe_ctrl = ProbeController(make_probe_snapshot(effective), spawn=probe_spawn)
-
-    dynlink = DynamicLinkController(
-        make_dl_snapshot(effective), probe_status=probe_ctrl.status, bus=bus
-    )
+    dynlink = DynamicLinkController(make_dl_snapshot(effective), bus=bus)
 
     pixelpilot = ProcessSupervisor(
         argv=render_pixelpilot_argv(effective),
@@ -190,9 +180,9 @@ def build_app(
         return {"enabled": True, **pixelpilot.state()}
 
     def _probe_status():
-        if not store.effective().get("dynamicLink", {}).get("enabled"):
-            return {"enabled": False, "running": False}
-        return {"enabled": True, **probe_ctrl.status()}
+        # Probe subsystem bypassed by the 2026-07-02 probe-less selector —
+        # retained in-tree for future experiments; never constructed or started.
+        return {"enabled": False, "running": False}
 
     def status_fn():
         wlans = resolve_wlans(store.effective())
@@ -224,7 +214,7 @@ def build_app(
         cfg_out=cfg_out,
         dynlink=dynlink,
         pixelpilot=pixelpilot,
-        probe=probe_ctrl,
+        probe=None,
         retune=lambda lnk: radio.retune(resolve_wlans(store.effective()), lnk),
         wlans_resolver=resolve_wlans,
         armer_tick=armer.tick,
@@ -239,7 +229,6 @@ def build_app(
         api,
         dynlink,
         pixelpilot=pixelpilot,
-        probe=probe_ctrl,
         armer=armer,
         idr_relay=idr_relay,
         connection_monitor=connection_monitor,

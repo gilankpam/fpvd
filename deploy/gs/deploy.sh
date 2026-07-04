@@ -4,6 +4,11 @@
 # Pure Python: no build. Copies the fpvdgs package + init script, backs up and
 # disables the stock S98wifibroadcast (wfb-server), then starts fpvd.
 #
+# Ordering: dynamicLink.tap.enabled defaults true, so this deploy renders
+# `wfb_rx -D`; a GS still running the pre-tap wfb_rx binary exits on the
+# unknown flag (crash-loop -> video down -> GS reboots on sustained video
+# loss). Deploy the forked wfb binaries BEFORE running this script.
+#
 # Usage: ./deploy/gs/deploy.sh [--host IP] [--user USER]
 # Env overrides: GS_HOST, GS_USER.
 set -euo pipefail

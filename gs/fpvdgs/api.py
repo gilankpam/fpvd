@@ -87,6 +87,13 @@ class Api:
     def _without(cfg: dict, *keys) -> dict:
         return {k: v for k, v in cfg.items() if k not in keys}
 
+    @staticmethod
+    def _tap_render_view(cfg):
+        """The (enabled, port) pair the rendered wfb cfg depends on — a
+        change here needs a runner bounce, unlike the rest of dynamicLink."""
+        tap = ((cfg.get("dynamicLink") or {}).get("tap")) or {}
+        return (bool(tap.get("enabled", True)), int(tap.get("port", 8110)))
+
     def _apply_gs(self):
         pending = self.store.pending()
         effective = self.store.effective()
@@ -95,7 +102,9 @@ class Api:
         link_changed = pending.get("link") != effective.get("link")
         wfb_changed = self._without(
             pending, "dynamicLink", "pixelpilot", "idrForward", "link"
-        ) != self._without(effective, "dynamicLink", "pixelpilot", "idrForward", "link")
+        ) != self._without(
+            effective, "dynamicLink", "pixelpilot", "idrForward", "link"
+        ) or self._tap_render_view(pending) != self._tap_render_view(effective)
 
         if link_changed or wfb_changed:
             # Render the cfg the runner reads on a (re)start, before applying.

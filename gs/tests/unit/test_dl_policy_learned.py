@@ -23,29 +23,26 @@ def _sig(rssi, ts=1.0):
     return Signals(rssi=rssi, residual_loss_w=0.0, fec_work=0.0, link_starved_w=False, timestamp=ts)
 
 
-def _settle_knee(policy, rung, rssi, clean, n=12):
-    """Prime the knee model directly via the facade (settled=True), bypassing
-    the policy's tick-driven settle gate — used only for test setup."""
-    for _ in range(n):
-        policy.learned_prior.ingest(
-            rssi=rssi, operating_mcs=rung, operating_clean=clean, settled=True
-        )
-
-
-def test_warm_start_seeds_from_persisted_curve(tmp_path):
+def test_no_warmstart_seed_boot_stays_at_start_mcs(tmp_path):
+    # A persisted prior with warm SNR knees (rung-5 knee planted) must NOT
+    # jump the boot MCS; the probe alone climbs from the start rung.
     prof = _profile()
     p1 = Policy(_cfg(tmp_path, min_samples=3), prof)
-    _settle_knee(p1, 5, -50.0, False)  # dirty to plant the knee
+    for _ in range(12):  # dirty SNR samples plant the rung-5 knee
+        p1.learned_prior.ingest(snr=36.0, operating_mcs=5, operating_clean=False, settled=True)
     p1.close()
     p2 = Policy(_cfg(tmp_path, min_samples=3), prof)
-    dec = p2.tick(_sig(-50.0, ts=1.0))
-    assert dec.mcs == 5  # warm-started from the persisted knee
+    dec = p2.tick(_sig_snr(36.0, ts=1.0))
+    # No seed: boot rung climbs only via the probe, not a ceiling jump.
+    assert dec.mcs == 1  # stays at boot MCS (start_mcs=1), not jumped to 5
+    p2.close()
 
 
 def test_unknown_curve_no_seed_stays_at_boot(tmp_path):
     p = Policy(_cfg(tmp_path, min_samples=100), _profile())
-    dec = p.tick(_sig(-50.0, ts=1.0))
+    dec = p.tick(_sig_snr(36.0, ts=1.0))
     assert dec.mcs == 1  # cold prior -> boot MCS
+    p.close()
 
 
 def test_predictive_demote_on_confident_fade(tmp_path):
@@ -54,17 +51,17 @@ def test_predictive_demote_on_confident_fade(tmp_path):
         _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=1),
         prof,
     )
-    # Direct-set: plant confident RSSI knees for rungs 1, 2, 5
-    p.learned_prior._model._knee[1] = -80.0
-    p.learned_prior._model._count[1] = 12.0
-    p.learned_prior._model._knee[2] = -62.0
-    p.learned_prior._model._count[2] = 12.0
-    p.learned_prior._model._knee[5] = -50.0
-    p.learned_prior._model._count[5] = 12.0
+    # Confident SNR knees for rungs 1, 2, 5.
+    p.learned_prior._snr_model._knee[1] = 20.0
+    p.learned_prior._snr_model._count[1] = 12.0
+    p.learned_prior._snr_model._knee[2] = 26.0
+    p.learned_prior._snr_model._count[2] = 12.0
+    p.learned_prior._snr_model._knee[5] = 34.0
+    p.learned_prior._snr_model._count[5] = 12.0
     p.leading.state.current_mcs = 5
-    p.tick(_sig(-50.0, ts=1.0))  # slope 0 -> no demote yet
-    dec = p.tick(_sig(-56.0, ts=1.1))  # slope -6, projected -56-18=-74 -> ceiling 1
-    assert dec.mcs == 1
+    p.tick(_sig_snr(34.0, ts=1.0))  # slope 0 -> no demote yet
+    dec = p.tick(_sig_snr(30.0, ts=1.1))  # falling -> predict-demote steps ONE rung 5->4
+    assert dec.mcs == 4
     p.close()
 
 
@@ -107,30 +104,30 @@ def test_decision_and_flightlog_carry_rssi_raw(tmp_path):
     assert last["rssi_raw"] == -65.0
 
 
-def test_predictive_demote_blocked_when_rssi_flat(tmp_path):
-    """Static prior-vs-probe disagreement at flat RSSI must NOT demote — the
-    slope-direction gate suppresses it (the 000010/000012 flapping fix)."""
+def test_predictive_demote_blocked_when_snr_flat(tmp_path):
+    """A confident current-rung knee but FLAT SNR (projected_drop 0 < min_drop)
+    must NOT demote — the slope-direction gate (the flapping fix)."""
     prof = _profile()
     p = Policy(
         _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=2),
         prof,
     )
-    # Direct-set: confident RSSI knee at rung 2 so predictive_ceiling(-50, 0) = 2 < 5.
-    # The gate (flat RSSI → projected_drop = 0 < predictive_min_drop_db) must block
-    # the demote despite the confident knee — that is the gate behaviour being tested.
-    p.learned_prior._model._knee[2] = -50.0
-    p.learned_prior._model._count[2] = 12.0
-    p.leading.state.current_mcs = 5  # probe pushed above the learned ceiling
+    # High snr_demote_debounce isolates the predict path: with slope=0 the
+    # projected SNR equals the current SNR, so snr_demote would fire via the
+    # same condition after its debounce — prevent that so only the predict
+    # slope-gate is exercised.
+    p.cfg.selector.snr_demote_debounce = 100
+    p.learned_prior._snr_model._knee[5] = 38.0  # cur rung unviable at live snr...
+    p.learned_prior._snr_model._count[5] = 12.0
+    p.leading.state.current_mcs = 5
     dec = None
     for ts in (1.0, 1.1, 1.2, 1.3, 1.4):
-        dec = p.tick(_sig(-50.0, ts=ts))
-    assert dec.mcs == 5  # flat RSSI -> never predict-demoted
+        dec = p.tick(_sig_snr(34.0, ts=ts))  # ...but flat -> no real fade
+    assert dec.mcs == 5
     p.close()
 
 
 def test_predictive_demote_blocked_when_fade_too_shallow(tmp_path):
-    """A real but shallow downtrend (projected drop < predictive_min_drop_db)
-    must NOT demote."""
     prof = _profile()
     p = Policy(
         _cfg(
@@ -142,39 +139,37 @@ def test_predictive_demote_blocked_when_fade_too_shallow(tmp_path):
         ),
         prof,
     )
-    # Direct-set: confident RSSI knee at rung 2 so predictive_ceiling returns 2 < 5.
-    # The gate (slope -0.2 dB/tick → projected_drop 0.6 dB < predictive_min_drop_db 1.0)
-    # must block the demote despite the confident knee — that is the gate being tested.
-    p.learned_prior._model._knee[2] = -52.0
-    p.learned_prior._model._count[2] = 12.0
+    # High snr_demote_debounce isolates the predict path: snr_rung_unviable uses
+    # the same knee+margin as predict, so snr_demote would also fire — prevent
+    # that so only the predict projected_drop gate is exercised.
+    p.cfg.selector.snr_demote_debounce = 100
+    p.learned_prior._snr_model._knee[5] = 38.0
+    p.learned_prior._snr_model._count[5] = 12.0
     p.leading.state.current_mcs = 5
     dec = None
-    for rssi, ts in [(-50.0, 1.0), (-50.2, 1.1), (-50.4, 1.2), (-50.6, 1.3), (-50.8, 1.4)]:
-        dec = p.tick(_sig(rssi, ts=ts))
-    assert dec.mcs == 5  # 0.2 dB/tick -> 0.6 dB over horizon < 1.0
+    for snr, ts in [(34.0, 1.0), (33.8, 1.1), (33.6, 1.2), (33.4, 1.3), (33.2, 1.4)]:
+        dec = p.tick(_sig_snr(snr, ts=ts))  # 0.2 dB/tick -> 0.6 dB over horizon < 1.0
+    assert dec.mcs == 5
     p.close()
 
 
-def test_predictive_demote_does_not_misfire_on_detrended_rssi(tmp_path):
-    """Raw RSSI (steps down on a power change) WOULD demote; EIRP-normalized
-    RSSI (flat) does NOT. Exercises predictive_ceiling's projection directly."""
-    from fpvdgs.dynlink.learned_prior import LearnedPrior, LearnedPriorConfig
-
-    lp = LearnedPrior(
-        "test-misfire",
-        LearnedPriorConfig(persist_dir=str(tmp_path), min_samples=3, predictive_horizon_ticks=3),
+def test_predictive_demote_does_not_collapse_on_cold_ladder(tmp_path):
+    """Flight log 000007 regression. A clean flight learns a knee ONLY for the
+    rung-0 floor; cold upper rungs must stay explorable. predict_demote must NOT
+    walk a clean link down to MCS0 on a no-loss SNR fade."""
+    prof = _profile()
+    p = Policy(
+        _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=1),
+        prof,
     )
-    # Direct-set: plant confident RSSI knees for rungs 1, 2, 5
-    lp._model._knee[1] = -80.0
-    lp._model._count[1] = 12.0
-    lp._model._knee[2] = -78.0
-    lp._model._count[2] = 12.0
-    lp._model._knee[5] = -55.0
-    lp._model._count[5] = 12.0
-    # Raw: rssi -62, slope -6/tick -> projected -80 -> ceiling 1 < 5 (would demote).
-    assert lp.predictive_ceiling(-62.0, -6.0) == 1
-    # Normalized: rssi -50, slope 0 -> projected -50 -> ceiling 5 (no demote).
-    assert lp.predictive_ceiling(-50.0, 0.0) == 5
+    p.learned_prior._snr_model._knee[0] = 6.0  # only the rung-0 floor learned
+    p.learned_prior._snr_model._count[0] = 12.0
+    p.leading.state.current_mcs = 5
+    dec = None
+    for i in range(12):  # steady SNR fade, NO loss
+        dec = p.tick(_sig_snr(34.0 - i, ts=1.0 + 0.1 * i))
+    assert dec.mcs == 5
+    p.close()
 
 
 def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
@@ -182,23 +177,23 @@ def test_reset_for_new_session_resets_selector_keeps_prior(tmp_path):
     prior_before = p.learned_prior
     # Simulate a session that climbed + accumulated hysteresis state.
     p.leading.state.current_mcs = 5
-    p._cold_started = True
     p._starvation_count = 4
     p._snr_demote_count = 2
     p._predict_demote_count = 5
+    p._windows_since_demote = 0
     p._ticks_at_mcs = 7
-    p.leading._promote_clean = 3
+    p.leading._clean_dwell = 3
 
     p.reset_for_new_session()
 
     assert p.leading.state.current_mcs == 1  # back to the boot MCS
-    assert p._cold_started is False  # warm-start will re-run
     assert p._starvation_count == 0
     assert p._snr_demote_count == 0
     assert p._predict_demote_count == 0
     assert p._ticks_at_mcs == 0
-    assert p.leading._promote_clean == 0
+    assert p.leading._clean_dwell == 0
     assert p.learned_prior is prior_before  # persistent knees preserved
+    assert p._windows_since_demote == p.cfg.selector.demote_cooldown_windows
 
 
 # ── SNR-knee promote/demote hysteresis (the MCS-stuck-at-4 field bug) ─────────
@@ -221,7 +216,7 @@ def _probe_snapshot(viable_mcs, *, per=0.0, age_ms=0.0):
 def _settle_snr_knee(policy, rung, snr, clean=True, n=12):
     for _ in range(n):
         policy.learned_prior.ingest(
-            rssi=None, snr=snr, operating_mcs=rung, operating_clean=clean, settled=True
+            snr=snr, operating_mcs=rung, operating_clean=clean, settled=True
         )
 
 
@@ -231,24 +226,30 @@ def _sig_snr(snr, ts):
     )
 
 
-def test_snr_knee_hysteresis_unsticks_stuck_promote(tmp_path):
+def test_cold_knee_rung_explores_after_dwell(tmp_path):
+    """A rung with only clean observations stays cold (no failure knee planted),
+    so the explore route (route 3) promotes after the dwell period.
+
+    _settle_snr_knee uses clean=True, so KneeModel never plants a failure knee
+    → knee[5] stays None → target_confident=False. Route 3 (explore) fires
+    once after promote_dwell_ticks clean ticks, regardless of margin."""
     prof = _profile()
-    p = Policy(_cfg(tmp_path, min_samples=3), prof, probe_status=lambda: _probe_snapshot(5))
-    _settle_snr_knee(p, 4, 34.0)  # knee[4] ~34
-    _settle_snr_knee(p, 5, 36.0)  # knee[5] ~36 (the wall)
+    p = Policy(_cfg(tmp_path, min_samples=3), prof)
+    _settle_snr_knee(p, 4, 34.0)
+    _settle_snr_knee(p, 5, 36.0)
     p.leading.state.current_mcs = 4
     dec = None
     ts = 1.0
-    for _ in range(10):  # > promote_debounce_windows
-        dec = p.tick(_sig_snr(35.6, ts))  # 0.4 dB below knee[5]: strict locks
+    for _ in range(35):  # 35 > promote_dwell_ticks (30)
+        dec = p.tick(_sig_snr(35.6, ts))
         ts += 1.0
-    assert dec.mcs == 5  # margin clears the knife-edge veto
+    assert dec.mcs == 5  # explore_promote (cold rung -> route 3)
     p.close()
 
 
 def test_snr_knee_hysteresis_holds_no_flap(tmp_path):
     prof = _profile()
-    p = Policy(_cfg(tmp_path, min_samples=3), prof, probe_status=lambda: _probe_snapshot(5))
+    p = Policy(_cfg(tmp_path, min_samples=3), prof)
     _settle_snr_knee(p, 4, 34.0)
     _settle_snr_knee(p, 5, 36.0)
     p.leading.state.current_mcs = 5  # already climbed onto the rung
@@ -265,7 +266,7 @@ def test_snr_knee_proactive_demote_still_fires_clearly_below(tmp_path):
     # The demote margin must not disable the proactive SNR-demote: a clear fade
     # (well past knee - demote_margin) still steps down ahead of loss.
     prof = _profile()
-    p = Policy(_cfg(tmp_path, min_samples=3), prof, probe_status=lambda: _probe_snapshot(5))
+    p = Policy(_cfg(tmp_path, min_samples=3), prof)
     # Direct-set: plant confident SNR knees for rungs 3, 4, 5
     p.learned_prior._snr_model._knee[3] = 30.0
     p.learned_prior._snr_model._count[3] = 12.0
@@ -299,6 +300,50 @@ def test_bind_learned_prior_rekeys(tmp_path):
     assert p.learned_prior is same
 
 
+def test_predictive_demote_paced_by_cooldown(tmp_path):
+    prof = _profile()
+    p = Policy(
+        _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=1),
+        prof,
+    )
+    for rung in (1, 2, 3, 4, 5):  # every stepped-through rung confidently unviable
+        p.learned_prior._snr_model._knee[rung] = 40.0
+        p.learned_prior._snr_model._count[rung] = 12.0
+    p.leading.state.current_mcs = 5
+    p.cfg.selector.demote_cooldown_windows = 3
+    p.tick(_sig_snr(36.0, ts=1.0))  # slope baseline
+    seq = []
+    ts = 1.1
+    for _ in range(9):  # sustained deep fade well below the knees
+        seq.append(p.tick(_sig_snr(36.0 - (ts * 5), ts=ts)).mcs)
+        ts += 0.1
+    p.close()
+    assert all(0 <= a - b <= 1 for a, b in zip(seq, seq[1:]))  # single-rung steps only
+    assert seq[0] == 4  # one step on the first confident fade tick
+    assert seq[1] == 4 and seq[2] == 4  # frozen during cooldown (windows 1+2 of 3)
+    assert seq[3] == 3  # steps again after cooldown clears
+
+
+def test_snr_demote_steps_one_rung_and_is_paced(tmp_path):
+    prof = _profile()
+    p = Policy(_cfg(tmp_path, min_samples=3), prof)
+    p.learned_prior._snr_model._knee[5] = 36.0
+    p.learned_prior._snr_model._count[5] = 12.0
+    p.learned_prior._snr_model._knee[4] = 34.0
+    p.learned_prior._snr_model._count[4] = 12.0
+    p.leading.state.current_mcs = 5
+    p.cfg.selector.demote_cooldown_windows = 3
+    seq = []
+    ts = 1.0
+    for _ in range(9):
+        seq.append(p.tick(_sig_snr(33.0, ts)).mcs)  # 3 dB below knee[5] -> unviable
+        ts += 1.0
+    p.close()
+    # snr_demote_debounce=2 -> first step at the 2nd unviable tick, then paced by cooldown.
+    assert seq[1] == 4  # one rung, not a jump to snr_ceiling
+    assert 4 in seq and min(seq) >= 2  # gradual, never slammed to 0
+
+
 def test_bind_learned_prior_keys_by_adapter_and_width(tmp_path):
     from fpvdgs.dynlink.flightlog import FlightLogConfig
     from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
@@ -312,7 +357,7 @@ def test_bind_learned_prior_keys_by_adapter_and_width(tmp_path):
 
     p.bind_learned_prior("ABC123", 10)
     assert p.learned_prior.key == "ABC123__bw10"
-    p.learned_prior.ingest(rssi=-60.0, operating_mcs=4, operating_clean=True, settled=True)
+    p.learned_prior.ingest(snr=22.0, operating_mcs=4, operating_clean=True, settled=True)
     p.learned_prior.flush()
     assert (tmp_path / "ABC123__bw10.json").exists()
 
@@ -324,4 +369,153 @@ def test_bind_learned_prior_keys_by_adapter_and_width(tmp_path):
     same = p.learned_prior
     p.bind_learned_prior("ABC123", 20)
     assert p.learned_prior is same
+    p.close()
+
+
+def test_no_two_demote_paths_stack_in_same_tick(tmp_path):
+    """Both snr_demote and reactive loss are active in the SAME tick; the
+    current_mcs == start_mcs guard inside snr_demote and select() prevents
+    them from stacking — exactly one rung is stepped, not two.
+
+    Setup: snr_demote reaches its debounce count on tick 2 (fires, 5→4).
+    Simultaneously, residual_loss_w (0.10) exceeds video_demote_per (0.05),
+    so reactive loss also wants to fire in the same tick.  Without the guard,
+    select() would step 4→3 for a net drop of 2; with the guard,
+    self.leading.state.current_mcs is already 4 != start_mcs (5), so
+    can_demote=False and loss is suppressed.  The decision reason names
+    snr_demote (not loss) as the sole cause.
+    """
+    prof = _profile()
+    p = Policy(_cfg(tmp_path, min_samples=3), prof)
+
+    # Plant a confident SNR knee for rung 5: snr_rung_unviable(5, 33.0, margin=1.5)
+    # is True because 33 dB < knee(36) - margin(1.5) = 34.5 dB.
+    p.learned_prior._snr_model._knee[5] = 36.0
+    p.learned_prior._snr_model._count[5] = 12.0
+    p.leading.state.current_mcs = 5
+
+    # Tick 1: SNR unviable → snr_demote_count reaches 1 (< debounce 2); no loss.
+    p.tick(
+        Signals(
+            rssi=None,
+            snr=33.0,
+            residual_loss_w=0.0,
+            fec_work=0.0,
+            link_starved_w=False,
+            timestamp=1.0,
+        )
+    )
+    assert p.leading.state.current_mcs == 5  # no demote yet
+
+    # Tick 2: both demote paths active simultaneously.
+    #   snr_demote: _snr_demote_count reaches 2 == snr_demote_debounce → fires (5→4),
+    #               setting current_mcs=4 BEFORE select() is called.
+    #   reactive loss: residual_loss_w=0.10 >= video_demote_per=0.05 → loss_demote=True.
+    #   Guard: select() receives can_demote = cooldown_ok AND (current_mcs==start_mcs)
+    #          = True AND (4==5) = False → reactive loss is blocked.
+    # Without the guard the net drop would be 2 (5→4→3); with it, exactly 1 (5→4).
+    dec = p.tick(
+        Signals(
+            rssi=None,
+            snr=33.0,
+            residual_loss_w=0.10,
+            fec_work=0.0,
+            link_starved_w=False,
+            timestamp=2.0,
+        )
+    )
+    assert dec.mcs == 4, f"expected one step (5→4), got {dec.mcs}"
+    assert "snr_demote" in dec.reason  # confirms snr_demote fired; no loss reason appended
+    p.close()
+
+
+def test_explore_flap_teaches_knee_then_blocks_retry(tmp_path):
+    """Explore promote -> steady-SNR flap -> knee planted for the target ->
+    subsequent promote requires headroom (route 3 self-converts to route 2)."""
+    cfg = PolicyConfig()
+    cfg.selector.max_mcs = 2  # cap so clean ticks don't keep climbing above 2
+    cfg.learned_prior.min_samples = 1.0
+    cfg.learned_prior.recency_decay = 1.0  # deterministic: no confidence fade in-test
+    cfg.learned_prior.persist_dir = str(tmp_path)
+    cfg.flightlog.enabled = False
+    p = Policy(cfg, "cardZ")
+    ts = 1_000_000.0
+
+    def tick(snr, snr_w=None, loss=0.0):
+        nonlocal ts
+        ts += 0.1
+        s = Signals()
+        s.timestamp = ts
+        s.snr = snr
+        s.snr_w = snr if snr_w is None else snr_w
+        s.residual_loss_w = loss
+        return p.tick(s)
+
+    # climb 1->2 via explore (cold knees), snr steady at 22
+    for _ in range(60):
+        tick(22.0)
+    assert p.leading.state.current_mcs == 2
+
+    # steady flap at 2 (loss with steady SNR while on trial)
+    tick(22.0, loss=0.2)
+    assert p.leading.state.current_mcs == 1
+    assert p.learned_prior.snr_knees_snapshot()[2] == 22.0
+
+    # rung 2 now confident; snr=18.0 is below BOTH the headroom boundary
+    # (knee+1.0 = 22.0+1.0 = 23.0) AND the snap-back threshold (22.0-3.0=19.0) => stays at 1
+    for _ in range(400):
+        tick(18.0)
+    assert p.leading.state.current_mcs == 1
+
+    # headroom appears: snr=26.0 >= promote boundary (knee+1.0 = 23.0) => knee_promote (or snap-back)
+    for _ in range(60):
+        tick(26.0)
+    assert p.leading.state.current_mcs == 2
+
+
+def test_planted_knee_deadband_blocks_then_headroom_promotes(tmp_path):
+    """A planted confident failure knee creates a promote dead-band: route 2
+    (knee_promote) requires SNR >= knee + snr_promote_margin_db.
+
+    Setup: knee[2]=20.0 planted via teach_failure; promote boundary = 20.0 + 1.0 = 21.0.
+    (a) snr=20.5 is inside the dead-band (< 21.0): target_confident=True and
+        target_blocked=True suppress both route 2 and route 3 → no promote.
+    (b) snr=21.5 >= 21.0: target_blocked=False → route 2 fires after the dwell.
+    """
+    cfg = PolicyConfig()
+    cfg.selector.max_mcs = 2  # cap so rung 2 is the only promote target
+    cfg.learned_prior.min_samples = 1.0
+    cfg.learned_prior.recency_decay = 1.0
+    cfg.learned_prior.persist_dir = str(tmp_path)
+    cfg.flightlog.enabled = False
+    p = Policy(cfg, "cardZ")
+
+    # Plant a confident failure knee for rung 2 at SNR=20 directly (no loss ticks;
+    # avoids any flap-damper charge on rung 2 that could interfere with section b).
+    p.learned_prior.teach_failure(2, 20.0)
+
+    ts = 1_000_000.0
+
+    def tick_snr(snr):
+        nonlocal ts
+        ts += 0.1
+        s = Signals()
+        s.timestamp = ts
+        s.snr = snr
+        s.snr_w = snr
+        return p.tick(s)
+
+    # (a) Dead-band: snr=20.5 < promote boundary (knee+1.0 = 21.0).
+    # target_confident=True (planted knee) and target_blocked=True → neither
+    # route 2 nor route 3 fires.
+    for _ in range(60):  # well past promote_dwell_ticks=30
+        tick_snr(20.5)
+    assert p.leading.state.current_mcs == 1
+
+    # (b) Headroom: snr=21.5 >= promote boundary (21.0) → target_blocked=False.
+    # Clean dwell >= promote_dwell_ticks already, so route 2 fires promptly.
+    for _ in range(5):
+        tick_snr(21.5)
+    assert p.leading.state.current_mcs == 2
+
     p.close()

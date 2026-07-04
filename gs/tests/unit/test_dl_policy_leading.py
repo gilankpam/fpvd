@@ -1,321 +1,375 @@
-"""Tests for the probe-driven LeadingSelector: probe-promote (climb one
-MCS step when the current+1 probe rung reads clean+fresh for
-promote_debounce_windows consecutive ticks) + reactive demote (Channel-B
-emergency loss/fec/starvation, or a video-PER breach)."""
+"""LeadingSelector — probe-less promote routes, failure classifier, damper."""
 
-from __future__ import annotations
+from dataclasses import replace
 
 import pytest
 
-from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
-from fpvdgs.dynlink.policy import (
-    LeadingSelector,
-    Policy,
-    PolicyConfig,
-    SelectorConfig,
-)
+from fpvdgs.dynlink.policy import LeadingSelector, SelectorConfig
 
-# Defaults below are deliberately friendly to testing — timing knobs are
-# small (<= the 1000 ms tick spacing the promote tests use) so the climb
-# isn't gated by the rate limiter. Where a test wants a specific timing
-# path it overrides explicitly.
+T0 = 1_000_000.0  # ms
+TICK = 100.0
 
 
-def _selector(
+def mk(**over):
+    return LeadingSelector(replace(SelectorConfig(), **over))
+
+
+def step(
+    s,
+    ts,
     *,
-    probe_viable_threshold: float = 0.99,
-    probe_freshness_ms: float = 500.0,
-    promote_debounce_windows: int = 3,
-    video_demote_per: float = 0.05,
-    emergency_fec_pressure: float = 0.80,
-    max_mcs: int = 7,
-    hold_modes_down_ms: int = 0,
-    min_between_changes_ms: int = 0,
-    starvation_windows: int = 5,
-) -> LeadingSelector:
-    return LeadingSelector(
-        SelectorConfig(
-            probe_viable_threshold=probe_viable_threshold,
-            probe_freshness_ms=probe_freshness_ms,
-            promote_debounce_windows=promote_debounce_windows,
-            video_demote_per=video_demote_per,
-            emergency_fec_pressure=emergency_fec_pressure,
-            max_mcs=max_mcs,
-            hold_modes_down_ms=hold_modes_down_ms,
-            min_between_changes_ms=min_between_changes_ms,
-            starvation_windows=starvation_windows,
-        )
-    )
-
-
-def _probe(viable_mcs, *, per=0.0, age_ms=0.0):
-    """Probe snapshot where every rung up to viable_mcs reads clean+fresh,
-    and rungs above it are cliffed (per=1.0)."""
-    mcs = {}
-    for m in range(0, 8):
-        p = per if m <= viable_mcs else 1.0
-        mcs[str(m)] = {"per": p, "rssi": -60, "snr": 20, "windows": 50, "ageMs": age_ms}
-    return {"running": True, "streams": 1, "mcs": mcs}
-
-
-def _select(s, *, probe=None, loss=0.0, loss_demote=False, fec=0.0, link_starved=False, ts_ms=0.0):
+    snr=30.0,
+    snr_w=None,
+    slope=0.0,
+    loss=0.0,
+    loss_demote=False,
+    confident=False,
+    blocked=False,
+    fec=0.0,
+    starved=False,
+    can_demote=True,
+):
     return s.select(
-        probe=probe if probe is not None else _probe(7),
+        snr_ewma=snr,
+        snr_w=snr if snr_w is None else snr_w,
+        slope=slope,
         loss_rate=loss,
         loss_demote=loss_demote,
+        target_confident=confident,
+        target_blocked=blocked,
         fec_pressure=fec,
-        link_starved=link_starved,
-        ts_ms=ts_ms,
+        link_starved=starved,
+        can_demote=can_demote,
+        ts_ms=ts,
     )
 
 
-def _drive_to_mcs_probe(s, target, max_ticks=400):
-    ts = 0.0
-    for _ in range(max_ticks):
-        ts += 1000.0
-        s.select(probe=_probe(7), loss_rate=0.0, fec_pressure=0.0, link_starved=False, ts_ms=ts)
-        if s.state.current_mcs >= target:
-            break
-    return s.state.current_mcs
+def climb_one(s, ts, *, snr=30.0, confident=False, blocked=False):
+    """Dwell clean until the selector takes one explore/knee promote; returns ts."""
+    start = s.state.current_mcs
+    for _ in range(200):
+        ts += TICK
+        step(s, ts, snr=snr, confident=confident, blocked=blocked)
+        if s.state.current_mcs != start:
+            return ts
+    raise AssertionError("selector never promoted")
 
 
-# ── Initial state ───────────────────────────────────────────────────────────
+# ---- promote routes ------------------------------------------------------
+
+
+def test_explore_promote_cold_target_after_dwell():
+    s = mk()
+    ts = T0
+    ts = climb_one(s, ts)  # 1 -> 2, cold target => explore route
+    assert s.state.current_mcs == 2
+    assert any("explore_promote" in r for r in s.reasons)
+
+
+def test_knee_promote_requires_headroom():
+    s = mk()
+    ts = T0
+    # confident target, blocked (snr below knee+margin) => never promotes
+    for _ in range(100):
+        ts += TICK
+        step(s, ts, confident=True, blocked=True)
+    assert s.state.current_mcs == 1
+    # headroom appears => knee_promote
+    ts = climb_one(s, ts, confident=True, blocked=False)
+    assert any("knee_promote" in r for r in s.reasons)
+
+
+def test_no_promote_while_snr_falling():
+    s = mk()
+    ts = T0
+    for _ in range(100):
+        ts += TICK
+        step(s, ts, slope=-0.2)  # falling hard: below promote_slope_min
+    assert s.state.current_mcs == 1
+
+
+def test_no_promote_without_snr():
+    s = mk()
+    ts = T0
+    for _ in range(100):
+        ts += TICK
+        s.select(
+            snr_ewma=None,
+            snr_w=None,
+            slope=0.0,
+            loss_rate=0.0,
+            loss_demote=False,
+            target_confident=False,
+            target_blocked=False,
+            fec_pressure=0.0,
+            link_starved=False,
+            can_demote=True,
+            ts_ms=ts,
+        )
+    assert s.state.current_mcs == 1
+
+
+# ---- failure classifier --------------------------------------------------
+
+
+def test_trial_flap_charges_damper_and_reports_fail():
+    s = mk()
+    ts = climb_one(s, T0)  # now at 2, on trial
+    ts += TICK
+    step(s, ts, loss=0.2, loss_demote=True)  # steady SNR, on trial => flap
+    assert s.state.current_mcs == 1
+    assert s.last_fail == (2, "flap", 30.0)
+    assert s._flap_level.get(2) == 1
+    assert any("class=flap" in r for r in s.reasons)
+
+
+def test_fade_teaches_raw_snr_and_never_charges():
+    s = mk()
+    ts = climb_one(s, T0)  # at 2, on trial — fade wins over trial
+    ts += TICK
+    step(s, ts, snr=25.0, snr_w=12.0, loss=0.3, loss_demote=True)  # collapse >= 4 dB
+    assert s.last_fail == (2, "fade", 12.0)  # raw snr_w, NOT the lagging EWMA
+    assert s._flap_level.get(2) is None
+    assert any("class=fade" in r for r in s.reasons)
+
+
+def test_settled_burst_charges_nothing_teaches_nothing():
+    s = mk(max_mcs=2)  # cap so 150 clean ticks don't keep climbing
+    ts = climb_one(s, T0)  # at 2
+    for _ in range(150):  # outlive the 10 s trial window
+        ts += TICK
+        step(s, ts)
+    ts += TICK
+    step(s, ts, loss=0.2, loss_demote=True)  # steady SNR, settled => burst
+    assert s.state.current_mcs == 1
+    assert s.last_fail is None
+    assert s._flap_level.get(2) is None
+    assert any("class=burst" in r for r in s.reasons)
+
+
+def test_cascade_steps_never_charge_damper():
+    s = mk(max_mcs=4)  # cap so 150 clean ticks don't keep climbing above 4
+    ts = T0
+    for rung in (2, 3, 4):
+        ts = climb_one(s, ts)
+    for _ in range(150):  # settle at 4 (out of trial)
+        ts += TICK
+        step(s, ts)
+    # steady-SNR burst cascades 4->3->2->1 (cooldown handled by caller: can_demote=True)
+    for _ in range(3):
+        ts += TICK
+        step(s, ts, loss=0.3, loss_demote=True)
+    assert s.state.current_mcs == 1
+    assert s._flap_level == {}
+
+
+# ---- damper recovery -----------------------------------------------------
+
+
+def _flap_at(s, ts, rung_from):
+    """Drive one steady-SNR trial flap from rung_from (must be current+1)."""
+    ts = climb_one(s, ts)
+    assert s.state.current_mcs == rung_from
+    ts += TICK
+    step(s, ts, loss=0.2, loss_demote=True)
+    return ts
+
+
+def test_backoff_escalates_and_suppresses():
+    s = mk()
+    ts = _flap_at(s, T0, 2)  # level 1 => 2 s suppression on rung 2
+    ts += TICK
+    step(s, ts)
+    assert s._promote_suppressed is True
+
+
+def test_snr_release_lifts_suppression_early():
+    s = mk()
+    ts = _flap_at(s, T0, 2)  # flapped at snr_ewma=30
+    ts += TICK
+    step(s, ts, snr=33.5)  # >= 30 + flap_snr_release_db (3.0)
+    assert s._promote_suppressed is False
+
+
+def test_time_decay_forgives_levels():
+    s = mk(flap_decay_ms=1000)  # fast decay for the test
+    ts = _flap_at(s, T0, 2)
+    assert s._effective_flap_level(2, ts) == 1
+    assert s._effective_flap_level(2, ts + 1000.0) == 0
+
+
+def test_clean_dwell_on_rung_clears_damper():
+    s = mk()
+    ts = _flap_at(s, T0, 2)
+    # wait out suppression (level 1 = 2 s), re-promote, dwell clean 3 s on rung 2
+    ts += 2100.0
+    ts = climb_one(s, ts)
+    assert s.state.current_mcs == 2
+    for _ in range(35):
+        ts += TICK
+        step(s, ts)
+    assert s._flap_level.get(2) is None
+
+
+# ---- snap-back -----------------------------------------------------------
+
+
+def _confirm_ladder_to_5(s, ts):
+    for _ in range(4):  # 1->2->3->4->5
+        ts = climb_one(s, ts)
+    for _ in range(35):  # confirm rung 5 (>= promote_dwell_ticks clean)
+        ts += TICK
+        step(s, ts)
+    assert s.state.current_mcs == 5
+    return ts
+
+
+def test_snapback_recovers_fast_after_fade():
+    s = mk(max_mcs=5)
+    ts = _confirm_ladder_to_5(s, T0)
+    # fade: SNR collapses, cascade to 1
+    for _ in range(4):
+        ts += TICK
+        step(s, ts, snr=25.0, snr_w=10.0, loss=0.3, loss_demote=True)
+    assert s.state.current_mcs == 1
+    # SNR recovers near the confirmed operating point => snap-back, no dwell
+    t_rec = ts
+    while s.state.current_mcs < 5:
+        ts += TICK
+        step(s, ts, snr=29.0)
+        assert ts - t_rec < 3000.0, "snap-back too slow"
+    assert any("snapback_promote" in r for r in s.reasons)
+
+
+def test_snapback_respects_damper():
+    # trial_window_ms=3000 so 35 clean ticks (3500ms) outlive the trial window
+    s = mk(max_mcs=3, trial_window_ms=3000)
+    ts = T0
+    # climb to 3 and confirm
+    for _ in range(2):
+        ts = climb_one(s, ts)
+    for _ in range(35):
+        ts += TICK
+        step(s, ts)
+    # steady-SNR burst at 3 (settled) -> at 2, no charge
+    ts += TICK
+    step(s, ts, loss=0.2, loss_demote=True)  # burst (settled) -> at 2, no charge
+    ts = climb_one(s, ts)  # re-promote to 3 (on trial)
+    ts += TICK
+    step(s, ts, loss=0.2, loss_demote=True)  # trial flap -> charge rung 3
+    assert s._flap_level.get(3) == 1
+    # snap-back target is 3 (confirmed) but rung 3 is suppressed => no promote yet
+    ts += TICK
+    step(s, ts)
+    assert s.state.current_mcs == 2
+    assert s._promote_suppressed is True
+
+
+def test_snapback_needs_recovered_snr_and_rising_slope():
+    s = mk(max_mcs=5)
+    ts = _confirm_ladder_to_5(s, T0)  # confirmed_snr[5] = 30
+    for _ in range(4):
+        ts += TICK
+        step(s, ts, snr=20.0, snr_w=10.0, loss=0.3, loss_demote=True)
+    assert s.state.current_mcs == 1
+    ts += TICK
+    step(s, ts, snr=20.0)  # 20 < 30 - 3 => no snap-back
+    assert s.state.current_mcs == 1
+    ts += 300.0
+    step(s, ts, snr=29.0, slope=-0.1)  # recovered but falling => no snap-back
+    assert s.state.current_mcs == 1
+
+
+def test_confirmation_expires():
+    s = mk(max_mcs=5, confirm_ttl_ms=1000)
+    ts = _confirm_ladder_to_5(s, T0)
+    for _ in range(4):
+        ts += TICK
+        step(s, ts, snr=25.0, snr_w=10.0, loss=0.3, loss_demote=True)
+    ts += 1500.0  # confirmation TTL lapsed
+    for _ in range(5):
+        ts += TICK
+        step(s, ts, snr=29.0)
+    # no snap-back: must ladder-climb (dwell) instead — still at 1 after 0.5 s
+    assert s.state.current_mcs == 1
+
+
+# ---- initial state ----------------------------------------------------------
 
 
 def test_starts_at_safe_default_mcs1():
-    s = _selector()
+    s = mk()
     assert s.state.current_mcs == 1
 
 
 def test_max_mcs_too_low_raises():
     with pytest.raises(ValueError, match="max_mcs"):
-        _selector(max_mcs=-1)
+        mk(max_mcs=-1)
 
 
-# ── Probe-driven promote ────────────────────────────────────────────────────
-
-
-def test_promotes_one_step_when_next_rung_clean_after_debounce():
-    s = _selector(
-        max_mcs=5, promote_debounce_windows=3, probe_viable_threshold=0.99, probe_freshness_ms=500
-    )
-    start = s.state.current_mcs
-    ts = 0.0
-    last = start
-    # need debounce windows of clean current+1, with rate limit satisfied
-    for _ in range(8):
-        ts += 1000.0
-        mcs, _ = _select(s, probe=_probe(5), ts_ms=ts)
-        last = mcs
-    assert last == start + 1 or last > start  # climbed at least one rung
-
-
-def test_does_not_promote_on_single_clean_blip():
-    s = _selector(max_mcs=5, promote_debounce_windows=3)
-    start = s.state.current_mcs
-    mcs, changed = _select(s, probe=_probe(5), ts_ms=1000.0)  # 1 window only
-    assert mcs == start and not changed
-
-
-def test_stops_climbing_at_ceiling():
-    s = _selector(max_mcs=3, promote_debounce_windows=1)
-    ts = 0.0
-    for _ in range(20):
-        ts += 1000.0
-        mcs, _ = _select(s, probe=_probe(3), ts_ms=ts)
-    assert s.state.current_mcs == 3  # cliffed above 3, won't exceed
-
-
-def test_no_promote_when_probe_stale():
-    s = _selector(max_mcs=5, promote_debounce_windows=1, probe_freshness_ms=500)
-    start = s.state.current_mcs
-    ts = 0.0
-    for _ in range(5):
-        ts += 1000.0
-        mcs, _ = _select(s, probe=_probe(5, age_ms=999.0), ts_ms=ts)  # stale
-    assert s.state.current_mcs == start
-
-
-def test_no_promote_when_next_rung_cliffed():
-    """current+1 reads per=1.0 (cliffed) — debounce never accumulates."""
-    s = _selector(max_mcs=7, promote_debounce_windows=1)
-    start = s.state.current_mcs
-    ts = 0.0
-    for _ in range(10):
-        ts += 1000.0
-        _select(s, probe=_probe(start), ts_ms=ts)  # only up to start is clean
-    assert s.state.current_mcs == start
-
-
-def test_no_promote_without_probe():
-    """No probe snapshot (None) → can't promote, but doesn't error."""
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    start = s.state.current_mcs
-    ts = 0.0
-    for _ in range(5):
-        ts += 1000.0
-        mcs, changed = s.select(
-            probe=None,
-            loss_rate=0.0,
-            fec_pressure=0.0,
-            link_starved=False,
-            ts_ms=ts,
-        )
-    assert s.state.current_mcs == start
-
-
-# ── Reactive demote: Channel-B emergency ────────────────────────────────────
-
-
-def test_loss_demote_one_step():
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
-    pre = s.state.current_mcs
-    mcs, changed = _select(s, loss=0.06, loss_demote=True, ts_ms=99999.0)
-    assert changed and mcs == pre - 1
+# ---- emergency / reactive demote --------------------------------------------
 
 
 def test_emergency_fec_pressure_demotes_one_step():
-    s = _selector(emergency_fec_pressure=0.80, max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
+    s = mk()
+    ts = climb_one(s, T0)  # 1 -> 2
     pre = s.state.current_mcs
-    mcs, changed = _select(s, fec=0.85, ts_ms=99999.0)
+    ts += TICK
+    mcs, changed = step(s, ts, fec=0.85)
     assert changed and mcs == pre - 1
+    assert any("emergency" in r for r in s.reasons)
 
 
 def test_emergency_link_starved_demotes_one_step():
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
+    s = mk()
+    ts = climb_one(s, T0)  # 1 -> 2
     pre = s.state.current_mcs
-    mcs, changed = _select(s, link_starved=True, ts_ms=99999.0)
+    ts += TICK
+    mcs, changed = step(s, ts, starved=True)
     assert changed and mcs == pre - 1
-
-
-def test_loss_not_demoted_when_loss_demote_false():
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
-    pre = s.state.current_mcs
-    mcs, changed = _select(s, loss=0.06, loss_demote=False, ts_ms=99999.0)
-    assert not changed and mcs == pre
+    assert any("emergency" in r for r in s.reasons)
 
 
 def test_emergency_at_mcs0_cannot_force_below():
     """Already at MCS 0 — emergency has nowhere to go, no change."""
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    ts = 0.0
+    s = mk()
+    ts = T0
     while s.state.current_mcs > 0:
-        ts += 1000.0
-        _select(s, link_starved=True, ts_ms=ts)
-    ts += 1000.0
-    mcs, changed = _select(s, link_starved=True, ts_ms=ts)
+        ts += TICK
+        step(s, ts, starved=True)
+    ts += TICK
+    mcs, changed = step(s, ts, starved=True)
     assert not changed
     assert mcs == 0
 
 
-# ── Reactive demote: video-PER breach ───────────────────────────────────────
+def test_loss_demote_blocked_when_cooldown_not_elapsed():
+    s = mk()
+    ts = climb_one(s, T0)  # 1 -> 2
+    pre = s.state.current_mcs
+    ts += TICK
+    mcs, changed = step(s, ts, loss=0.06, loss_demote=True, can_demote=False)
+    assert mcs == pre and changed is False
 
 
-def test_loss_demote_reason_is_video_per_not_emergency():
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
-    _select(s, loss=0.07, loss_demote=True, ts_ms=99999.0)
-    assert any("video_per_demote" in r for r in s._reasons)
-    assert not any("emergency" in r for r in s._reasons)
+def test_emergency_blocked_when_cooldown_not_elapsed():
+    s = mk()
+    ts = climb_one(s, T0)  # 1 -> 2
+    pre = s.state.current_mcs
+    ts += TICK
+    mcs, changed = step(s, ts, fec=0.9, can_demote=False)
+    assert mcs == pre and changed is False
 
 
-def test_strong_rssi_does_not_raise_mcs_without_probe_or_prior(tmp_path):
-    """The RSSI cold-start seed was removed: a strong RSSI alone must NOT
-    raise the operating MCS. With no probe data (select() cannot promote on
-    its own) and a cold prior (empty persist_dir → no warm-start seed), the
-    first tick stays at the boot MCS (1); in production the probe climbs from
-    there."""
-    from fpvdgs.dynlink.signals import Signals
-
-    cfg = PolicyConfig(learned_prior=LearnedPriorConfig(persist_dir=str(tmp_path)))
-    # No probe_status → selector can never promote; cold prior (empty dir) →
-    # no warm-start seed. Any MCS > boot would have to come from the removed
-    # RSSI cold-start.
-    policy = Policy(
-        cfg, "test-cold-prior"
-    )  # cold: persist_dir is an empty tmp_path, so no warm-start seed
-
-    strong_signals = Signals(
-        rssi=-50.0,
-        rssi_min_w=-50.0,
-        rssi_max_w=-50.0,
-        residual_loss_w=0.0,
-        fec_work=0.0,
-        timestamp=1.0,
-        link_starved_w=False,
-    )
-    decision = policy.tick(strong_signals)
-    assert decision.mcs == 1, (
-        f"strong RSSI must not raise MCS without probe/prior data, " f"got {decision.mcs}"
-    )
-
-
-def test_loss_demote_jumps_to_target_in_one_move():
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
-    mcs, changed = s.select(
-        probe=_probe(7),
-        loss_rate=0.3,
-        loss_demote=True,
-        loss_demote_target=2,
-        fec_pressure=0.0,
-        link_starved=False,
-        ts_ms=99999.0,
-    )
-    assert changed and mcs == 2  # 5 -> 2 in one commit, not 5 -> 4
-
-
-def test_loss_demote_target_at_or_above_current_does_not_demote():
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
-    mcs, changed = s.select(
-        probe=_probe(7),
-        loss_rate=0.3,
-        loss_demote=True,
-        loss_demote_target=5,
-        fec_pressure=0.0,
-        link_starved=False,
-        ts_ms=99999.0,
-    )
-    assert not changed and mcs == 5  # SNR says 5 is fine -> fluke loss, no demote
-
-
-def test_loss_demote_cold_target_falls_back_to_one_step():
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 5)
-    mcs, changed = s.select(
-        probe=_probe(7),
-        loss_rate=0.3,
-        loss_demote=True,
-        loss_demote_target=None,
-        fec_pressure=0.0,
-        link_starved=False,
-        ts_ms=99999.0,
-    )
-    assert changed and mcs == 4  # cold SNR knee -> today's one-step demote
-
-
-# ── SNR ceiling as operating ceiling: promote cap ──────────────────────────
-
-
-def test_promote_proceeds_despite_blocked_flag():
-    # Fix A: the live probe is authoritative for promotes. A clean+fresh+debounced
-    # current+1 rung promotes even when the SNR knee says promote_blocked=True
-    # (the flag is advisory only, kept for the log). debounce=1 -> one clean select
-    # commits; assert the single promote 3->4 rather than looping (a fully-clean
-    # _probe(7) would otherwise keep climbing).
-    s = _selector(max_mcs=5, promote_debounce_windows=1)
-    _drive_to_mcs_probe(s, 3)  # reach MCS3
-    mcs, changed = s.select(
-        probe=_probe(7),
-        loss_rate=0.0,
-        fec_pressure=0.0,
-        link_starved=False,
-        ts_ms=600000.0,  # well past the drive's timestamps -> rate limit clear
-        promote_blocked=True,
-    )
-    assert changed and mcs == 4  # promoted 3->4 despite promote_blocked=True
+def test_emergency_demote_does_not_strike():
+    """Emergency demotes (fec/starved) must not charge the flap-damper
+    and must not set last_fail — they are infrastructure events, not
+    promote-failure evidence."""
+    s = mk()
+    ts = climb_one(s, T0)  # 1 -> 2
+    pre = s.state.current_mcs
+    ts += TICK
+    mcs, changed = step(s, ts, fec=0.95)
+    assert changed and mcs == pre - 1
+    assert s._flap_level == {}  # emergency never charges the damper
+    assert s.last_fail is None  # emergency never teaches a failure

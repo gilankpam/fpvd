@@ -20,20 +20,18 @@ def test_selector_block_overrides_defaults():
     cfg = build_policy_config(
         _block(
             selector={
-                "probeViableThreshold": 0.95,
-                "promoteDebounceWindows": 2,
                 "holdModesDownMs": 1000,
                 "minBetweenChangesMs": 100,
                 "starvationWindows": 9,
+                "demoteCooldownWindows": 5,
             }
         )
     )
     s = cfg.selector
-    assert s.probe_viable_threshold == 0.95
-    assert s.promote_debounce_windows == 2
     assert s.hold_modes_down_ms == 1000
     assert s.min_between_changes_ms == 100
     assert s.starvation_windows == 9
+    assert s.demote_cooldown_windows == 5
     # unspecified selector knobs keep their defaults
     assert s.video_demote_per == 0.05
 
@@ -41,10 +39,9 @@ def test_selector_block_overrides_defaults():
 def test_selector_defaults_when_absent():
     cfg = build_policy_config(_block())
     s = cfg.selector
-    assert s.probe_viable_threshold == 0.99
-    assert s.probe_freshness_ms == 500.0
     assert s.hold_modes_down_ms == 2000
     assert s.starvation_windows == 5
+    assert s.demote_cooldown_windows == 3
     # SNR-knee hysteresis dead-band defaults (demote > promote)
     assert s.snr_promote_margin_db == 1.0
     assert s.snr_demote_margin_db == 1.5
@@ -104,12 +101,11 @@ def test_flightlog_reads_only_enabled():
     assert cfg.flightlog.dir == "/media/dvr/log/dynamic-link/"  # frozen default
 
 
-def test_rssi_norm_defaults_to_identity():
-    # The operator config knob for RSSI-norm is retired; the aggregator starts
-    # in identity and the controller binds the drone curve at the connect event.
+def test_aggregator_has_no_rssi_norm():
+    # rssi_norm and the normalization plumbing have been removed; the aggregator
+    # uses raw SNR as the control axis with no txpower-curve offset.
     agg = build_aggregator(_block())
-    assert agg.rssi_norm.enabled is False
-    assert agg.rssi_norm.tx_power_dbm_by_mcs == ()
+    assert not hasattr(agg, "rssi_norm")
 
 
 def test_make_dl_snapshot_uses_drone_host():
@@ -166,3 +162,29 @@ def test_link_width_maps_into_policy_config():
 
 def test_link_width_defaults_to_20_when_absent():
     assert build_policy_config(_block()).link_width == 20
+
+
+def test_selector_new_knobs_map_and_probe_knobs_gone():
+    block = {
+        "selector": {
+            "trialWindowMs": 5000,
+            "promoteDwellTicks": 10,
+            "promoteSlopeMin": -0.1,
+            "collapseDeltaDb": 5.0,
+            "snapbackRecoverMarginDb": 2.0,
+            "confirmTtlMs": 30000,
+            "flapSnrReleaseDb": 4.0,
+            "flapDecayMs": 120000,
+        }
+    }
+    cfg = build_policy_config(block)
+    sel = cfg.selector
+    assert sel.trial_window_ms == 5000
+    assert sel.promote_dwell_ticks == 10
+    assert sel.promote_slope_min == -0.1
+    assert sel.collapse_delta_db == 5.0
+    assert sel.snapback_recover_margin_db == 2.0
+    assert sel.confirm_ttl_ms == 30000
+    assert sel.flap_snr_release_db == 4.0
+    assert sel.flap_decay_ms == 120000
+    assert not hasattr(sel, "probe_viable_threshold")

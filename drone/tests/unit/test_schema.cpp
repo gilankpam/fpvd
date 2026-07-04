@@ -25,7 +25,8 @@ TEST_CASE("schema: round-trip a minimal config through json") {
             "applyStaggerMs":50,"applySubPaceMs":5,
             "roiQp":{"thresholdKbps":6000,"lowAnchorKbps":2000,
                      "floor":-24,"step":3},
-            "compute":{"minBitrateKbps":1000,"maxBitrateKbps":24000,"baseRedundancyRatio":0.5,"blocksPerFrame":2.0,"kMin":2,"kMax":50}
+            "compute":{"minBitrateKbps":1000,"maxBitrateKbps":24000,"baseRedundancyRatio":0.5,"blocksPerFrame":2.0,"kMin":2,"kMax":50},
+            "probe":{"enabled":false}
         },
         "services":{}
     })");
@@ -130,6 +131,7 @@ TEST_CASE("schema: dynamicLink defaults match spec") {
     CHECK(c.dynamicLink.roiQp.lowAnchorKbps == 2000);
     CHECK(c.dynamicLink.roiQp.floor == -24);
     CHECK(c.dynamicLink.roiQp.step == 3);
+    CHECK(c.dynamicLink.probe.enabled == false);
 }
 
 TEST_CASE("schema: beamforming defaults and round-trip") {

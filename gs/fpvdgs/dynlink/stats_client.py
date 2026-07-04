@@ -52,10 +52,12 @@ class RxAnt:
     snr_min: int
     snr_avg: int
     snr_max: int
-    # EVM% (radiotap lock_quality, 0..100, higher = better). Per spatial
-    # STREAM, not per antenna: -1 = absent/unmeasured (e.g. the 2nd-stream
-    # sentinel slot on a single-stream link). Default -1 for older wfb_rx
-    # feeds that don't append the EVM fields.
+    # |EVM| in dB magnitude (radiotap lock_quality, uncapped, higher = better).
+    # Our wfb-ng now emits the dB magnitude on both ath9k and Realtek; older
+    # builds emitted EVM% (0..100). Per spatial STREAM, not per antenna:
+    # -1 = absent/unmeasured (e.g. the 2nd-stream sentinel slot on a
+    # single-stream link). Default -1 for older wfb_rx feeds that don't
+    # append the EVM fields.
     evm_min: int = -1
     evm_avg: int = -1
     evm_max: int = -1

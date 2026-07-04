@@ -46,3 +46,32 @@ def test_selector_has_no_loss_windows_knob():
     with pytest.raises(TypeError):
         SelectorConfig(loss_windows=2)
     assert not hasattr(SelectorConfig(), "loss_windows")
+
+
+def test_sustained_loss_descends_one_rung_per_cooldown(tmp_path):
+    p = Policy(_cfg(tmp_path, video_demote_per=0.05, demote_cooldown_windows=3), "m8812eu2")
+    p.leading.state.current_mcs = 5
+    seq = []
+    ts = 1.0
+    for _ in range(12):  # sustained loss
+        seq.append(p.tick(_sig(0.30, ts=ts)).mcs)
+        ts += 1.0
+    p.close()
+    # First breach demotes immediately; then one rung per 3 windows. No jump to 0.
+    assert seq[0] == 4
+    assert seq[1] == 4 and seq[2] == 4  # frozen during cooldown
+    assert seq[3] == 3  # next step after cooldown
+    assert min(seq) >= 5 - (12 // 3)  # never cascades to 0 in one go
+
+
+def test_clean_window_arrests_descent(tmp_path):
+    p = Policy(_cfg(tmp_path, video_demote_per=0.05, demote_cooldown_windows=3), "m8812eu2")
+    p.leading.state.current_mcs = 5
+    ts = 1.0
+    p.tick(_sig(0.30, ts=ts))  # 5 -> 4
+    ts += 1.0
+    for _ in range(8):  # rung 4 now clean -> descent must stop at 4
+        last = p.tick(_sig(0.0, ts=ts)).mcs
+        ts += 1.0
+    p.close()
+    assert last == 4

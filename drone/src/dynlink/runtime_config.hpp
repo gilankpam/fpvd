@@ -39,7 +39,8 @@ struct DlRuntimeConfig {
     // table. The radiotap MODULATION width is modulationWidth() of this, derived
     // at the controller (d.bandwidth); they differ only at 10 MHz.
     uint8_t linkWidthMhz{20};
-    uint16_t probeCtlPort{0}; // probe wfb_tx -C port; 0 disables probe retune
+    bool probeEnabled{false}; // dynamicLink.probe.enabled; gates children + airtime
+    uint16_t probeCtlPort{0}; // probe wfb_tx -C port; 0 when probe disabled
     int probeMcsCeiling{7};
     std::string iface;
 };

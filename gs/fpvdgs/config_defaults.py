@@ -21,14 +21,23 @@ def _dynamic_link_defaults() -> dict:
         "maxMcs": 5,
         "dronePort": 9999,
         "selector": {
-            "probeViableThreshold": sel.probe_viable_threshold,
-            "probeFreshnessMs": sel.probe_freshness_ms,
-            "promoteDebounceWindows": sel.promote_debounce_windows,
             "videoDemotePer": sel.video_demote_per,
             "emergencyFecPressure": sel.emergency_fec_pressure,
             "holdModesDownMs": sel.hold_modes_down_ms,
             "minBetweenChangesMs": sel.min_between_changes_ms,
             "starvationWindows": sel.starvation_windows,
+            "flapBaseBackoffMs": sel.flap_base_backoff_ms,
+            "flapBackoffMult": sel.flap_backoff_mult,
+            "flapBackoffCapMs": sel.flap_backoff_cap_ms,
+            "flapResetCleanDwellTicks": sel.flap_reset_clean_dwell_ticks,
+            "trialWindowMs": sel.trial_window_ms,
+            "promoteDwellTicks": sel.promote_dwell_ticks,
+            "promoteSlopeMin": sel.promote_slope_min,
+            "collapseDeltaDb": sel.collapse_delta_db,
+            "snapbackRecoverMarginDb": sel.snapback_recover_margin_db,
+            "confirmTtlMs": sel.confirm_ttl_ms,
+            "flapSnrReleaseDb": sel.flap_snr_release_db,
+            "flapDecayMs": sel.flap_decay_ms,
         },
         "smoothing": {
             "ewmaAlphaRssi": agg.ewma_alpha_rssi,
@@ -45,6 +54,9 @@ def _dynamic_link_defaults() -> dict:
             "recencyDecay": lp.recency_decay,
         },
         "flightlog": {"enabled": True},
+        # wfb_rx dynlink tap (2026-07-02 spec): enabled/port are render-
+        # affecting (wfb runner bounce on change); staleMs/captureRaw hot.
+        "tap": {"enabled": True, "port": 8110, "staleMs": 500, "captureRaw": False},
     }
 
 

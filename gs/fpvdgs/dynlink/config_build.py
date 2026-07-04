@@ -14,16 +14,13 @@ from __future__ import annotations
 from .flightlog import FlightLogConfig
 from .learned_prior import LearnedPriorConfig
 from .policy import PolicyConfig, SelectorConfig
-from .signals import RssiNormConfig, SignalAggregator
+from .signals import SignalAggregator
 
 
 def build_policy_config(block: dict) -> PolicyConfig:
     sel = block.get("selector", {}) or {}
     d = SelectorConfig()
     selector = SelectorConfig(
-        probe_viable_threshold=float(sel.get("probeViableThreshold", d.probe_viable_threshold)),
-        probe_freshness_ms=float(sel.get("probeFreshnessMs", d.probe_freshness_ms)),
-        promote_debounce_windows=int(sel.get("promoteDebounceWindows", d.promote_debounce_windows)),
         video_demote_per=float(sel.get("videoDemotePer", d.video_demote_per)),
         emergency_fec_pressure=float(sel.get("emergencyFecPressure", d.emergency_fec_pressure)),
         max_mcs=int(block.get("maxMcs", d.max_mcs)),
@@ -32,6 +29,23 @@ def build_policy_config(block: dict) -> PolicyConfig:
         starvation_windows=int(sel.get("starvationWindows", d.starvation_windows)),
         snr_promote_margin_db=float(sel.get("snrPromoteMarginDb", d.snr_promote_margin_db)),
         snr_demote_margin_db=float(sel.get("snrDemoteMarginDb", d.snr_demote_margin_db)),
+        demote_cooldown_windows=int(sel.get("demoteCooldownWindows", d.demote_cooldown_windows)),
+        flap_base_backoff_ms=int(sel.get("flapBaseBackoffMs", d.flap_base_backoff_ms)),
+        flap_backoff_mult=float(sel.get("flapBackoffMult", d.flap_backoff_mult)),
+        flap_backoff_cap_ms=int(sel.get("flapBackoffCapMs", d.flap_backoff_cap_ms)),
+        flap_reset_clean_dwell_ticks=int(
+            sel.get("flapResetCleanDwellTicks", d.flap_reset_clean_dwell_ticks)
+        ),
+        trial_window_ms=int(sel.get("trialWindowMs", d.trial_window_ms)),
+        promote_dwell_ticks=int(sel.get("promoteDwellTicks", d.promote_dwell_ticks)),
+        promote_slope_min=float(sel.get("promoteSlopeMin", d.promote_slope_min)),
+        collapse_delta_db=float(sel.get("collapseDeltaDb", d.collapse_delta_db)),
+        snapback_recover_margin_db=float(
+            sel.get("snapbackRecoverMarginDb", d.snapback_recover_margin_db)
+        ),
+        confirm_ttl_ms=int(sel.get("confirmTtlMs", d.confirm_ttl_ms)),
+        flap_snr_release_db=float(sel.get("flapSnrReleaseDb", d.flap_snr_release_db)),
+        flap_decay_ms=int(sel.get("flapDecayMs", d.flap_decay_ms)),
     )
     fl = block.get("flightlog", {}) or {}
     # flightlog internals are frozen — read only `enabled`.
@@ -64,9 +78,6 @@ def build_aggregator(block: dict) -> SignalAggregator:
         ewma_alpha_fec=float(s.get("ewmaAlphaFec", d.ewma_alpha_fec)),
         ewma_alpha_burst=float(s.get("ewmaAlphaBurst", d.ewma_alpha_burst)),
         starvation_threshold_pps=float(s.get("starvationThresholdPps", d.starvation_threshold_pps)),
-        rssi_norm=RssiNormConfig(
-            enabled=False
-        ),  # identity until the controller binds the drone curve
     )
 
 

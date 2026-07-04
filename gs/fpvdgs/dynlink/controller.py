@@ -18,20 +18,11 @@ from ..events import DRONE_CONNECTED, DRONE_DISCONNECTED
 from .config_build import build_aggregator, build_policy_config
 from .policy import Policy
 from .return_link import ReturnLink
-from .signals import RssiNormConfig
 from .stats_client import RxEvent, SessionEvent, StatsClient
+from .tap_client import TapProtocol
 from .wire import Encoder as WireEncoder
 
 log = logging.getLogger("fpvdgs.dynlink")
-
-
-def _valid_curve(curve) -> bool:
-    """A drone TX-power curve: a list/tuple of exactly 8 ints (not bools)."""
-    return (
-        isinstance(curve, (list, tuple))
-        and len(curve) == 8
-        and all(isinstance(v, int) and not isinstance(v, bool) for v in curve)
-    )
 
 
 class DynamicLinkController:
@@ -41,13 +32,11 @@ class DynamicLinkController:
         *,
         stats_endpoint="tcp://127.0.0.1:8103",
         stats_client_factory=StatsClient,
-        probe_status=None,
         bus=None,
     ):
         self._snapshot = dict(snapshot)
         self._stats_endpoint = stats_endpoint
         self._make_stats = stats_client_factory
-        self._probe_status = probe_status
         self._bus = bus
         self._policy = None
         self._aggregator = None
@@ -65,6 +54,7 @@ class DynamicLinkController:
             "lastEmitMs": None,
             "emitSeq": 0,
             "reason": "",
+            "tapActive": False,
         }
         if bus is not None:
             bus.subscribe(DRONE_CONNECTED, self._on_drone_connected)
@@ -141,7 +131,7 @@ class DynamicLinkController:
     async def _run(self):
         with self._lock:
             snap = dict(self._snapshot)
-        policy = Policy(build_policy_config(snap), probe_status=self._probe_status)
+        policy = Policy(build_policy_config(snap))
         with self._lock:
             self._policy = policy
         aggregator = build_aggregator(snap)
@@ -160,6 +150,72 @@ class DynamicLinkController:
         def _is_video(ev):
             return ev.id is not None and video_id in ev.id.lower()
 
+        # --- dynlink tap (2026-07-02 spec): micro-window mode + fast demote ---
+        tap_cfg = snap.get("tap") or {}
+        tap_enabled = bool(tap_cfg.get("enabled", True))
+        tap_port = int(tap_cfg.get("port", 8110))
+        tap_stale_s = float(tap_cfg.get("staleMs", 500)) / 1000.0
+        tap_state = {"last_rx": None, "micros": 0}
+        # _status survives a set_config rebuild (same controller object), so a
+        # fresh loop must not inherit the previous incarnation's tapActive —
+        # e.g. tap.enabled=false would otherwise report tapActive=true forever.
+        self._set(tapActive=False)
+        tap_capture = None
+        if tap_enabled and bool(tap_cfg.get("captureRaw", False)):
+            from .tap_client import TapCapture
+
+            tap_capture = TapCapture()
+
+        def _tap_alive():
+            lr = tap_state["last_rx"]
+            return lr is not None and (time.monotonic() - lr) < tap_stale_s
+
+        def _emit(decision):
+            return_link.send(encoder.encode(decision))
+            self._set(
+                decision={"mcs": decision.mcs},
+                reason=decision.reason,
+                lastEmitMs=int(time.monotonic() * 1000),
+                emitSeq=self._status["emitSeq"] + 1,
+            )
+
+        def _mark_tap_rx():
+            was = _tap_alive()
+            tap_state["last_rx"] = time.monotonic()
+            if not was:
+                tap_state["micros"] = 0
+                aggregator.reset_micro_window()
+                aggregator.signals.tap_active = True
+                self._set(tapActive=True)
+                log.info("dynlink: tap feed live — micro-window mode")
+
+        def on_micro(rec):
+            _mark_tap_rx()
+            if tap_capture is not None:
+                tap_capture.write("micro", rec)
+            signals = aggregator.consume_micro(rec, now_s=time.time())
+            if rec.pkt_lost:
+                d = policy.loss_event(signals)
+                if d is not None:
+                    _emit(d)
+            tap_state["micros"] += 1
+            if tap_state["micros"] % 10 == 0:
+                _emit(policy.tick(signals))
+
+        def on_loss(rec):
+            _mark_tap_rx()
+            if tap_capture is not None:
+                tap_capture.write("loss", rec)
+            # Latency here is GS receive->decision only; the fork-side 2 ms
+            # coalesce holdoff and datagram transit are not included, so the
+            # flightlog's loss_latency_ms underreports true loss->decision
+            # latency by ~1-3 ms.
+            t0 = time.monotonic()
+            signals = aggregator.consume_loss(rec, now_s=time.time())
+            d = policy.loss_event(signals, latency_ms=(time.monotonic() - t0) * 1000.0)
+            if d is not None:
+                _emit(d)
+
         def on_event(ev):
             if isinstance(ev, SessionEvent):
                 if _is_video(ev):
@@ -168,14 +224,27 @@ class DynamicLinkController:
             if isinstance(ev, RxEvent):
                 if not _is_video(ev):
                     return
+                if ev.session is not None:
+                    aggregator.update_session(ev.session)
+                if _tap_alive():
+                    return  # tap drives folding + ticks; :8103 is session-only
+                if aggregator.signals.tap_active:
+                    aggregator.signals.tap_active = False
+                    self._set(tapActive=False)
+                    log.info("dynlink: tap stale — fallback to :8103 ticks")
                 signals = aggregator.consume(ev)
-                decision = policy.tick(signals)
-                return_link.send(encoder.encode(decision))
-                self._set(
-                    decision={"mcs": decision.mcs},
-                    reason=decision.reason,
-                    lastEmitMs=int(time.monotonic() * 1000),
-                    emitSeq=self._status["emitSeq"] + 1,
+                _emit(policy.tick(signals))
+
+        tap_transport = None
+        if tap_enabled:
+            try:
+                tap_transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(
+                    lambda: TapProtocol(on_micro, on_loss),
+                    local_addr=("127.0.0.1", tap_port),
+                )
+            except OSError as e:
+                log.warning(
+                    "dynlink: tap bind 127.0.0.1:%d failed: %s — fallback mode", tap_port, e
                 )
 
         self._stop_event = asyncio.Event()
@@ -186,6 +255,10 @@ class DynamicLinkController:
         try:
             await self._stats_loop(on_event)
         finally:
+            if tap_transport is not None:
+                tap_transport.close()
+            if tap_capture is not None:
+                tap_capture.close()
             policy.close()
             return_link.close()
             with self._lock:
@@ -234,27 +307,18 @@ class DynamicLinkController:
             return
         with self._lock:
             radio = self._pending_cal
-        self._bind_calibration(radio)  # before warm-start so the prior is right
-        p.reset_for_new_session()  # new session: re-warm-start, re-climb
+        self._bind_calibration(radio)  # bind prior key before reset so first climb uses it
+        p.reset_for_new_session()  # new session: reset selector, re-climb from start MCS
         p.flightlog.begin_flight()  # start a fresh flight file
         log.info("dynlink: drone connected — bound calibration + began new flight")
 
     def _bind_calibration(self, radio):
         agg = self._aggregator
-        curve = (radio or {}).get("txPowerCurve")
         adapter = (radio or {}).get("adapterId")
-        # Normalization binds on a valid drone curve; identity until one arrives.
+        # New session: clear stale smoothed signals. Raw SNR is the control axis
+        # — no txpower-curve normalization (2026-07-02 spec).
         if agg is not None:
-            if _valid_curve(curve):
-                c = tuple(int(v) for v in curve)
-                agg.rssi_norm = RssiNormConfig(
-                    enabled=True, p_ref_dbm=max(c), tx_power_dbm_by_mcs=c
-                )
-                agg.reset_smoothed_rssi()
-                log.info("dynlink: bound drone txpower curve=%s", c)
-            else:
-                agg.rssi_norm = RssiNormConfig(enabled=False)
-                log.warning("dynlink: drone supplied no txpower curve — RSSI normalization OFF")
+            agg.reset_smoothed()
         # Learned-prior key binds on a present adapter id + the channel width
         # (10 MHz and 20 MHz keep independent knees), independent of the curve.
         if adapter:

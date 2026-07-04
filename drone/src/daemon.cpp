@@ -142,9 +142,10 @@ void Daemon::seedOrchestrator() {
     }
 
     // Observe-only probe link: ONE FEC-off wfb_tx tracking current+1, owned by
-    // the dynamic-link lifecycle. Seeded only when dynamicLink is enabled; the
-    // controller retunes it live on each {mcs} (see DynamicLinkController).
-    if (effective_.dynamicLink.enabled) {
+    // the dynamic-link lifecycle. Seeded only when dynamicLink is enabled AND
+    // probe.enabled is true; the controller retunes it live on each {mcs}
+    // (see DynamicLinkController).
+    if (effective_.dynamicLink.enabled && effective_.dynamicLink.probe.enabled) {
         static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
         const int probeMcs = std::min(dynlink::kDlFailsafeMcs + 1, kProbeMcsCeiling);
         for (auto& s : buildProbeSpecs(effective_, iface, key, kProbeFeeder, probeMcs))
@@ -250,6 +251,8 @@ void Daemon::startController() {
 }
 
 void Daemon::addProbeStream() {
+    if (!effective_.dynamicLink.probe.enabled)
+        return;
     const std::string iface = radio_.iface.empty() ? "wlan0" : radio_.iface;
     static const std::string kProbeFeeder = "/usr/libexec/fpvd/probe-feeder";
     const int probeMcs = std::min(dynlink::kDlFailsafeMcs + 1, kProbeMcsCeiling);
@@ -297,6 +300,8 @@ ApplyResult Daemon::apply(bool reallyRestart) {
     // config).
     const bool enabledOld = effective_.dynamicLink.enabled;
     const bool enabledNew = pending_.dynamicLink.enabled;
+    const bool probeOld = effective_.dynamicLink.probe.enabled;
+    const bool probeNew = pending_.dynamicLink.probe.enabled;
 
     // Beamforming is reconciled (not exec-supervised); report it as restarted
     // when its own block or the derived modulation width changed.
@@ -422,11 +427,16 @@ ApplyResult Daemon::apply(bool reallyRestart) {
             removeProbeStream(); // targeted orch_.remove (no video bounce)
             restateStaticLink(); // revert radio + encoder to the static config
         } else if (enabledOld && enabledNew &&
-                   (subs.dynamicLink || link.videoRadiotap || link.videoFec))
+                   (subs.dynamicLink || link.videoRadiotap || link.videoFec)) {
+            if (probeNew && !probeOld)
+                addProbeStream(); // probe knob flipped on under a live DL
+            else if (!probeNew && probeOld)
+                removeProbeStream();
             // stbc/ldpc (videoRadiotap) and swfec overhead/deadline (videoFec) are
             // static params the controller preserves; refresh its snapshot so the
             // loop re-emits them on the next decision. mcs/width/rs-k/n stay locked.
             dl_.setConfig(dynlink::buildDlSnapshot(effective_, radio_.iface));
+        }
 
         // DL isn't feeding the OSD — (re)assert the system-stats base line so a
         // just-restarted msposd, or an on->off toggle, shows CPU/temp/bitrate

@@ -27,12 +27,10 @@ DYNAMIC_LINK_KEYS = {
     "smoothing",
     "flightlog",
     "learnedPrior",
+    "tap",
 }
 DRONE_KEYS = {"host", "apiPort"}  # the drone's address; reused by HTTP/IDR/DL
 SELECTOR_KEYS = {
-    "probeViableThreshold",
-    "probeFreshnessMs",
-    "promoteDebounceWindows",
     "videoDemotePer",
     "emergencyFecPressure",
     "holdModesDownMs",
@@ -40,6 +38,18 @@ SELECTOR_KEYS = {
     "starvationWindows",
     "snrPromoteMarginDb",
     "snrDemoteMarginDb",
+    "flapBaseBackoffMs",
+    "flapBackoffMult",
+    "flapBackoffCapMs",
+    "flapResetCleanDwellTicks",
+    "trialWindowMs",
+    "promoteDwellTicks",
+    "promoteSlopeMin",
+    "collapseDeltaDb",
+    "snapbackRecoverMarginDb",
+    "confirmTtlMs",
+    "flapSnrReleaseDb",
+    "flapDecayMs",
 }
 SMOOTHING_KEYS = {"ewmaAlphaRssi", "ewmaAlphaFec", "ewmaAlphaBurst", "starvationThresholdPps"}
 LEARNED_PRIOR_KEYS = {
@@ -50,6 +60,7 @@ LEARNED_PRIOR_KEYS = {
     "minSamples",
     "recencyDecay",
 }
+TAP_KEYS = frozenset({"enabled", "port", "staleMs", "captureRaw"})
 VALID_WIDTHS = {10, 20, 40}  # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 
 
@@ -166,23 +177,54 @@ def _validate_dynamic_link(dl: dict) -> None:
     port = dl.get("dronePort", 9999)
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise SchemaError("dynamicLink.dronePort must be an int in 1..65535")
+    tap = dl.get("tap")
+    if tap is not None:
+        if not isinstance(tap, dict):
+            raise SchemaError("dynamicLink.tap must be an object")
+        unknown_tap = set(tap) - TAP_KEYS
+        if unknown_tap:
+            raise SchemaError(f"unknown dynamicLink.tap keys: {sorted(unknown_tap)}")
+        enabled = tap.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise SchemaError("dynamicLink.tap.enabled must be a bool")
+        capture = tap.get("captureRaw", False)
+        if not isinstance(capture, bool):
+            raise SchemaError("dynamicLink.tap.captureRaw must be a bool")
+        tap_port = tap.get("port", 8110)
+        if (
+            isinstance(tap_port, bool)
+            or not isinstance(tap_port, int)
+            or not 1024 <= tap_port <= 65535
+        ):
+            raise SchemaError("dynamicLink.tap.port must be an int in 1024..65535")
+        stale = tap.get("staleMs", 500)
+        if isinstance(stale, bool) or not isinstance(stale, (int, float)) or stale <= 0:
+            raise SchemaError("dynamicLink.tap.staleMs must be > 0")
     if not isinstance(dl.get("enabled", False), bool):
         raise SchemaError("dynamicLink.enabled must be a bool")
     sel = dl.get("selector")
     if sel is not None:
         _validate_block_keys("dynamicLink.selector", sel, SELECTOR_KEYS)
-        for k in ("probeViableThreshold", "videoDemotePer", "emergencyFecPressure"):
+        for k in ("videoDemotePer", "emergencyFecPressure"):
             _validate_prob(f"dynamicLink.selector.{k}", sel.get(k))
-        for k in ("promoteDebounceWindows", "starvationWindows"):
+        for k in ("starvationWindows", "promoteDwellTicks"):
             _validate_pos_int(f"dynamicLink.selector.{k}", sel.get(k))
         for k in (
-            "probeFreshnessMs",
             "holdModesDownMs",
             "minBetweenChangesMs",
             "snrPromoteMarginDb",
             "snrDemoteMarginDb",
+            "trialWindowMs",
+            "collapseDeltaDb",
+            "snapbackRecoverMarginDb",
+            "confirmTtlMs",
+            "flapSnrReleaseDb",
+            "flapDecayMs",
         ):
             _validate_non_neg_num(f"dynamicLink.selector.{k}", sel.get(k))
+        v = sel.get("promoteSlopeMin")
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))):
+            raise SchemaError("dynamicLink.selector.promoteSlopeMin must be a number")
         # Invariant: the proactive-demote margin must exceed the promote margin or
         # the SNR-knee gates collapse to a single oscillating edge (no dead-band).
         # Fallbacks track SelectorConfig defaults; both are validated numeric above.

@@ -8,36 +8,20 @@ a visible FPV glitch (§3).
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 
 from .stats_client import RxEvent, SessionInfo
 
 WINDOW_S = 0.1  # design cadence: log_interval = 100 ms (§3)
 
-
-@dataclass(frozen=True)
-class RssiNormConfig:
-    """EIRP-normalization of the video-link RSSI by the drone's per-MCS TX
-    power. The controller binds `tx_power_dbm_by_mcs` (and the derived
-    `p_ref_dbm`) from the drone's /status curve at the connect event — the
-    drone is the single source of truth. `enabled` is internal bind state, not
-    a config knob: it is False (identity / raw RSSI) until a curve is bound,
-    True while a valid drone curve is in effect."""
-
-    enabled: bool = False
-    p_ref_dbm: int = 0
-    tx_power_dbm_by_mcs: tuple[int, ...] = ()
+MICROS_PER_WINDOW = 10  # 10 ms tap micro-windows per 100 ms policy window
 
 
-def normalize_rssi(rssi_raw: float | None, mcs: int | None, cfg: RssiNormConfig) -> float | None:
-    """EIRP-normalize one RSSI reading: rssi_raw + (P_ref − curve[mcs]).
-    Clamps mcs into the curve's index range. None-safe (returns rssi_raw
-    when disabled, or when rssi_raw / mcs is None)."""
-    if not cfg.enabled or not cfg.tx_power_dbm_by_mcs or rssi_raw is None or mcs is None:
-        return rssi_raw
-    n = len(cfg.tx_power_dbm_by_mcs)
-    m = max(0, min(n - 1, int(mcs)))
-    return rssi_raw + (cfg.p_ref_dbm - cfg.tx_power_dbm_by_mcs[m])
+def micro_alpha(alpha: float) -> float:
+    """Rescale a 10 Hz EWMA alpha to the 100 Hz micro cadence so the
+    smoothing time constant is preserved exactly: (1-a')^10 == (1-a)."""
+    return 1.0 - (1.0 - alpha) ** (1.0 / MICROS_PER_WINDOW)
 
 
 @dataclass
@@ -53,9 +37,10 @@ class Signals:
     rssi_avg_w: float | None = None  # diversity-combined estimate
     rssi_max_w: float | None = None  # max(rssi_avg) — best-antenna operating point
     mcs_w: int | None = None  # received MCS of the best antenna this window
-    snr_w: float | None = None  # operating (best-RSSI) antenna SNR (per-antenna diversity)
-    # EVM% (lock_quality, higher=better) is per spatial STREAM, not per antenna:
-    # combined per dongle then across dongles. None when no real EVM this window.
+    snr_w: float | None = None  # operating (best-SNR) antenna SNR (per-antenna diversity)
+    # |EVM| in dB magnitude (lock_quality, uncapped, higher=better) is per
+    # spatial STREAM, not per antenna: combined per dongle then across dongles.
+    # None when no real EVM this window.
     evm_w: float | None = None  # best dongle (operating modulation quality)
     evm_lo_w: float | None = None  # worst dongle (diversity floor)
     evm_min_w: float | None = None  # worst per-window sample across dongles
@@ -70,10 +55,16 @@ class Signals:
     # a session implies the drone is still TXing.
     link_starved_w: bool = False
 
+    # True while the wfb_rx dynlink tap is driving the aggregator (set by
+    # the controller); logged per tick for fallback-transition analysis.
+    tap_active: bool = False
+
     # EWMA-smoothed controller inputs
-    rssi: float | None = None
+    rssi: float | None = (
+        None  # DEPRECATED control axis — always None now; rssi_raw is the logged observability
+    )
     rssi_raw: float | None = None  # EWMA of the un-normalized RSSI (observability)
-    snr: float | None = None  # EWMA of EIRP-normalized SNR (cross-rung control axis)
+    snr: float | None = None  # EWMA of raw SNR (sole control axis; no TX-power normalization)
     fec_work: float = 0.0
     burst_rate: float = 0.0
     holdoff_rate: float = 0.0
@@ -110,21 +101,67 @@ class SignalAggregator:
     # above background noise from a stalled stream.
     starvation_threshold_pps: float = 50.0
 
-    rssi_norm: RssiNormConfig = field(default_factory=RssiNormConfig)
-
     signals: Signals = field(default_factory=Signals)
+
+    # tap micro-window state: rolling (data, fec_rec, lost, out) per 10 ms
+    # slot; pending_lost carries LOSS-record losses not yet in a completed
+    # micro window (cleared on the next MICRO, which contains them).
+    _micro: deque = field(default_factory=lambda: deque(maxlen=MICROS_PER_WINDOW))
+    _pending_lost: int = 0
 
     def update_session(self, session: SessionInfo) -> None:
         self.signals.session = session
 
-    def reset_smoothed_rssi(self) -> None:
-        """Drop the smoothed RSSI/SNR EWMAs so they restart clean. Called
-        when the TX-power curve is (re)bound from the drone: samples taken
-        under a different (or identity) normalization must not bleed into
-        the freshly-normalized series."""
+    def reset_smoothed(self) -> None:
+        """Drop the smoothed RSSI/SNR EWMAs so they restart clean on a new
+        drone session (called on reconnect). Ensures stale pre-disconnect
+        samples do not bleed into the new session's series."""
         self.signals.rssi = None
         self.signals.rssi_raw = None
         self.signals.snr = None
+
+    def reset_micro_window(self) -> None:
+        """Drop the tap rolling window + pending losses. Called on the tap's
+        stale->alive transition: pre-outage slots and an orphaned pending
+        LOSS count must not leak into the revived feed's first windows
+        (they could fire a spurious fast demote off ancient losses)."""
+        self._micro.clear()
+        self._pending_lost = 0
+
+    def _fold_ants(self, ants) -> None:
+        """Antenna-derived raw signals from one window's rx_ant_stats
+        (shared by the 100 ms :8103 path and the 10 ms tap path)."""
+        s = self.signals
+        rssi_mins = [a.rssi_min for a in ants]
+        rssi_avgs = [a.rssi_avg for a in ants]
+        s.rssi_min_w = float(min(rssi_mins))
+        s.rssi_avg_w = float(sum(rssi_avgs) / len(rssi_avgs))
+        s.rssi_max_w = float(max(rssi_avgs))  # max RSSI across antennas (observability)
+        # Operating antenna = best SNR (the sole control axis). mcs_w/snr_w
+        # follow it; rssi_max_w stays the diversity max for the log.
+        best_ant = max(ants, key=lambda a: a.snr_avg)
+        s.mcs_w = int(best_ant.mcs)
+        s.ant_count = len(ants)
+        s.snr_w = float(best_ant.snr_avg)
+        # EVM is per-STREAM, not per-antenna. Group by dongle (ant>>8);
+        # a real slot has evm_avg > 0 (absent/2nd-stream slots report -1;
+        # 0 = unmeasurable). The > 0 filter holds for the dB magnitude too:
+        # a real lock reads positive dB, sentinels are -1/0. Per dongle:
+        # stream EVM = max(evm_avg over real slots), worst sample =
+        # min(evm_min). Across dongles: best = max, floor = min; worst
+        # sample = min over all real slots. (Averaging raw per-"ant" EVM
+        # would corrupt it — sentinels and STBC duplicates skew it.)
+        d_avg: dict[int, float] = {}
+        d_min: dict[int, float] = {}
+        for a in ants:
+            if a.evm_avg > 0:
+                d = a.ant >> 8
+                d_avg[d] = max(d_avg.get(d, float(a.evm_avg)), float(a.evm_avg))
+                d_min[d] = min(d_min.get(d, float(a.evm_min)), float(a.evm_min))
+        if d_avg:
+            s.evm_w = max(d_avg.values())
+            s.evm_lo_w = min(d_avg.values())
+            s.evm_min_w = min(d_min.values())
 
     def consume(self, ev: RxEvent) -> Signals:
         s = self.signals
@@ -158,34 +195,7 @@ class SignalAggregator:
 
         # --- Antenna-derived signals (§3) ------------------------------
         if ev.rx_ant_stats:
-            rssi_mins = [a.rssi_min for a in ev.rx_ant_stats]
-            rssi_avgs = [a.rssi_avg for a in ev.rx_ant_stats]
-            s.rssi_min_w = float(min(rssi_mins))
-            s.rssi_avg_w = float(sum(rssi_avgs) / len(rssi_avgs))
-            best_ant = max(ev.rx_ant_stats, key=lambda a: a.rssi_avg)
-            s.rssi_max_w = float(best_ant.rssi_avg)
-            s.mcs_w = int(best_ant.mcs)
-            s.ant_count = len(ev.rx_ant_stats)
-            # SNR is genuine per-antenna diversity: log the operating
-            # (best-RSSI) antenna's SNR, coherent with rssi_max_w / mcs_w.
-            s.snr_w = float(best_ant.snr_avg)
-            # EVM is per-STREAM, not per-antenna. Group by dongle (ant>>8);
-            # a real slot has evm_avg > 0 (absent/2nd-stream slots report -1).
-            # Per dongle: stream EVM = max(evm_avg over real slots), worst
-            # sample = min(evm_min). Across dongles: best = max, floor = min;
-            # worst sample = min over all real slots. (Averaging raw per-"ant"
-            # EVM would corrupt it — sentinels and STBC duplicates skew it.)
-            d_avg: dict[int, float] = {}
-            d_min: dict[int, float] = {}
-            for a in ev.rx_ant_stats:
-                if a.evm_avg > 0:
-                    d = a.ant >> 8
-                    d_avg[d] = max(d_avg.get(d, float(a.evm_avg)), float(a.evm_avg))
-                    d_min[d] = min(d_min.get(d, float(a.evm_min)), float(a.evm_min))
-            if d_avg:
-                s.evm_w = max(d_avg.values())
-                s.evm_lo_w = min(d_avg.values())
-                s.evm_min_w = min(d_min.values())
+            self._fold_ants(ev.rx_ant_stats)
         # If no antenna lines this window, keep prior values — don't
         # reset; the RSSI operating point doesn't vanish just because
         # no fragments arrived.
@@ -197,27 +207,79 @@ class SignalAggregator:
         s.link_starved_w = s.session is not None and s.packet_rate_w < self.starvation_threshold_pps
 
         # --- EWMA smoothing (§3) ---------------------------------------
-        # Smoothed inputs feed the leading loop. Use best-antenna
-        # aggregation: max(rssi_avg) matches what the diversity receiver
-        # actually decodes against (and what the OSD shows).
-        # min(rssi_min) tracks the weakest antenna and misses
-        # best-antenna degradation entirely.
+        # The leading loop runs on the raw best-SNR-antenna EWMA (snr field below);
+        # rssi_raw is observability only, smoothed from the best-antenna
+        # aggregation max(rssi_avg) — what the diversity receiver decodes
+        # against (and what the OSD shows), not min(rssi_min) which tracks the
+        # weakest antenna and misses best-antenna degradation.
         if s.rssi_max_w is not None:
-            # Normalize per-window by the received MCS BEFORE smoothing, so a
-            # promote's power drop never enters the EWMA as a fake fade.
-            rssi_norm_w = normalize_rssi(s.rssi_max_w, s.mcs_w, self.rssi_norm)
-            s.rssi = _ewma(s.rssi, rssi_norm_w, self.ewma_alpha_rssi)
+            # RSSI is observability-only now: smooth the raw value for the log,
+            # but it no longer feeds control (SNR is the sole control axis).
             s.rssi_raw = _ewma(s.rssi_raw, s.rssi_max_w, self.ewma_alpha_rssi)
-            # SNR shares RSSI's per-MCS TX-power offset (SNR scales 1:1 with
-            # TX power, noise unchanged), so reuse normalize_rssi to make SNR
-            # cross-rung comparable, then smooth it like rssi.
+            # Raw SNR IS the control axis — no TX-power normalization. The curve
+            # is a fictional driver token (2026-07-02 spec); normalizing by it was
+            # a no-op per-rung and uncalibrated cross-rung.
             if s.snr_w is not None:
-                snr_norm_w = normalize_rssi(s.snr_w, s.mcs_w, self.rssi_norm)
-                s.snr = _ewma(s.snr, snr_norm_w, self.ewma_alpha_rssi)
+                s.snr = _ewma(s.snr, s.snr_w, self.ewma_alpha_rssi)
 
         s.fec_work = _ewma(s.fec_work, s.fec_work_rate_w, self.ewma_alpha_fec)
         s.burst_rate = _ewma(s.burst_rate, s.burst_rate_w, self.ewma_alpha_burst)
         s.holdoff_rate = _ewma(s.holdoff_rate, s.holdoff_rate_w, self.ewma_alpha_burst)
         s.late_rate = _ewma(s.late_rate, s.late_rate_w, self.ewma_alpha_burst)
 
+        return s
+
+    def _recompute_micro_window(self) -> None:
+        """Window-denominated fields from the rolling 100 ms sum of micro
+        counters (+ pending LOSS losses), so every Signals field keeps its
+        per-100 ms meaning under the tap."""
+        s = self.signals
+        data = sum(m[0] for m in self._micro)
+        fec_rec = sum(m[1] for m in self._micro)
+        lost = sum(m[2] for m in self._micro) + self._pending_lost
+        out = sum(m[3] for m in self._micro)
+        tx_primaries = out + lost
+        if tx_primaries > 0:
+            s.residual_loss_w = lost / tx_primaries
+            s.fec_work_rate_w = fec_rec / tx_primaries
+        else:
+            s.residual_loss_w = 0.0
+            s.fec_work_rate_w = 0.0
+        s.packet_rate_w = data / WINDOW_S
+        s.link_starved_w = s.session is not None and s.packet_rate_w < self.starvation_threshold_pps
+
+    def consume_micro(self, rec, now_s: float) -> Signals:
+        """Fold one 10 ms tap MICRO record. Mirrors consume() at the micro
+        cadence: EWMAs use micro-rescaled alphas (same time constants);
+        burst/holdoff/late rates are observability-only and not carried by
+        the tap, so they stop updating while the tap drives. Timestamps come
+        from the GS clock (now_s) — the tap clock base differs from :8103
+        and selector timers must not jump across a fallback transition."""
+        s = self.signals
+        s.timestamp = now_s
+        self._micro.append((rec.pkt_data, rec.pkt_fec_rec, rec.pkt_lost, rec.pkt_out))
+        self._pending_lost = 0  # this MICRO's window contains any held losses
+        self._recompute_micro_window()
+        if rec.rx_ant_stats:
+            self._fold_ants(rec.rx_ant_stats)
+        a = micro_alpha(self.ewma_alpha_rssi)
+        if s.rssi_max_w is not None:
+            s.rssi_raw = _ewma(s.rssi_raw, s.rssi_max_w, a)
+            if s.snr_w is not None:
+                s.snr = _ewma(s.snr, s.snr_w, a)
+        s.fec_work = _ewma(s.fec_work, s.fec_work_rate_w, micro_alpha(self.ewma_alpha_fec))
+        return s
+
+    def consume_loss(self, rec, now_s: float) -> Signals:
+        """Fold an immediate LOSS record: these losses are not yet in any
+        completed micro window, so hold them as pending (added to the rolling
+        loss sum) until the next MICRO — which contains them — arrives. A loss
+        coalesced across the fork's 2 ms holdoff can arrive just AFTER the
+        MICRO that already contains it, double-counting those losses for
+        <=10 ms — acceptable (the loss was real; demote stays one-step +
+        cooldown-gated)."""
+        s = self.signals
+        s.timestamp = now_s
+        self._pending_lost += int(rec.lost_count)
+        self._recompute_micro_window()
         return s
