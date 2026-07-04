@@ -46,6 +46,16 @@ import sys
 sys.exit(1)
 """
 
+# A forwarder/injector stand-in: no handshake, no IPC_MSG stats lines -- just
+# noisy stdout (mirrors real wfb_rx -f / wfb_tx -I, which only ever emit
+# WFB_ERR diagnostics, never a stats line a parser could recognize).
+FAKE_NOISY_NO_PARSER = """#!/usr/bin/env python3
+import time
+while True:
+    print("some diagnostic line that is not a stats record", flush=True)
+    time.sleep(0.02)
+"""
+
 
 def run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
@@ -72,6 +82,10 @@ def write_fake_tx_no_handshake(tmp_path) -> str:
 
 def write_fake_insta_exit(tmp_path) -> str:
     return _write_script(tmp_path, "fake_insta_exit.py", FAKE_INSTA_EXIT)
+
+
+def write_fake_noisy_no_parser(tmp_path) -> str:
+    return _write_script(tmp_path, "fake_noisy_no_parser.py", FAKE_NOISY_NO_PARSER)
 
 
 def make_spec(name: str, kind: str, argv: list[str], unix_path: str | None = None) -> ServiceSpec:
@@ -298,6 +312,47 @@ def test_failed_respawn_retries_under_budget_then_recovers(tmp_path, monkeypatch
 
 
 # -- (f) stop() terminates the process group ---------------------------------
+
+
+# -- (g) spec.parser=None -> no parser built, no hub calls, settle-style
+# readiness (ready as soon as alive, regardless of `kind`) --------------------
+#
+# Forwarders (kind="rx") and injectors (kind="tx") both carry parser=None
+# (graph.py: neither role ever emits an IPC_MSG stats line). Dispatching
+# parser construction on `.kind` alone (the pre-fix behavior) builds a real
+# TxLineParser for an injector and then blocks in `_wait_tx_ready` for a
+# LISTEN handshake that will never arrive -- a bug flagged by Task 4 review.
+# The fix keys off `spec.parser is None` instead: no parser, stdout is
+# drained (not fed to any parser), and readiness never waits on a handshake.
+
+
+def test_parser_none_child_skips_parser_and_settles_ready(tmp_path):
+    async def main():
+        spec = make_spec("mavlink inj", "tx", [write_fake_noisy_no_parser(tmp_path)])
+        spec.parser = None
+        hub = StubHub()
+        child = WfbChild(spec, hub, ready_timeout=1.0)
+        try:
+            t0 = time.monotonic()
+            ok = await child.start()
+            elapsed = time.monotonic() - t0
+            assert ok is True
+            # No handshake wait: readiness should land almost immediately,
+            # well under ready_timeout.
+            assert elapsed < 0.5
+            assert child.tx_parser is None
+
+            # Let the noisy child print a bunch of lines the (nonexistent)
+            # parser could never have understood.
+            await asyncio.sleep(0.2)
+            assert hub.rx_windows == []
+            assert hub.sessions == []
+            assert hub.tx_windows == []
+            assert child.state()["running"] is True
+        finally:
+            await child.stop()
+
+    run(main())
 
 
 def test_stop_terminates_process_group(tmp_path):

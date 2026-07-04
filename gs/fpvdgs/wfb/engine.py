@@ -19,12 +19,29 @@ watches `tx_parser` *object identity* for the two tx children so a respawn
 (detected by that identity changing) re-fires the current TX selection and
 re-broadcasts `set_all_tx_sockets`, even though no antenna switch actually
 happened.
+
+Phase 2 remote cards — whenever `has_remote(cards)` (any `link.cards` entry
+names a `host`), `_setup` takes the remote branch: `radio_init` only ever
+sees LOCAL ifaces (a remote card's radio is tuned by its own node script,
+not by this process); `build_graph_remote` replaces `build_graph`, adding
+per-service local forwarder/injector children (`parser=None` — see
+`children.py`'s `spec.parser is None` branch) alongside the usual
+aggregator/distributor legs; and one `NodeSession` per remote node is
+started, over `functools.partial(_ssh_argv_for_card, card)` bound to that
+node's representative `Card`. A node session is *degrade, never fail*: it
+never blocks or fails engine `start()`, it just reports itself down via
+`state()["nodes"][node]["alive"]` until it (re)connects. Node sessions are
+torn down FIRST in `_teardown`, ahead of every local service, so a remote
+node's own children die before the GS-side aggregators/distributors they
+were feeding disappear. The all-local path is untouched by any of this —
+same `build_graph`, same leg list, `state()["nodes"] == {}`.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import threading
 import time
@@ -32,8 +49,10 @@ import uuid
 
 from .. import radio
 from .aggregator import StatsHub
+from .cards import Card, has_remote, local_ifaces, parse_cards, remote_cards
 from .children import WfbChild
-from .graph import build_graph
+from .cluster import NodeSession, derive_server_address, plan_cluster, ssh_argv
+from .graph import build_graph, build_graph_remote
 from .mavproxy import MavlinkService
 from .statsd import StatsServer
 from .tunnel import TunnelService
@@ -54,6 +73,15 @@ def _rand_suffix() -> str:
     return uuid.uuid4().hex[:8]
 
 
+def _ssh_argv_for_card(card: Card, _node) -> list[str]:
+    """`NodeSession.argv_builder` shape is `(node) -> argv`, but `node` here
+    is the plain host string (see `_start_node_sessions`), not a `Card` --
+    `ssh_argv` needs the full `Card` (user/port/key). `functools.partial`
+    binds `card` as the first positional arg; the `node` NodeSession passes
+    at call time lands in `_node` and is intentionally ignored."""
+    return ssh_argv(card)
+
+
 class WfbEngine:
     def __init__(
         self,
@@ -61,7 +89,9 @@ class WfbEngine:
         wlans_resolver,
         *,
         graph_builder=build_graph,
+        graph_builder_remote=build_graph_remote,
         child_cls=WfbChild,
+        node_session_cls=NodeSession,
         tun_factory=None,
         radio_init=radio.init_cards,
         stats_port=8103,
@@ -71,7 +101,9 @@ class WfbEngine:
         self._config_provider = config_provider
         self._wlans_resolver = wlans_resolver
         self._graph_builder = graph_builder
+        self._graph_builder_remote = graph_builder_remote
         self._child_cls = child_cls
+        self._node_session_cls = node_session_cls
         self._tun_factory = tun_factory
         self._radio_init = radio_init
         self._stats_port = stats_port
@@ -89,12 +121,19 @@ class WfbEngine:
         self._start_ok = False
 
         self._children: dict[str, object] = {}
+        self._extra_rx_names: list[str] = []  # remote-mode local forwarders
+        self._extra_tx_names: list[str] = []  # remote-mode local injectors
         self._mav_service = None
         self._tunnel_service = None
         self._stats_server: StatsServer | None = None
         self._tick_task: asyncio.Task | None = None
         self._tx_selector: TxSelector | None = None
         self._tx_parser_ids: dict[str, object] = {}
+
+        # Remote-mode (Phase 2) node sessions, keyed by node (host string).
+        # Always empty in all-local mode -- state()["nodes"] stays {}.
+        self._node_sessions: dict[str, object] = {}
+        self._nodes_state: dict[str, dict] = {}
 
         self._restarts = 0
         self._engine_fault = False
@@ -150,6 +189,7 @@ class WfbEngine:
             children = dict(self._children)
             restarts = self._restarts
             engine_fault = self._engine_fault
+            nodes = dict(self._nodes_state)
 
         if not children:
             return {
@@ -159,6 +199,7 @@ class WfbEngine:
                 "autoRestarts": 0,
                 "lastExit": None,
                 "fault": engine_fault,
+                "nodes": nodes,
             }
 
         child_states = {name: c.state() for name, c in children.items()}
@@ -181,6 +222,7 @@ class WfbEngine:
             "autoRestarts": auto_restarts,
             "lastExit": last_exit,
             "fault": fault,
+            "nodes": nodes,
         }
 
     def client_factory(self):
@@ -296,10 +338,33 @@ class WfbEngine:
         try:
             cfg = self._config_provider()
             link = cfg.get("link", {}) or {}
-            wlans = self._wlans_resolver(cfg)
+            # `parse_cards` is pure (no I/O): a concrete `link.cards`/`wlans`
+            # list is returned as-is, and only the "auto" placeholder would
+            # ever need hardware nic-detection -- but "auto" can only ever
+            # resolve to LOCAL cards (see cards.py's module docstring), so
+            # treating it as an empty (definitely-not-remote) list here is
+            # exact, not an approximation, and keeps this branch-decision
+            # free of any subprocess/hardware dependency.
+            parsed_cards = parse_cards(link)
+            cards: list[Card] = [] if parsed_cards == "auto" else parsed_cards
+            remote = has_remote(cards)
         except Exception:
-            log.exception("wfb engine: failed to resolve config/wlans")
+            log.exception("wfb engine: failed to resolve config/cards")
             return False
+
+        if not remote:
+            # ---- EXACTLY Phase 1: local ifaces come from wlans_resolver ----
+            try:
+                wlans = self._wlans_resolver(cfg)
+            except Exception:
+                log.exception("wfb engine: failed to resolve config/wlans")
+                return False
+        else:
+            # Remote mode: `cards` is already fully resolved (concrete, by
+            # definition of not being "auto"), so local ifaces come straight
+            # from it -- no need to consult wlans_resolver at all. Remote
+            # card init lives in the node's own bootstrap script, not here.
+            wlans = local_ifaces(cards)
 
         try:
             radio_ok = await loop.run_in_executor(None, self._radio_init, wlans, link)
@@ -310,13 +375,32 @@ class WfbEngine:
             log.error("wfb engine: radio_init failed for wlans=%s", wlans)
             return False
 
+        plan = None
+        server_address = None
+        if remote:
+            try:
+                plan = plan_cluster(cards)
+                first_remote = remote_cards(cards)[0]
+                server_address = derive_server_address(first_remote.host, link.get("serverAddress"))
+            except Exception:
+                log.exception("wfb engine: cluster planning failed")
+                return False
+
         try:
-            graph = self._graph_builder(cfg, wlans, rand_suffix=_rand_suffix)
+            if remote:
+                graph = self._graph_builder_remote(
+                    cfg, cards, plan, server_address, rand_suffix=_rand_suffix
+                )
+            else:
+                graph = self._graph_builder(cfg, wlans, rand_suffix=_rand_suffix)
         except Exception:
             log.exception("wfb engine: graph_builder raised")
             return False
 
-        tx_selector = TxSelector(_tx_selector_config(cfg))
+        tx_selector = TxSelector(
+            _tx_selector_config(cfg),
+            rx_only_wlan_ids=plan.rx_only_wlan_ids if plan is not None else frozenset(),
+        )
         hub = StatsHub(tx_selector, time_fn=time.time)
 
         specs_by_name = {
@@ -327,11 +411,28 @@ class WfbEngine:
             "tunnel_tx": graph.tunnel_tx,
         }
 
+        # Base legs (aggregator rx / distributor tx in remote mode, plain rx/tx
+        # in all-local mode -- same names either way) plus, in remote mode
+        # only, the local forwarders (rx, parser=None) and injectors (tx,
+        # parser=None): all-local mode never appends anything here, so this
+        # loop's *behavior* for that path is unchanged from Phase 1.
+        leg_specs: list[tuple[str, object]] = [
+            (name, specs_by_name[name]) for name in RX_LEG_ORDER + TX_LEG_ORDER
+        ]
+        extra_rx_names: list[str] = []
+        extra_tx_names: list[str] = []
+        if remote:
+            for spec in graph.local_forwarders:
+                leg_specs.append((spec.name, spec))
+                extra_rx_names.append(spec.name)
+            for spec in graph.local_injectors:
+                leg_specs.append((spec.name, spec))
+                extra_tx_names.append(spec.name)
+
         children: dict[str, object] = {}
         started_order: list[str] = []
         ok_all = True
-        for name in RX_LEG_ORDER + TX_LEG_ORDER:
-            spec = specs_by_name[name]
+        for name, spec in leg_specs:
             try:
                 child = self._child_cls(spec, hub, on_fault=self._on_child_fault)
                 ok = await child.start()
@@ -374,6 +475,8 @@ class WfbEngine:
                 "mavlink_tx": mav_child.tx_parser,
                 "tunnel_tx": tun_child.tx_parser,
             }
+            self._extra_rx_names = extra_rx_names
+            self._extra_tx_names = extra_tx_names
 
             hub.add_ant_sel_cb(self._apply_tx_selection)
             # NOTE: `mav_service.start()` above already registers its own
@@ -404,8 +507,50 @@ class WfbEngine:
                 self.hub = None
             return False
 
+        # ---- remote node sessions (started AFTER local children; a node
+        # that fails to come up degrades, never fails engine start) --------
+        if remote:
+            await self._start_node_sessions(graph, plan)
+
         self._tick_task = asyncio.ensure_future(self._ticker())
         return True
+
+    async def _start_node_sessions(self, graph, plan) -> None:
+        for node in sorted(graph.node_scripts):
+            script = graph.node_scripts[node]
+            rep_card = plan.nodes[node][0]
+            session = self._node_session_cls(
+                node,
+                script,
+                argv_builder=functools.partial(_ssh_argv_for_card, rep_card),
+                on_state=self._make_node_state_cb(node),
+            )
+            self._node_sessions[node] = session
+            try:
+                ok = await session.start()
+            except Exception:
+                log.exception("wfb engine: node %s session failed to start (degrading)", node)
+                ok = False
+            with self._lock:
+                self._nodes_state[node] = {"alive": bool(ok), "restarts": 0}
+            if not ok:
+                log.warning("wfb engine: node %s failed to start", node)
+
+    def _make_node_state_cb(self, node):
+        def _on_node_state(_node, up: bool) -> None:
+            if up:
+                log.info("wfb engine: node %s up", node)
+            else:
+                log.warning("wfb engine: node %s down", node)
+            session = self._node_sessions.get(node)
+            restarts = 0
+            if session is not None:
+                with contextlib.suppress(Exception):
+                    restarts = session.state()["restarts"]
+            with self._lock:
+                self._nodes_state[node] = {"alive": up, "restarts": restarts}
+
+        return _on_node_state
 
     @staticmethod
     async def _stop_children(children: dict, order) -> None:
@@ -440,6 +585,21 @@ class WfbEngine:
         # cancelled below and is always suspended at its own `asyncio.sleep`
         # when `_teardown` runs (single-threaded event loop), so it cannot
         # observe this hub again before that cancellation lands.
+        # Node sessions FIRST, ahead of everything else: a remote node's own
+        # script tears down its wfb_rx/wfb_tx children the moment its ssh
+        # session dies (trap on stdin close -- see cluster.py's NodeSession
+        # docstring), so stopping the session before the local
+        # aggregators/distributors vanish avoids a brief window where a
+        # still-alive remote injector/forwarder is talking to a GS side that
+        # has already torn down.
+        node_sessions = self._node_sessions
+        self._node_sessions = {}
+        for session in node_sessions.values():
+            with contextlib.suppress(Exception):
+                await session.stop()
+        with self._lock:
+            self._nodes_state = {}
+
         with self._lock:
             hub = self.hub
             self.hub = None
@@ -468,13 +628,15 @@ class WfbEngine:
             self._mav_service = None
 
         children = self._children
-        await self._stop_children(children, TX_LEG_ORDER)
-        await self._stop_children(children, RX_LEG_ORDER)
+        await self._stop_children(children, TX_LEG_ORDER + tuple(self._extra_tx_names))
+        await self._stop_children(children, RX_LEG_ORDER + tuple(self._extra_rx_names))
 
         with self._lock:
             self._children = {}
             self._tx_selector = None
         self._tx_parser_ids = {}
+        self._extra_rx_names = []
+        self._extra_tx_names = []
 
     # ---- TX antenna wiring (engine loop thread only) -------------------------
     def _on_child_fault(self, child) -> None:

@@ -147,7 +147,12 @@ class WfbChild:
         )
 
     async def _spawn_and_wait(self) -> bool:
-        self._parser = self._make_parser()
+        # `spec.parser is None` (forwarders/injectors -- see graph.py's
+        # module docstring: neither role ever emits an IPC_MSG stats line)
+        # dispatches on `.parser`, NOT `.kind`: a tx-kind injector must skip
+        # TxLineParser construction too, or `_wait_tx_ready` blocks for a
+        # LISTEN handshake that will never arrive.
+        self._parser = None if self.spec.parser is None else self._make_parser()
         try:
             self._proc = await asyncio.create_subprocess_exec(
                 *self.spec.argv,
@@ -166,8 +171,16 @@ class WfbChild:
             # incarnation first so it doesn't linger as an orphaned,
             # never-awaited task ("Task was destroyed but it is pending").
             self._pump_task.cancel()
-        self._pump_task = asyncio.ensure_future(self._pump_stdout(self._proc, self._parser))
+        if self._parser is None:
+            self._pump_task = asyncio.ensure_future(self._drain_stdout(self._proc))
+        else:
+            self._pump_task = asyncio.ensure_future(self._pump_stdout(self._proc, self._parser))
 
+        if self._parser is None:
+            # No stats interface to parse and hence no handshake to wait
+            # for, regardless of `kind` -- settle-style readiness (ready as
+            # soon as alive), same as a plain rx leg.
+            return self._check_rx_ready()
         if self.spec.kind == "tx":
             return await self._wait_tx_ready()
         return self._check_rx_ready()
@@ -231,6 +244,21 @@ class WfbChild:
             raise
         except Exception:
             log.exception("wfb child %s: stdout pump crashed", self.spec.name)
+
+    async def _drain_stdout(self, proc: asyncio.subprocess.Process) -> None:
+        """`spec.parser is None` sibling of `_pump_stdout`: no parser to feed
+        (forwarders/injectors have no stats interface), so just read and
+        discard lines -- devnull -- to keep the pipe from filling up and
+        blocking the child's own stdout writes."""
+        try:
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("wfb child %s: stdout drain crashed", self.spec.name)
 
     # -- kill -------------------------------------------------------------------
     async def _kill_process(self) -> None:
