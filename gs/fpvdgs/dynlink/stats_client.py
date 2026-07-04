@@ -1,9 +1,16 @@
-"""asyncio TCP client for wfb-ng's JSON stats API (§3).
+"""Event types + wire decoder for wfb-ng's JSON stats API (§3).
 
-The server is `StatisticsJSONProtocol` in wfb_ng/protocols.py:72.
-Newline-delimited JSON, one record per line. First record on connect
-is a 'settings' dump; subsequent records are 'rx', 'tx', or
-'new_session' at `log_interval` cadence (we require 100 ms → 10 Hz).
+The server is `StatisticsJSONProtocol` in wfb_ng/protocols.py:72 (or, on
+the GS, `fpvdgs.wfb.statsd.StatsServer`, a compatible re-implementation).
+Newline-delimited JSON, one record per line. First record on connect is
+a 'settings' dump; subsequent records are 'rx', 'tx', or 'new_session' at
+`log_interval` cadence (we require 100 ms → 10 Hz).
+
+There is no TCP client class here anymore — native mode always receives
+events via the engine's in-process, StatsClient-compatible
+`client_factory()` (see `fpvdgs/wfb/engine.py`). `ReplayClient` below
+replays a captured JSONL file through the same `on_event` convention for
+offline use.
 """
 
 from __future__ import annotations
@@ -241,78 +248,6 @@ def _parse_endpoint(url: str) -> tuple[str, int]:
     if not parsed.hostname or not parsed.port:
         raise ValueError(f"endpoint must be tcp://host:port, got {url!r}")
     return parsed.hostname, parsed.port
-
-
-class StatsClient:
-    """Reconnecting asyncio client for the wfb-ng JSON stats API."""
-
-    def __init__(
-        self,
-        endpoint: str,
-        on_event: Callable[[Event], Any],
-        *,
-        reconnect_initial_s: float = 1.0,
-        reconnect_max_s: float = 30.0,
-    ) -> None:
-        self._host, self._port = _parse_endpoint(endpoint)
-        self._on_event = on_event
-        self._reconnect_initial_s = reconnect_initial_s
-        self._reconnect_max_s = reconnect_max_s
-        self._stop = asyncio.Event()
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        backoff = self._reconnect_initial_s
-        while not self._stop.is_set():
-            try:
-                reader, writer = await asyncio.open_connection(self._host, self._port)
-            except OSError as e:
-                log.warning(
-                    "stats_client: connect %s:%d failed: %s (retry in %.1fs)",
-                    self._host,
-                    self._port,
-                    e,
-                    backoff,
-                )
-                await self._sleep_or_stop(backoff)
-                backoff = min(backoff * 2, self._reconnect_max_s)
-                continue
-
-            log.info("stats_client: connected to %s:%d", self._host, self._port)
-            backoff = self._reconnect_initial_s
-            try:
-                async for ev in iter_events_from_reader(reader):
-                    if self._stop.is_set():
-                        break
-                    res = self._on_event(ev)
-                    if asyncio.iscoroutine(res):
-                        await res
-            except ContractVersionError:
-                # Hard fail — silent divergence is the whole reason the contract exists.
-                log.error("stats_client: contract_version mismatch; aborting")
-                raise
-            except Exception:
-                log.exception("stats_client: error in event loop")
-            finally:
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except Exception:
-                    pass
-
-            if self._stop.is_set():
-                break
-            log.info("stats_client: disconnected; reconnecting in %.1fs", backoff)
-            await self._sleep_or_stop(backoff)
-            backoff = min(backoff * 2, self._reconnect_max_s)
-
-    async def _sleep_or_stop(self, seconds: float) -> None:
-        try:
-            await asyncio.wait_for(self._stop.wait(), timeout=seconds)
-        except asyncio.TimeoutError:
-            pass
 
 
 class ReplayClient:

@@ -18,7 +18,7 @@ from ..events import DRONE_CONNECTED, DRONE_DISCONNECTED
 from .config_build import build_aggregator, build_policy_config
 from .policy import Policy
 from .return_link import ReturnLink
-from .stats_client import RxEvent, SessionEvent, StatsClient
+from .stats_client import RxEvent, SessionEvent
 from .tap_client import TapProtocol
 from .wire import Encoder as WireEncoder
 
@@ -31,7 +31,7 @@ class DynamicLinkController:
         snapshot,
         *,
         stats_endpoint="tcp://127.0.0.1:8103",
-        stats_client_factory=StatsClient,
+        stats_client_factory,
         bus=None,
     ):
         self._snapshot = dict(snapshot)

@@ -3,7 +3,7 @@
 This replaces wfb-ng's `StatisticsJSONProtocol` (wfb_ng/protocols.py:72)
 for GS-local consumers: the deploy health check (`ss -tln | grep 8103`),
 the future `fpvd-stats` CLI, and (via a real TCP round trip, not just
-in-process) the existing `StatsClient` contract test.
+in-process) `test_wfb_statsd.py`'s wire-contract test.
 
 Design decision -- raw listener, not Event subscription
 ---------------------------------------------------------
