@@ -205,7 +205,10 @@ class ProcessSupervisor:
             self._supervise = False
             self._kill_locked()
 
-    def restart(self):
+    def restart(self, config=None):
+        # `config` is accepted for interface parity with WfbEngine.restart but
+        # ignored: this supervisor's child re-reads the rendered cfg file, which
+        # api._apply_gs writes from the pending config before the restart.
         with self._lock:
             self.stop()
             self._restarts += 1

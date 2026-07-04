@@ -298,6 +298,40 @@ def test_restart_bumps_restarts_and_rebuilds_from_changed_config():
         engine.shutdown()
 
 
+def test_restart_with_config_builds_from_it_not_provider_and_consumes_once():
+    # restart(config) must build from `config` — the pending config the api hands
+    # in before store.commit() — NOT config_provider(), which still returns the
+    # OLD committed store during an apply (bench-caught 2026-07-04). And a plain
+    # restart() (reset/boot/crash) falls back to the provider: staged is one-shot.
+    provider_cfg = make_config(_tag="PROVIDER")
+    staged_cfg = make_config(_tag="STAGED")
+    seen = []
+
+    def graph_builder(effective, wlans, *, rand_suffix):
+        seen.append(effective.get("_tag"))
+        return make_graph_builder("x")(effective, wlans, rand_suffix=rand_suffix)
+
+    engine = WfbEngine(
+        config_provider=lambda: provider_cfg,
+        wlans_resolver=lambda c: list(WLANS),
+        graph_builder=graph_builder,
+        child_cls=make_child_cls([]),
+        radio_init=lambda wlans, link: True,
+        stats_port=0,
+        mav_service_cls=make_service_cls([], [], []),
+        tunnel_service_cls=make_service_cls([], [], [], []),
+    )
+    try:
+        assert engine.start() is True
+        assert seen[-1] == "PROVIDER"  # boot: no staged config -> provider
+        assert engine.restart(staged_cfg) is True
+        assert seen[-1] == "STAGED"  # restart(config) built from the staged config
+        assert engine.restart() is True
+        assert seen[-1] == "PROVIDER"  # staged consumed once -> falls back to provider
+    finally:
+        engine.shutdown()
+
+
 # -- (d) state() aggregation incl. fault propagation -------------------------
 
 

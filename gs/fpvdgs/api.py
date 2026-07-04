@@ -110,10 +110,13 @@ class Api:
             # Render the cfg the runner reads on a (re)start, before applying.
             self.render_mod.write_cfg(self.cfg_out, self.render_mod.render_cfg(pending))
             if not self._apply_link_local(
-                effective.get("link", {}), pending.get("link", {}), force_bounce=wfb_changed
+                effective.get("link", {}),
+                pending.get("link", {}),
+                pending,
+                force_bounce=wfb_changed,
             ):
                 self.render_mod.write_cfg(self.cfg_out, self.render_mod.render_cfg(effective))
-                self.runner.restart()
+                self.runner.restart(effective)
                 return 500, {
                     "applied": False,
                     "error": "apply failed; rolled back to last-good cfg",
@@ -156,9 +159,15 @@ class Api:
             return False
         return self._bw_class(old.get("width")) == self._bw_class(new.get("width"))
 
-    def _apply_link_local(self, old_link, new_link, force_bounce=False):
+    def _apply_link_local(self, old_link, new_link, new_config, force_bounce=False):
         """Apply the GS-local link delta: live retune when possible, else bounce.
-        No drone push (client orchestrates). Returns True on success."""
+        No drone push (client orchestrates). Returns True on success.
+
+        `new_config` is the full pending config handed to `runner.restart()` so a
+        restart-class runner (the native WfbEngine) rebuilds from exactly the
+        config being applied. The store is not committed until after this call
+        returns, so the engine cannot read it from `store.effective()` yet; the
+        wfbng runner ignores the arg and reads the freshly-rendered cfg file."""
         non_bf_changed = any(
             k != "beamforming" and old_link.get(k) != new_link.get(k)
             for k in set(old_link) | set(new_link)
@@ -167,7 +176,7 @@ class Api:
             if self.retune(new_link):
                 return True
             # live retune failed -> fall back to a bounce
-        return self.runner.restart()
+        return self.runner.restart(new_config)
 
     def _route_idr_forward(self, old, new, pending):
         """Start/stop the always-available IDR relay on idrForward changes.

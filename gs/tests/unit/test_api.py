@@ -11,9 +11,14 @@ from fpvdgs.config import ConfigStore
 class FakeRunner:
     def __init__(self):
         self.restarts = 0
+        self.restart_configs = []  # the config handed to each restart() call
+        self.restart_returns = []  # optional queued return values (pop-front)
 
-    def restart(self):
+    def restart(self, config=None):
         self.restarts += 1
+        self.restart_configs.append(config)
+        if self.restart_returns:
+            return self.restart_returns.pop(0)
         return True
 
     def state(self):
@@ -128,6 +133,50 @@ def test_video_encryption_change_bounces_no_live_retune():
     assert retunes == []  # NOT a live iw retune
 
 
+def test_apply_bounce_hands_new_config_to_runner_restart():
+    # The native WfbEngine rebuilds from the config handed to restart(); it must
+    # be the PENDING (new) config, NOT the not-yet-committed store. Bench-caught
+    # 2026-07-04: a link.cards/videoEncryption change applied cleanly but the
+    # engine kept the OLD wiring because _apply_gs calls runner.restart() before
+    # store.commit(), and the engine reads store.effective() (still old).
+    api, store, _, runner, retunes, ticks, _ = _api()
+    api.handle("PATCH", "/gs/config", {}, json.dumps({"link": {"videoEncryption": False}}).encode())
+    code, obj = api.handle("POST", "/gs/apply", {}, b"")
+    assert code == 200 and runner.restarts == 1
+    assert runner.restart_configs[-1] is not None  # config was threaded through
+    assert runner.restart_configs[-1]["link"]["videoEncryption"] is False  # the NEW value
+
+
+def test_apply_rollback_hands_old_config_to_runner_restart():
+    # On a failed apply-bounce the engine must rebuild from the OLD config so the
+    # rollback restores the last-good wiring.
+    cfg_out = os.path.join(tempfile.mkdtemp(), "wifibroadcast.cfg")
+    store = ConfigStore(
+        {"link": {"channel": 132, "width": 40, "region": "US", "videoEncryption": True}},
+        config_path=None,
+    )
+    runner = FakeRunner()
+    runner.restart_returns = [False, True]  # apply restart fails -> rollback restart
+    api = Api(
+        store=store,
+        schema=schema,
+        render_mod=render_mod,
+        runner=runner,
+        drone=FakeDrone(),
+        status_fn=lambda: {"ok": True},
+        cfg_out=cfg_out,
+        retune=lambda link: False,
+        wlans_resolver=lambda cfg: ["wlan0"],
+        armer_tick=lambda: None,
+    )
+    api.handle("PATCH", "/gs/config", {}, json.dumps({"link": {"videoEncryption": False}}).encode())
+    code, obj = api.handle("POST", "/gs/apply", {}, b"")
+    assert code == 500 and obj["applied"] is False
+    assert len(runner.restart_configs) == 2
+    assert runner.restart_configs[0]["link"]["videoEncryption"] is False  # apply attempt = new
+    assert runner.restart_configs[1]["link"]["videoEncryption"] is True  # rollback = old
+
+
 def test_apply_fires_armer_tick():
     api, store, drone, runner, retunes, ticks, cfg_out = _api()
     api.handle("POST", "/gs/apply", {}, b"")
@@ -169,7 +218,7 @@ class _FakeRunner:
     def __init__(self):
         self.restarts = 0
 
-    def restart(self):
+    def restart(self, config=None):
         self.restarts += 1
         return True
 
@@ -274,7 +323,7 @@ class _FakePP:
     def stop(self):
         self.calls.append(("stop", None))
 
-    def restart(self):
+    def restart(self, config=None):
         self.calls.append(("restart", None))
 
 

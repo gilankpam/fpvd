@@ -112,6 +112,10 @@ class WfbEngine:
 
         self.hub: StatsHub | None = None  # current incarnation; read by statsd/CLI/tests
 
+        # Config for the next _setup, set by restart(config=...) and consumed once
+        # (the store isn't committed until after the restart returns).
+        self._staged_config = None
+
         self._lifecycle = threading.RLock()
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
@@ -168,11 +172,18 @@ class WfbEngine:
             with self._lock:
                 self._thread = None
 
-    def restart(self) -> bool:
+    def restart(self, config=None) -> bool:
+        """Stop, then rebuild. `config`, when given, is the exact config the next
+        `_setup` builds from (consumed once) — the caller (api._apply_gs) hands
+        the pending config here because the store is not committed until after
+        the restart returns, so `_config_provider()` would still read the OLD
+        config. `config=None` falls back to `_config_provider()` (boot, reset,
+        crash-restart)."""
         with self._lifecycle:
             self.stop()
             with self._lock:
                 self._restarts += 1
+                self._staged_config = config
             return self.start()
 
     def shutdown(self) -> None:
@@ -336,7 +347,9 @@ class WfbEngine:
             self._engine_fault = False
 
         try:
-            cfg = self._config_provider()
+            with self._lock:
+                staged, self._staged_config = self._staged_config, None
+            cfg = staged if staged is not None else self._config_provider()
             link = cfg.get("link", {}) or {}
             # `parse_cards` is pure (no I/O): a concrete `link.cards`/`wlans`
             # list is returned as-is, and only the "auto" placeholder would
