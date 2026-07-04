@@ -10,6 +10,7 @@ devices are touched.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from types import SimpleNamespace
 
@@ -494,12 +495,128 @@ def test_radio_init_failure_stops_before_any_child_starts():
         engine.shutdown()
 
 
-# -- _teardown clears self.hub so a held client_factory() class takes the
-# documented `if hub is None` early-out instead of subscribing to the dead
-# hub from before the stop. -------------------------------------------------
+# -- I1: engine restart must not permanently freeze a stats subscriber -----
+#
+# Reproduces DynamicLinkController._stats_loop's reconnect contract (a
+# consumer-owned loop/thread holding one client_factory()-built instance
+# long-term) against a real WfbEngine.restart(). Before the fix, the old
+# hub is simply dropped by `_teardown()` with no wakeup, so the
+# NativeStatsSource subscribed to it blocks forever on `self._stop.wait()`
+# -- and since the consumer's reconnect loop only re-invokes the factory
+# once `run()` RETURNS, events stop flowing forever even though a brand
+# new hub (and new children) is up and running post-restart.
 
 
-def test_teardown_clears_hub_for_dead_hub_early_out():
+def test_engine_restart_rebinds_stats_subscriber_without_freezing():
+    import asyncio
+    import threading
+
+    from fpvdgs.dynlink.stats_client import SessionEvent
+
+    engine, rec = make_engine()
+    try:
+        assert engine.start() is True
+        # Mimic DynamicLinkController: call client_factory() ONCE and hold
+        # the returned class long-term, across restart().
+        factory_cls = engine.client_factory()
+
+        events = []
+        state = {}
+
+        def consumer_thread_main():
+            async def stats_loop():
+                stop_event = asyncio.Event()
+                state["stop_event"] = stop_event
+                state["loop"] = asyncio.get_running_loop()
+                # Mirrors DynamicLinkController._stats_loop exactly: a
+                # fresh client per reconnect attempt, retried until
+                # stop_event fires, with a short backoff between attempts.
+                while not stop_event.is_set():
+                    client = factory_cls("tcp://ignored:0", events.append)
+                    run_task = asyncio.ensure_future(client.run())
+                    stop_task = asyncio.ensure_future(stop_event.wait())
+                    try:
+                        await asyncio.wait(
+                            {run_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
+                        )
+                    finally:
+                        client.stop()
+                        for t in (run_task, stop_task):
+                            t.cancel()
+                    if stop_event.is_set():
+                        break
+                    try:
+                        await asyncio.wait_for(stop_event.wait(), timeout=0.05)
+                    except asyncio.TimeoutError:
+                        pass
+
+            # asyncio.run() (rather than a bare new_event_loop()) drains and
+            # cancels every leftover task -- including the nested ones
+            # spawned inside client.run() -- before closing the loop, so a
+            # forceful test-side stop doesn't leak "Task was destroyed but
+            # it is pending" warnings from tasks that never got a final
+            # turn to process their own cancellation.
+            asyncio.run(stats_loop())
+
+        thread = threading.Thread(target=consumer_thread_main, daemon=True)
+        thread.start()
+
+        def make_session(epoch):
+            return {
+                "fec_type": "swfec",
+                "fec_k": 1,
+                "fec_n": 2,
+                "epoch": epoch,
+                "contract_version": 3,
+            }
+
+        def seen(epoch):
+            return any(isinstance(ev, SessionEvent) and ev.session.epoch == epoch for ev in events)
+
+        def post_and_check(hub, epoch):
+            # Re-posts on every poll (harmless: each phase uses its OWN
+            # unique epoch marker, so a late-arriving duplicate from an
+            # earlier poll can never satisfy the OTHER phase's check).
+            hub.process_new_session("video_rx", make_session(epoch))
+            return seen(epoch)
+
+        hub1 = engine.hub
+        assert hub1 is not None
+        assert _wait_until(lambda: engine.hub is hub1)
+        assert _wait_until(lambda: post_and_check(hub1, 101), timeout=5.0)
+
+        events.clear()
+        assert engine.restart() is True
+        hub2 = engine.hub
+        assert hub2 is not None
+        assert hub2 is not hub1
+
+        # The SAME long-held client instance must rebind to the new hub and
+        # keep delivering events -- within a bounded timeout, not forever.
+        assert _wait_until(
+            lambda: post_and_check(hub2, 202), timeout=5.0
+        ), "stats subscriber never rebound to the post-restart hub"
+    finally:
+        loop = state.get("loop")
+        stop_event = state.get("stop_event")
+        if loop is not None and stop_event is not None:
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(stop_event.set)
+        thread.join(timeout=5.0)
+        engine.shutdown()
+
+
+# -- _teardown clears self.hub, and a held client_factory() class must NOT
+# treat that as terminal: `run()` polls quietly for a hub to come back
+# instead of returning, and only unblocks on an explicit stop(). (Before
+# the I1 fix, run() returned immediately on `hub is None` -- fine for
+# DynamicLinkController's own reconnect loop, but ConnectionMonitor has no
+# such loop, so a returned run() there permanently kills reachability
+# tracking. The fix moves the retry INSIDE run() so both callers are safe
+# without either of them changing.) ------------------------------------
+
+
+def test_teardown_clears_hub_but_run_polls_quietly_until_stop():
     import asyncio
 
     engine, rec = make_engine()
@@ -517,11 +634,15 @@ def test_teardown_clears_hub_for_dead_hub_early_out():
 
         async def _drive():
             client = factory_cls("tcp://ignored:0", got.append)
-            await asyncio.wait_for(client.run(), timeout=2.0)
+            run_task = asyncio.ensure_future(client.run())
+            # No hub will ever come back in this test -- run() must NOT
+            # return on its own (a self-returned run() reads as terminal
+            # to ConnectionMonitor, which never re-invokes the factory).
+            await asyncio.sleep(1.0)
+            assert not run_task.done(), "run() returned on its own with no explicit stop()"
+            client.stop()
+            await asyncio.wait_for(run_task, timeout=2.0)
 
-        # run() must hit the `if hub is None: return` early-out and come
-        # back promptly, rather than subscribing to the now-dead hub (or
-        # hanging waiting on it).
         asyncio.run(_drive())
         assert got == []
     finally:

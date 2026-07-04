@@ -79,6 +79,16 @@ def test_rx_malformed_lines_skipped():
     assert windows == [] and sessions == []
 
 
+def test_rx_ant_short_key_skipped_not_indexerror():
+    # A 2-part "freq:mcs" key (missing bw) must be rejected by the parser
+    # itself, not silently accepted and left to IndexError downstream in
+    # aggregator._to_rx_event (which unpacks key as (freq, mcs, bw)).
+    p, windows, _ = _collect()
+    p.feed_line("100\tRX_ANT\t5660:5\t0\t95:-52:-48:-45:26:28:30:22:24:26")
+    p.feed_line("100\tPKT\t50:1000:0:0:50:50:0:0:0:50:900")
+    assert windows[0][2] == {}  # malformed ant entry skipped, window still flushes
+
+
 def test_tx_handshake_unix_sockets_and_control_port():
     done = []
     p = TxLineParser("mavlink tx", on_window=lambda *a: None)

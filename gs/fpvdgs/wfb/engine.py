@@ -44,6 +44,7 @@ log = logging.getLogger("fpvdgs.wfb")
 AGGREGATE_INTERVAL_S = 0.1
 START_JOIN_TIMEOUT_S = 30.0
 STOP_JOIN_TIMEOUT_S = 30.0
+_HUB_POLL_INTERVAL_S = 0.5  # client_factory()'s retry cadence while engine.hub is None
 
 RX_LEG_ORDER = ("video_rx", "mavlink_rx", "tunnel_rx")
 TX_LEG_ORDER = ("mavlink_tx", "tunnel_tx")
@@ -190,10 +191,19 @@ class WfbEngine:
         construct a fresh instance per reconnect attempt. Each instance
         resolves `self.hub` at `run()` time rather than baking in a
         particular hub, so a reconnect attempt made *after* an engine
-        restart binds to the new hub. A connection already in progress when
-        a restart happens keeps talking to the old (now-idle) hub until
-        that `run()` call ends on its own — full mid-flight rebinding is out
-        of scope here.
+        restart binds to the new hub.
+
+        `run()` does NOT return just because the CURRENT hub went away
+        (`StatsHub.close()`, fired by `_teardown` before a `restart()`/
+        `stop()` drops `engine.hub`) — it loops internally, polling for the
+        next hub and resubscribing to it. This matters because the two
+        callers' reconnect contracts differ: `DynamicLinkController.
+        _stats_loop` reconnects indefinitely across a returned/raised
+        `run()`, but `ConnectionMonitor._run()` has no such outer loop — a
+        returned `run()` there is terminal for the whole monitor thread.
+        Looping in here (rather than relying on the caller to re-invoke the
+        factory) is what makes rebinding actually happen for BOTH, without
+        touching either caller.
         """
         engine = self
 
@@ -203,17 +213,44 @@ class WfbEngine:
                 self._on_event = on_event
                 self._kw = kw
                 self._inner = None
+                self._stop: asyncio.Event | None = None
 
             async def run(self):
-                with engine._lock:
-                    hub = engine.hub
-                if hub is None:
-                    return  # engine not up yet; caller's reconnect loop retries
-                inner_cls = hub.client_factory()
-                self._inner = inner_cls(self._endpoint, self._on_event, **self._kw)
-                await self._inner.run()
+                self._stop = asyncio.Event()
+                while not self._stop.is_set():
+                    with engine._lock:
+                        hub = engine.hub
+                    if hub is None:
+                        # Engine not up yet, or between this restart's
+                        # teardown and its next setup -- wait briefly and
+                        # retry rather than returning (a returned run() is
+                        # terminal for ConnectionMonitor; see docstring).
+                        with contextlib.suppress(asyncio.TimeoutError):
+                            await asyncio.wait_for(self._stop.wait(), timeout=_HUB_POLL_INTERVAL_S)
+                        continue
+                    inner_cls = hub.client_factory()
+                    self._inner = inner_cls(self._endpoint, self._on_event, **self._kw)
+                    try:
+                        # Awaited directly (not wrapped in its own Task): a
+                        # `stop()` call reaches this via `self._inner.stop()`
+                        # below, and a hub `close()` reaches it via the
+                        # inner `NativeStatsSource`'s own closed_event race
+                        # -- either way `run()` returns on its own, so there
+                        # is nothing left to separately race here. Direct
+                        # awaiting also means an external cancellation of
+                        # THIS task propagates straight into the inner
+                        # coroutine's own suspension point instead of
+                        # leaving an orphaned sibling Task behind.
+                        await self._inner.run()
+                    finally:
+                        self._inner = None
+                    # `run()` returning means the inner NativeStatsSource's
+                    # hub closed (restart/stop) or stop() fired -- loop back
+                    # to recheck `self._stop` and re-resolve engine.hub.
 
             def stop(self):
+                if self._stop is not None:
+                    self._stop.set()
                 if self._inner is not None:
                     self._inner.stop()
 
@@ -348,6 +385,10 @@ class WfbEngine:
                 self._stats_server = stats_server
         except Exception:
             log.exception("wfb engine: service wiring failed")
+            # Close BEFORE dropping the reference: any stats subscriber that
+            # already resolved `self.hub` (or races `subscribe()` against
+            # this close) must be woken rather than left hanging forever.
+            hub.close()
             with contextlib.suppress(Exception):
                 await stats_server.stop()
             with contextlib.suppress(Exception):
@@ -384,6 +425,16 @@ class WfbEngine:
 
     # ---- teardown -----------------------------------------------------------
     async def _teardown(self) -> None:
+        # Close BEFORE dropping the reference (see `client_factory`'s
+        # docstring): wakes every `NativeStatsSource.run()` subscribed to
+        # this hub immediately, so a held stats subscriber rebinds to the
+        # NEXT hub instead of blocking forever on a hub nobody aggregates
+        # into again once this restart's/stop's teardown proceeds.
+        with self._lock:
+            hub = self.hub
+        if hub is not None:
+            hub.close()
+
         if self._tick_task is not None:
             self._tick_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

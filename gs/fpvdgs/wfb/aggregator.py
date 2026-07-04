@@ -68,6 +68,11 @@ class _Subscription:
     def __init__(self, hub, loop, on_event):
         self._hub, self._loop, self._on_event = hub, loop, on_event
         self.queue = collections.deque(maxlen=256)  # drop-oldest backstop
+        # Created on the CONSUMER's own loop (subscribe() is always called
+        # from the consumer's run() coroutine), so it's safe for that same
+        # loop to `await` it. StatsHub.close() wakes it cross-thread via
+        # `loop.call_soon_threadsafe` -- see StatsHub.close().
+        self.closed_event = asyncio.Event()
 
     def _push(self, ev):
         # runs on the producer (engine) thread
@@ -101,6 +106,7 @@ class StatsHub:
         self._txsel = tx_selector
         self._time = time_fn
         self._lock = threading.Lock()
+        self._closed = False
         self._subs: list[_Subscription] = []
         self._rssi_cbs, self._ant_sel_cbs = [], []
         self._cur: dict[str, tuple] = {}  # child_id -> (ant, packets)
@@ -277,7 +283,15 @@ class StatsHub:
     def subscribe(self, loop, on_event) -> _Subscription:
         sub = _Subscription(self, loop, on_event)
         with self._lock:
-            self._subs.append(sub)
+            already_closed = self._closed
+            if not already_closed:
+                self._subs.append(sub)
+        if already_closed:
+            # A subscribe() racing a close() (e.g. the engine already tore
+            # this hub down but a consumer's factory-built source hadn't
+            # resolved it yet) must not wait forever either -- it's already
+            # on the CONSUMER's own loop here, so no cross-thread hop needed.
+            sub.closed_event.set()
         return sub
 
     def unsubscribe(self, sub) -> None:
@@ -286,6 +300,28 @@ class StatsHub:
                 self._subs.remove(sub)
             except ValueError:
                 pass  # already removed — double-close is a harmless no-op
+
+    def close(self) -> None:
+        """Idempotent shutdown: mark the hub closed and wake every current
+        subscriber's `closed_event` so a `NativeStatsSource.run()` blocked
+        on it returns promptly instead of hanging on a hub nobody will ever
+        aggregate into again (see the "TX RESPAWN NOTE"-adjacent restart
+        story in `engine.py`'s `_teardown`/`client_factory` docstrings).
+
+        Must be called BEFORE the owner drops its reference to this hub, so
+        a consumer's `run()` that is mid-resolve (`engine.hub` still
+        pointing here) either observes `_closed` at `subscribe()` time (see
+        above) or gets woken via this loop."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            subs = list(self._subs)
+        for sub in subs:
+            try:
+                sub._loop.call_soon_threadsafe(sub.closed_event.set)
+            except RuntimeError:
+                pass  # consumer loop already closed/closing — nothing to wake
 
     def add_raw_listener(self, cb) -> None:
         with self._lock:
@@ -335,9 +371,20 @@ class StatsHub:
                             timestamp=hub._time(), id=child_id, session=_to_session_info(ses)
                         )
                     )
+                stop_task = asyncio.ensure_future(self._stop.wait())
+                closed_task = asyncio.ensure_future(self._sub.closed_event.wait())
                 try:
-                    await self._stop.wait()
+                    # Wait on EITHER an explicit stop() OR the hub closing
+                    # (engine teardown/restart) -- otherwise a subscriber
+                    # whose hub was torn down out from under it blocks here
+                    # forever, and its consumer (which only reconnects once
+                    # run() RETURNS) never notices the hub is dead.
+                    await asyncio.wait(
+                        {stop_task, closed_task}, return_when=asyncio.FIRST_COMPLETED
+                    )
                 finally:
+                    stop_task.cancel()
+                    closed_task.cancel()
                     self._sub.close()
 
             def stop(self):

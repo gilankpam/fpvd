@@ -71,6 +71,8 @@ class RxLineParser:
                 if len(cols) != 5:
                     raise _Bad()
                 key = tuple(int(v) for v in cols[2].split(":"))
+                if len(key) != 3:
+                    raise _Bad()
                 vals = tuple(int(v) for v in cols[4].split(":"))
                 if len(vals) == 7:  # pre-EVM wfb_rx
                     vals = vals + (-1, -1, -1)

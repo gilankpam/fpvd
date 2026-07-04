@@ -178,6 +178,22 @@ def _validate_wfb(wfb: dict) -> None:
             isinstance(abs_delta, bool) or not isinstance(abs_delta, int) or abs_delta < 0
         ):
             raise SchemaError("wfb.txSelector.counterAbsDelta must be a non-negative int")
+    mav = wfb.get("mavlink")
+    if mav is not None:
+        if not isinstance(mav, dict):
+            raise SchemaError("wfb.mavlink must be an object")
+        _validate_mavlink_peer("wfb.mavlink.peer", mav.get("peer"))
+
+
+def _validate_mavlink_peer(name: str, v) -> None:
+    if not isinstance(v, str) or not v:
+        raise SchemaError(f"{name} must be a non-empty string")
+    scheme, sep, rest = v.partition("://")
+    if not sep or scheme not in ("connect", "listen"):
+        raise SchemaError(f"{name} must match connect://host:port or listen://host:port")
+    host, sep2, port = rest.rpartition(":")
+    if not sep2 or not host or not port.isdigit():
+        raise SchemaError(f"{name} must match connect://host:port or listen://host:port")
 
 
 def _validate_beamforming(bf: dict) -> None:

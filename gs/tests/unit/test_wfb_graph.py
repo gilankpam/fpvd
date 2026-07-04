@@ -321,6 +321,15 @@ def test_mavlink_peer_listen_scheme_parsed():
     assert g.mav_peer.peer == "listen://0.0.0.0:14550"
 
 
+def test_mavlink_peer_missing_raises_clean_valueerror():
+    import pytest
+
+    cfg = copy.deepcopy(default_config())
+    cfg["wfb"]["mavlink"]["peer"] = None
+    with pytest.raises(ValueError, match="wfb.mavlink.peer required"):
+        _build(cfg)
+
+
 def test_wfb_raw_nonempty_warns_and_is_ignored(caplog):
     cfg = copy.deepcopy(default_config())
     cfg["wfb"]["raw"] = {"some_stray_key": "value"}

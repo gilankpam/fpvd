@@ -228,7 +228,10 @@ def build_graph(effective: dict, wlans: list[str], *, rand_suffix: Callable[[], 
         unix_path=tun_tx_sock,
     )
 
-    mav_peer = MavlinkConfig(peer=(wfb.get("mavlink", {}) or {}).get("peer"))
+    mav_peer_url = (wfb.get("mavlink", {}) or {}).get("peer")
+    if not mav_peer_url:
+        raise ValueError("wfb.mavlink.peer required")
+    mav_peer = MavlinkConfig(peer=mav_peer_url)
     tun_cfg = TunnelConfig(ifname="gs-wfb", ifaddr="10.5.0.1/24", mtu=1445, agg_timeout=0.005)
 
     return GsGraph(

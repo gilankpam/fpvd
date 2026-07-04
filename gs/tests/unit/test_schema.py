@@ -531,3 +531,62 @@ def test_wfb_tx_selector_rejects_unknown_key():
 
 def test_config_patch_accepts_sparse_wfb_engine():
     validate_config_patch({"wfb": {"engine": "native"}})
+
+
+def test_wfb_mavlink_peer_null_rejected():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"mavlink": {"peer": None}},
+            }
+        )
+
+
+def test_wfb_mavlink_peer_missing_rejected():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"mavlink": {}},
+            }
+        )
+
+
+def test_wfb_mavlink_peer_malformed_rejected():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"mavlink": {"peer": "http://127.0.0.1:14550"}},
+            }
+        )
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"mavlink": {"peer": "connect://127.0.0.1"}},
+            }
+        )
+
+
+def test_wfb_mavlink_peer_valid_schemes_accepted():
+    schema.validate_effective(
+        {
+            "link": {"channel": 132, "region": "US"},
+            "wfb": {"mavlink": {"peer": "connect://127.0.0.1:14550"}},
+        }
+    )
+    schema.validate_effective(
+        {
+            "link": {"channel": 132, "region": "US"},
+            "wfb": {"mavlink": {"peer": "listen://0.0.0.0:14550"}},
+        }
+    )
+
+
+def test_wfb_no_mavlink_block_is_allowed():
+    # wfb.mavlink is optional at the block level; only required WHEN present.
+    schema.validate_effective(
+        {"link": {"channel": 132, "region": "US"}, "wfb": {"engine": "native"}}
+    )
