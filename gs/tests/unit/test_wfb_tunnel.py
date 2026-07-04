@@ -1,0 +1,331 @@
+"""Tests for the tuntap tunnel (gs/fpvdgs/wfb/tunnel.py): the frame batch
+codec, the keepalive state machine, and the asyncio TunnelService plumbing.
+
+Real-tun integration (opening /dev/net/tun + `ip` CLI configuration) is not
+tested here — it needs root and a real network namespace. Instead,
+`_FakeTun` stands in for `TunTap` via the `tun_factory` injection point.
+
+`_FakeTun` uses a `socket.socketpair()` rather than a plain `os.pipe()`: a
+real tun fd is a single, full-duplex fd (`os.read` drains uplink packets,
+`os.write` injects downlink packets, both on the same fd number) — a pipe
+only ever flows one direction per fd, so it cannot stand in for both
+directions at once. A socketpair is bidirectional and both ends behave
+like ordinary fds under `os.read`/`os.write`, which is what the service
+code under test actually calls.
+"""
+
+import asyncio
+import os
+import socket
+import struct
+
+from fpvdgs.wfb.tunnel import (
+    TunnelConfig,
+    TunnelService,
+    pack_tun,
+    unpack_batch,
+)
+
+
+def run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
+# ---- (a): pure frame batch codec -------------------------------------------
+
+
+def test_pack_tun_round_trip_single_packet():
+    data = b"hello-ip-packet"
+    assert unpack_batch(pack_tun(data)) == [data]
+
+
+def test_unpack_batch_multi_packet():
+    p1, p2, p3 = b"a", b"bb", b"ccc"
+    batch = pack_tun(p1) + pack_tun(p2) + pack_tun(p3)
+    assert unpack_batch(batch) == [p1, p2, p3]
+
+
+def test_unpack_batch_empty_message_is_keepalive_noop():
+    assert unpack_batch(b"") == []
+
+
+def test_unpack_batch_corrupted_header_logs_and_stops(caplog):
+    p1 = b"a"
+    batch = pack_tun(p1) + b"\x00"  # 1 trailing byte: not enough for a length header
+    with caplog.at_level("WARNING"):
+        result = unpack_batch(batch)
+    assert result == [p1]
+    assert any("Corrupted tunneled packet header" in r.message for r in caplog.records)
+
+
+def test_unpack_batch_truncated_body_logs_and_stops():
+    p1 = b"a"
+    # claims a 10-byte body but only 5 bytes follow
+    batch = pack_tun(p1) + struct.pack("!H", 10) + b"short"
+    result = unpack_batch(batch)
+    assert result == [p1]
+
+
+def test_unpack_batch_truncated_tail_after_valid_packets_still_returns_prior():
+    p1, p2 = b"first", b"second"
+    good = pack_tun(p1) + pack_tun(p2)
+    truncated_tail = good + struct.pack("!H", 99) + b"nope"
+    assert unpack_batch(truncated_tail) == [p1, p2]
+
+
+# ---- (b): keepalive state machine, driven directly (no real sleeps) -------
+
+
+class _RecordingSock:
+    def __init__(self):
+        self.sent: list[bytes] = []
+
+    def send(self, data):
+        self.sent.append(data)
+
+
+def _service_with_fake_tx_socks():
+    service = TunnelService(TunnelConfig())
+    a, b = _RecordingSock(), _RecordingSock()
+    service._tx_socks = {"a": a, "b": b}
+    service._tx_sock_name = "a"
+    service._tx_sock = a
+    return service, a, b
+
+
+def test_keepalive_fresh_rx_suppresses_broadcast_but_not_directed():
+    service, a, b = _service_with_fake_tx_socks()
+    service._pkt_in_sem = 1  # RX seen within the last interval -> no broadcast
+    service._pkt_out_sem = 0  # idle TX -> directed keepalive to current only
+
+    service._keepalive_tick()
+
+    assert a.sent == [b""]  # current tx socket got the directed keepalive
+    assert b.sent == []  # never touched: broadcast route did not fire
+    assert service._pkt_in_sem == 0
+    assert service._pkt_out_sem == 0
+
+
+def test_keepalive_idle_two_intervals_broadcasts_to_all():
+    service, a, b = _service_with_fake_tx_socks()
+    service._pkt_in_sem = 0  # no RX for 2 whole intervals
+    service._pkt_out_sem = 0  # also idle TX, but broadcast route takes priority
+
+    service._keepalive_tick()
+
+    assert a.sent == [b""]
+    assert b.sent == [b""]
+
+
+def test_keepalive_tx_traffic_suppresses_directed_keepalive():
+    service, a, b = _service_with_fake_tx_socks()
+    service._pkt_in_sem = 1  # not idle enough to broadcast
+    service._pkt_out_sem = 1  # fresh TX -> no directed keepalive either
+
+    service._keepalive_tick()
+
+    assert a.sent == []
+    assert b.sent == []
+    assert service._pkt_in_sem == 0
+    assert service._pkt_out_sem == 0
+
+
+def test_keepalive_full_lifecycle_matches_state_machine():
+    service, a, b = _service_with_fake_tx_socks()
+    # A batch just arrived from the peer and we just sent uplink data.
+    service._pkt_in_sem = 2
+    service._pkt_out_sem = 1
+
+    service._keepalive_tick()  # fresh both ways -> nothing sent
+    assert a.sent == [] and b.sent == []
+    assert (service._pkt_in_sem, service._pkt_out_sem) == (1, 0)
+
+    service._keepalive_tick()  # pkt_out_sem now 0 -> directed keepalive
+    assert a.sent == [b""] and b.sent == []
+    assert (service._pkt_in_sem, service._pkt_out_sem) == (0, 0)
+
+    service._keepalive_tick()  # pkt_in_sem now 0 too -> broadcast to all
+    assert a.sent == [b"", b""] and b.sent == [b""]
+    assert (service._pkt_in_sem, service._pkt_out_sem) == (0, 0)
+
+
+# ---- (c)/(d): asyncio TunnelService plumbing via a fake tun fd -------------
+
+
+class _FakeTun:
+    """Test double for `TunTap` — see module docstring for why a
+    socketpair, not a plain `os.pipe()`, backs the fake fd."""
+
+    def __init__(self, name, addr_cidr, mtu):
+        self.name = name
+        self.addr_cidr = addr_cidr
+        self.mtu = mtu - 2
+        # SOCK_DGRAM so each os.read/os.write is one packet, matching a real
+        # tun fd's one-read-one-packet semantics (SOCK_STREAM would coalesce
+        # writes and lose the packet boundary the codec relies on).
+        self.sock, self.peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+        self.sock.setblocking(False)
+        self.peer.setblocking(False)
+        self.fd = self.sock.fileno()
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+        self.sock.close()
+
+
+async def _recv_one(sock, timeout=2.0):
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        try:
+            return sock.recv(65536)
+        except BlockingIOError:
+            if loop.time() > deadline:
+                raise TimeoutError("no data arrived") from None
+            await asyncio.sleep(0.005)
+
+
+def test_tun_read_batches_through_agg_and_forwards_to_current_tx_socket():
+    async def main():
+        cfg = TunnelConfig(agg_timeout=0.01, keepalive_s=10.0)
+        service = TunnelService(cfg)
+        fake_tun = _FakeTun(cfg.ifname, cfg.ifaddr, cfg.mtu)
+
+        def factory(name, addr_cidr, mtu):
+            return fake_tun
+
+        rx_unix_path = "fpvd-test-tunnel-rx-" + os.urandom(4).hex()
+        tx_unix_path = "fpvd-test-tunnel-tx-" + os.urandom(4).hex()
+
+        loop = asyncio.get_running_loop()
+        await service.start(loop, rx_unix_path, tun_factory=factory)
+
+        fake_tx = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        fake_tx.setblocking(False)
+        fake_tx.bind("\0" + tx_unix_path)
+        try:
+            service.set_tx_socket(tx_unix_path)
+
+            payload = b"uplink-ip-packet-from-the-os"
+            fake_tun.peer.send(payload)  # simulate the kernel handing a packet to the tun fd
+
+            got = await _recv_one(fake_tx)
+            assert got == pack_tun(payload)
+        finally:
+            fake_tx.close()
+            await service.stop()
+
+    run(main())
+
+
+def test_rx_unix_batch_written_unpacked_to_fake_tun_fd():
+    async def main():
+        cfg = TunnelConfig(agg_timeout=0.01, keepalive_s=10.0)
+        service = TunnelService(cfg)
+        fake_tun = _FakeTun(cfg.ifname, cfg.ifaddr, cfg.mtu)
+
+        def factory(name, addr_cidr, mtu):
+            return fake_tun
+
+        rx_unix_path = "fpvd-test-tunnel-rx2-" + os.urandom(4).hex()
+        loop = asyncio.get_running_loop()
+        await service.start(loop, rx_unix_path, tun_factory=factory)
+
+        fake_rx = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            pkt1, pkt2 = b"downlink-packet-one", b"downlink-packet-two"
+            batch = pack_tun(pkt1) + pack_tun(pkt2)
+            fake_rx.connect("\0" + rx_unix_path)
+            fake_rx.send(batch)
+
+            got1 = await _recv_one(fake_tun.peer)
+            got2 = await _recv_one(fake_tun.peer)
+            assert [got1, got2] == [pkt1, pkt2]
+        finally:
+            fake_rx.close()
+            await service.stop()
+
+    run(main())
+
+
+def test_rx_empty_batch_is_ignored_as_keepalive():
+    async def main():
+        cfg = TunnelConfig(agg_timeout=0.01, keepalive_s=10.0)
+        service = TunnelService(cfg)
+        fake_tun = _FakeTun(cfg.ifname, cfg.ifaddr, cfg.mtu)
+
+        def factory(name, addr_cidr, mtu):
+            return fake_tun
+
+        rx_unix_path = "fpvd-test-tunnel-rx3-" + os.urandom(4).hex()
+        loop = asyncio.get_running_loop()
+        await service.start(loop, rx_unix_path, tun_factory=factory)
+
+        fake_rx = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            assert service._pkt_in_sem == 0
+            fake_rx.connect("\0" + rx_unix_path)
+            fake_rx.send(b"")  # keepalive
+
+            # give the datagram a moment to be delivered, then confirm
+            # pkt_in_sem was bumped (peer is alive) with nothing written to tun
+            for _ in range(50):
+                if service._pkt_in_sem == 2:
+                    break
+                await asyncio.sleep(0.005)
+            assert service._pkt_in_sem == 2
+
+            try:
+                fake_tun.peer.recv(65536)
+            except BlockingIOError:
+                pass
+            else:
+                raise AssertionError("keepalive payload must not be written to the tun fd")
+        finally:
+            fake_rx.close()
+            await service.stop()
+
+    run(main())
+
+
+def test_set_all_tx_sockets_updates_broadcast_set_and_reuses_current():
+    async def main():
+        cfg = TunnelConfig(agg_timeout=0.01, keepalive_s=10.0)
+        service = TunnelService(cfg)
+        fake_tun = _FakeTun(cfg.ifname, cfg.ifaddr, cfg.mtu)
+
+        def factory(name, addr_cidr, mtu):
+            return fake_tun
+
+        rx_unix_path = "fpvd-test-tunnel-rx4-" + os.urandom(4).hex()
+        tx_a = "fpvd-test-tunnel-tx-a-" + os.urandom(4).hex()
+        tx_b = "fpvd-test-tunnel-tx-b-" + os.urandom(4).hex()
+
+        loop = asyncio.get_running_loop()
+        await service.start(loop, rx_unix_path, tun_factory=factory)
+
+        fake_a = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        fake_a.setblocking(False)
+        fake_a.bind("\0" + tx_a)
+        fake_b = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        fake_b.setblocking(False)
+        fake_b.bind("\0" + tx_b)
+        try:
+            service.set_all_tx_sockets([tx_a, tx_b])
+            service.set_tx_socket(tx_a)
+            assert set(service._tx_socks) == {tx_a, tx_b}
+            assert service._tx_sock_name == tx_a
+
+            # dropping tx_a from the broadcast set while it's the current
+            # selection clears the current selection too (it's no longer
+            # a socket the service owns).
+            service.set_all_tx_sockets([tx_b])
+            assert set(service._tx_socks) == {tx_b}
+            assert service._tx_sock_name is None
+        finally:
+            fake_a.close()
+            fake_b.close()
+            await service.stop()
+
+    run(main())
