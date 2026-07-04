@@ -126,3 +126,26 @@ def test_video_encryption_default_omits_keypair():
     # EFFECTIVE has no videoEncryption key -> treated as encrypted -> no keypair line.
     parsed = _parse_literals(render_cfg(EFFECTIVE))
     assert "keypair" not in parsed.get("gs_video", {})
+
+
+def test_render_emits_tap_port_in_gs_video_only():
+    from fpvdgs.config_defaults import default_config
+    from fpvdgs.render import render_cfg
+
+    text = render_cfg(default_config())
+    video = text.split("[gs_video]")[1].split("[")[0]
+    assert "dynlink_tap_port = 8110" in video
+    for section in ("[gs_mavlink]", "[gs_tunnel]"):
+        rest = text.split(section)[1].split("[")[0]
+        assert "dynlink_tap_port" not in rest
+
+
+def test_render_tap_disabled_omits_port():
+    import copy
+
+    from fpvdgs.config_defaults import default_config
+    from fpvdgs.render import render_cfg
+
+    cfg = copy.deepcopy(default_config())
+    cfg["dynamicLink"]["tap"]["enabled"] = False
+    assert "dynlink_tap_port" not in render_cfg(cfg)

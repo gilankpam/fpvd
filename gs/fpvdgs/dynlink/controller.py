@@ -19,6 +19,7 @@ from .config_build import build_aggregator, build_policy_config
 from .policy import Policy
 from .return_link import ReturnLink
 from .stats_client import RxEvent, SessionEvent, StatsClient
+from .tap_client import TapProtocol
 from .wire import Encoder as WireEncoder
 
 log = logging.getLogger("fpvdgs.dynlink")
@@ -53,6 +54,7 @@ class DynamicLinkController:
             "lastEmitMs": None,
             "emitSeq": 0,
             "reason": "",
+            "tapActive": False,
         }
         if bus is not None:
             bus.subscribe(DRONE_CONNECTED, self._on_drone_connected)
@@ -148,6 +150,72 @@ class DynamicLinkController:
         def _is_video(ev):
             return ev.id is not None and video_id in ev.id.lower()
 
+        # --- dynlink tap (2026-07-02 spec): micro-window mode + fast demote ---
+        tap_cfg = snap.get("tap") or {}
+        tap_enabled = bool(tap_cfg.get("enabled", True))
+        tap_port = int(tap_cfg.get("port", 8110))
+        tap_stale_s = float(tap_cfg.get("staleMs", 500)) / 1000.0
+        tap_state = {"last_rx": None, "micros": 0}
+        # _status survives a set_config rebuild (same controller object), so a
+        # fresh loop must not inherit the previous incarnation's tapActive —
+        # e.g. tap.enabled=false would otherwise report tapActive=true forever.
+        self._set(tapActive=False)
+        tap_capture = None
+        if tap_enabled and bool(tap_cfg.get("captureRaw", False)):
+            from .tap_client import TapCapture
+
+            tap_capture = TapCapture()
+
+        def _tap_alive():
+            lr = tap_state["last_rx"]
+            return lr is not None and (time.monotonic() - lr) < tap_stale_s
+
+        def _emit(decision):
+            return_link.send(encoder.encode(decision))
+            self._set(
+                decision={"mcs": decision.mcs},
+                reason=decision.reason,
+                lastEmitMs=int(time.monotonic() * 1000),
+                emitSeq=self._status["emitSeq"] + 1,
+            )
+
+        def _mark_tap_rx():
+            was = _tap_alive()
+            tap_state["last_rx"] = time.monotonic()
+            if not was:
+                tap_state["micros"] = 0
+                aggregator.reset_micro_window()
+                aggregator.signals.tap_active = True
+                self._set(tapActive=True)
+                log.info("dynlink: tap feed live — micro-window mode")
+
+        def on_micro(rec):
+            _mark_tap_rx()
+            if tap_capture is not None:
+                tap_capture.write("micro", rec)
+            signals = aggregator.consume_micro(rec, now_s=time.time())
+            if rec.pkt_lost:
+                d = policy.loss_event(signals)
+                if d is not None:
+                    _emit(d)
+            tap_state["micros"] += 1
+            if tap_state["micros"] % 10 == 0:
+                _emit(policy.tick(signals))
+
+        def on_loss(rec):
+            _mark_tap_rx()
+            if tap_capture is not None:
+                tap_capture.write("loss", rec)
+            # Latency here is GS receive->decision only; the fork-side 2 ms
+            # coalesce holdoff and datagram transit are not included, so the
+            # flightlog's loss_latency_ms underreports true loss->decision
+            # latency by ~1-3 ms.
+            t0 = time.monotonic()
+            signals = aggregator.consume_loss(rec, now_s=time.time())
+            d = policy.loss_event(signals, latency_ms=(time.monotonic() - t0) * 1000.0)
+            if d is not None:
+                _emit(d)
+
         def on_event(ev):
             if isinstance(ev, SessionEvent):
                 if _is_video(ev):
@@ -156,14 +224,27 @@ class DynamicLinkController:
             if isinstance(ev, RxEvent):
                 if not _is_video(ev):
                     return
+                if ev.session is not None:
+                    aggregator.update_session(ev.session)
+                if _tap_alive():
+                    return  # tap drives folding + ticks; :8103 is session-only
+                if aggregator.signals.tap_active:
+                    aggregator.signals.tap_active = False
+                    self._set(tapActive=False)
+                    log.info("dynlink: tap stale — fallback to :8103 ticks")
                 signals = aggregator.consume(ev)
-                decision = policy.tick(signals)
-                return_link.send(encoder.encode(decision))
-                self._set(
-                    decision={"mcs": decision.mcs},
-                    reason=decision.reason,
-                    lastEmitMs=int(time.monotonic() * 1000),
-                    emitSeq=self._status["emitSeq"] + 1,
+                _emit(policy.tick(signals))
+
+        tap_transport = None
+        if tap_enabled:
+            try:
+                tap_transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(
+                    lambda: TapProtocol(on_micro, on_loss),
+                    local_addr=("127.0.0.1", tap_port),
+                )
+            except OSError as e:
+                log.warning(
+                    "dynlink: tap bind 127.0.0.1:%d failed: %s — fallback mode", tap_port, e
                 )
 
         self._stop_event = asyncio.Event()
@@ -174,6 +255,10 @@ class DynamicLinkController:
         try:
             await self._stats_loop(on_event)
         finally:
+            if tap_transport is not None:
+                tap_transport.close()
+            if tap_capture is not None:
+                tap_capture.close()
             policy.close()
             return_link.close()
             with self._lock:

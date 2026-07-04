@@ -579,6 +579,7 @@ class Policy:
                 "prior_learn": prior_learn,
                 "slope": slope,
                 "predict_gated": predict_gated,
+                "tap_active": signals.tap_active,
             }
         )
         return Decision(
@@ -591,6 +592,65 @@ class Policy:
                 "residual_loss_w": signals.residual_loss_w,
                 "fec_work": signals.fec_work,
                 "link_starved": sustained_starved,
+                "mcs": new_mcs,
+            },
+        )
+
+    def loss_event(self, signals: Signals, latency_ms: float | None = None) -> Decision | None:
+        """Fast-path reactive demote — called by the controller the moment
+        tap loss is observed, outside the 10 Hz tick. A pure latency cut of
+        the tick's single-window loss rule: same video_demote_per threshold
+        (signals carry the rolling 100 ms loss sum), same one-step commit,
+        same shared cooldown, same fade/flap/burst classification and knee
+        teaching. Never promotes; never advances window-denominated counters
+        (dwell, cooldown, starvation) — those stay tick-owned. Returns the
+        Decision when a demote fired, else None."""
+        if signals.residual_loss_w < self.cfg.selector.video_demote_per:
+            return None
+        if self._windows_since_demote < self.cfg.selector.demote_cooldown_windows:
+            return None
+        ts_ms = signals.timestamp * 1000.0 if signals.timestamp else 0.0
+        start_mcs = self.leading.state.current_mcs
+        new_mcs, changed = self.leading.select(
+            snr_ewma=signals.snr,
+            snr_w=signals.snr_w,
+            slope=None,
+            loss_rate=signals.residual_loss_w,
+            loss_demote=True,
+            fec_pressure=signals.fec_work,
+            link_starved=False,
+            can_demote=True,
+            ts_ms=ts_ms,
+        )
+        if not changed or new_mcs >= start_mcs:
+            return None
+        self._windows_since_demote = 0
+        fail = self.leading.last_fail
+        if fail is not None:
+            self.learned_prior.teach_failure(fail[0], fail[2])
+        reason = "; ".join(self.leading.reasons) + " _fast"
+        self.flightlog.write(
+            {
+                "ts": signals.timestamp,
+                "snr": signals.snr_w,
+                "snr_ewma": signals.snr,
+                "mcs": new_mcs,
+                "width": self.cfg.link_width,
+                "reason": reason,
+                "residual_loss_w": signals.residual_loss_w,
+                "fail_class": fail[1] if fail else None,
+                "fast_path": True,
+                "loss_latency_ms": latency_ms,
+                "tap_active": True,
+            }
+        )
+        return Decision(
+            timestamp=signals.timestamp,
+            mcs=new_mcs,
+            reason=reason,
+            signals_snapshot={
+                "residual_loss_w": signals.residual_loss_w,
+                "fec_work": signals.fec_work,
                 "mcs": new_mcs,
             },
         )

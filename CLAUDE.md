@@ -68,6 +68,7 @@ Deploy gotchas (both learned the hard way):
 - Any **new `fpvdgs/` subpackage must be added to `deploy/gs/deploy.sh`'s scp list** or fpvd ImportError-crashes on the GS and video drops.
 - The init-script restart race can leave a stale pidfile; recovery: `rm -f /var/run/fpvd.pid; /etc/init.d/S99fpvd start` on the device.
 - A drone redeploy briefly drops the video source, which can make this GS reboot once (it reboots on sustained video loss). GS-only redeploys don't.
+- **Deploy the forked wfb binaries BEFORE any fpvdgs deploy that has the dynlink tap** (`dynamicLink.tap.enabled` defaults true → renders `wfb_rx -D`; a pre-tap binary exits on the unknown flag → wfb crash-loop → video down → GS reboot loop). Rollback: `PATCH dynamicLink.tap.enabled=false` + apply, or deploy the fork binaries.
 
 ## Architecture: the dynamic link control loop
 

@@ -52,6 +52,9 @@ def summarize(path) -> dict:
     fade_recovery: list[float] = []
     fade_from: tuple[float, int] | None = None  # (ts, pre-fade mcs)
     prev_mcs = None
+    fast_demotes = 0
+    loss_latencies: list[float] = []
+    tap_active_ticks = 0
     for r in recs:
         time_at_mcs[r.get("mcs")] += 1
         reason = r.get("reason") or ""
@@ -86,6 +89,12 @@ def summarize(path) -> dict:
         for route in ("snapback_promote", "knee_promote", "explore_promote"):
             if route in reason:
                 promote_route_counts[route] = promote_route_counts.get(route, 0) + 1
+        if "_fast" in reason:
+            fast_demotes += 1
+        if r.get("loss_latency_ms") is not None:
+            loss_latencies.append(r["loss_latency_ms"])
+        if r.get("tap_active"):
+            tap_active_ticks += 1
         if fc == "fade" and fade_from is None and prev_mcs is not None:
             fade_from = (r["ts"], prev_mcs)
         if fade_from is not None and r.get("mcs") is not None and r["mcs"] >= fade_from[1]:
@@ -111,6 +120,10 @@ def summarize(path) -> dict:
         "promote_route_counts": promote_route_counts,
         "fade_recovery_p50_s": statistics.median(fade_recovery) if fade_recovery else None,
         "fade_recovery_max_s": max(fade_recovery) if fade_recovery else None,
+        "fast_demotes": fast_demotes,
+        "loss_latency_p50_ms": statistics.median(loss_latencies) if loss_latencies else None,
+        "loss_latency_max_ms": max(loss_latencies) if loss_latencies else None,
+        "tap_active_ticks": tap_active_ticks,
     }
 
 
@@ -135,6 +148,9 @@ def _print_summary(s: dict) -> None:
     p50_str = f"{p50:.2f}s" if p50 is not None else "n/a"
     mx_str = f"{mx:.2f}s" if mx is not None else "n/a"
     print(f"fade recovery:       p50={p50_str}  max={mx_str}")
+    print(f"fast demotes:        {s['fast_demotes']}   tap-active ticks: {s['tap_active_ticks']}")
+    p50l, mxl = s["loss_latency_p50_ms"], s["loss_latency_max_ms"]
+    print(f"loss->decision:      p50={p50l}ms  max={mxl}ms")
 
 
 def _plot(path, out):

@@ -134,6 +134,22 @@ def test_apply_fires_armer_tick():
     assert ticks == [1]
 
 
+def test_apply_tap_port_change_bounces_runner():
+    api, store, _, runner, retunes, ticks, _ = _api()
+    code, _ = api.handle("PATCH", "/gs/config", {}, b'{"dynamicLink": {"tap": {"port": 8111}}}')
+    assert code == 200
+    code, body = api.handle("POST", "/gs/apply", {}, b"")
+    assert code == 200 and runner.restarts == 1
+
+
+def test_apply_tap_stale_ms_change_is_hot():
+    api, store, _, runner, retunes, ticks, _ = _api()
+    code, _ = api.handle("PATCH", "/gs/config", {}, b'{"dynamicLink": {"tap": {"staleMs": 250}}}')
+    assert code == 200
+    code, body = api.handle("POST", "/gs/apply", {}, b"")
+    assert code == 200 and runner.restarts == 0
+
+
 # --- dynamicLink apply routing ---
 class _FakeController:
     def __init__(self):
