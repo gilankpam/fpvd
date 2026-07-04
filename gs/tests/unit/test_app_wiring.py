@@ -1,3 +1,5 @@
+import json
+
 from fpvdgs.config import ConfigStore
 from fpvdgs.supervisor import App
 
@@ -134,6 +136,65 @@ def test_build_app_wires_connection_monitor_and_bus(tmp_path, monkeypatch):
     app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
     assert app.connection_monitor is not None
     assert app.bus is not None
+
+
+def test_build_app_retune_calls_radio_retune_when_all_local(tmp_path, monkeypatch):
+    """All-local retune behavior is unchanged: the wired retune callback
+    still calls radio.retune(local_wlans, link) and returns its result."""
+    import fpvdgs.supervisor as sup
+
+    monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
+    monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
+
+    calls = []
+
+    def _fake_retune(wlans, link):
+        calls.append((list(wlans), link))
+        return True
+
+    monkeypatch.setattr(sup.radio, "retune", _fake_retune)
+
+    config = tmp_path / "config.json"
+    config.write_text('{"link": {"region": "US", "channel": 132, "width": 20, "wlans": ["wlan0"]}}')
+    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+
+    new_link = {"region": "US", "channel": 149, "width": 20}
+    assert app.api.retune(new_link) is True
+    assert calls == [(["wlan0"], new_link)]
+
+
+def test_build_app_retune_returns_false_when_remote_card_present(tmp_path, monkeypatch):
+    """A remote (SSH-attached) card can't be live-retuned by this process's
+    `iw` -- the retune callback must return False so api._apply_link_local
+    falls back to runner.restart() (re-pushing the node script)."""
+    import fpvdgs.supervisor as sup
+
+    monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
+    monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
+
+    calls = []
+    monkeypatch.setattr(sup.radio, "retune", lambda *a, **k: calls.append((a, k)) or True)
+
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps(
+            {
+                "link": {
+                    "region": "US",
+                    "channel": 132,
+                    "width": 20,
+                    "cards": [
+                        {"iface": "wlan0"},
+                        {"host": "192.168.1.10", "iface": "wlan0"},
+                    ],
+                }
+            }
+        )
+    )
+    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+
+    assert app.api.retune({"region": "US", "channel": 149, "width": 20}) is False
+    assert calls == []
 
 
 def test_build_app_probe_is_bypassed(tmp_path, monkeypatch):

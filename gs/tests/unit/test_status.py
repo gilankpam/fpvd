@@ -140,3 +140,18 @@ def test_build_status_omits_connection_when_absent():
 
     out = build_status("v", {}, {}, {"linkId": 1})
     assert "connection" not in out
+
+
+def test_build_status_passes_through_runner_nodes():
+    # runner_state["nodes"] (WfbEngine's Phase 2 per-remote-node alive/restarts
+    # map, Task 6) must reach the client untouched -- build_status must not
+    # whitelist/strip unknown runner_state keys.
+    runner_state = {
+        "running": True,
+        "pid": 591,
+        "restarts": 0,
+        "lastExit": None,
+        "nodes": {"192.168.1.10": {"alive": True, "restarts": 2}},
+    }
+    out = build_status("1.0", runner_state, {}, {"linkId": 1})
+    assert out["runner"]["nodes"] == {"192.168.1.10": {"alive": True, "restarts": 2}}

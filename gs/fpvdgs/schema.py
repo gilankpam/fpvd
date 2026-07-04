@@ -233,6 +233,27 @@ def _validate_cards(cards) -> None:
         unknown = set(c) - CARD_KEYS
         if unknown:
             raise SchemaError(f"unknown link.cards keys: {sorted(unknown)}")
+        if "host" in c:
+            host = c["host"]
+            if not isinstance(host, str) or not host:
+                raise SchemaError("link.cards.host must be a non-empty string")
+        port = c.get("sshPort", 22)
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise SchemaError("link.cards.sshPort must be an int in 1..65535")
+        ssh_user = c.get("sshUser", "root")
+        if not isinstance(ssh_user, str) or not ssh_user:
+            raise SchemaError("link.cards.sshUser must be a non-empty string")
+        ssh_key = c.get("sshKey")
+        if ssh_key is not None and not isinstance(ssh_key, str):
+            raise SchemaError("link.cards.sshKey must be a string or absent")
+        if "txPowerDbm" in c:
+            txp = c["txPowerDbm"]
+            if (
+                txp is not None
+                and txp != "off"
+                and (isinstance(txp, bool) or not isinstance(txp, (int, float)))
+            ):
+                raise SchemaError("link.cards.txPowerDbm must be a number, 'off', or null")
 
 
 def _validate_dynamic_link(dl: dict) -> None:

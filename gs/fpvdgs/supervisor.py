@@ -23,6 +23,7 @@ from .events import EventBus
 from .idr_relay import IdrRelay
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
 from .runner_supervisor import ProcessSupervisor, RunnerSupervisor, resolve_wlans
+from .wfb.cards import has_remote, resolve_cards
 
 log = logging.getLogger(__name__)
 
@@ -223,6 +224,19 @@ def build_app(
             connection=connection_monitor.status(),
         )
 
+    def _retune(lnk):
+        # A remote (SSH-attached) card's radio is tuned by its own node
+        # script, not by this process's `iw` -- a live retune can't reach
+        # it. Returning False here makes api._apply_link_local fall back to
+        # runner.restart(), which re-renders and re-pushes the node script
+        # with the new channel/width/etc. All-local is untouched: same real
+        # `radio.retune` call as before, over `resolve_wlans` (local ifaces
+        # only, unaffected by Phase 2 remote cards).
+        eff = store.effective()
+        if has_remote(resolve_cards(eff)):
+            return False
+        return radio.retune(resolve_wlans(eff), lnk)
+
     api = Api(
         store=store,
         schema=schema,
@@ -234,7 +248,7 @@ def build_app(
         dynlink=dynlink,
         pixelpilot=pixelpilot,
         probe=None,
-        retune=lambda lnk: radio.retune(resolve_wlans(store.effective()), lnk),
+        retune=_retune,
         wlans_resolver=resolve_wlans,
         armer_tick=armer.tick,
         idr_relay=idr_relay,

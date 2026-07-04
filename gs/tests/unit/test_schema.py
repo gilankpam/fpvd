@@ -654,3 +654,134 @@ def test_defaults_have_cards_and_server_address_not_wlans():
     assert link["cards"] == "auto"
     assert link["serverAddress"] is None
     assert "wlans" not in link
+
+
+# ---- link.cards remote-field hardening (Task 1 review fold-in) ------------
+
+
+def test_validate_effective_accepts_full_remote_card():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    {
+                        "host": "192.168.1.10",
+                        "iface": "wlan0",
+                        "sshUser": "root",
+                        "sshPort": 2222,
+                        "sshKey": "/root/.ssh/id_ed25519",
+                        "txPowerDbm": 20,
+                    }
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_accepts_txpower_off_and_null():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    {"host": "192.168.1.10", "iface": "wlan0", "txPowerDbm": "off"},
+                    {"host": "192.168.1.10", "iface": "wlan1", "txPowerDbm": None},
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_rejects_sshport_out_of_range():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "sshPort": 99999}],
+                }
+            }
+        )
+
+
+def test_validate_effective_rejects_sshport_non_int():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "sshPort": "x"}],
+                }
+            }
+        )
+
+
+def test_validate_effective_rejects_empty_host():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {"link": {"channel": 132, "region": "US", "cards": [{"host": "", "iface": "w"}]}}
+        )
+
+
+def test_validate_effective_rejects_non_string_host():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {"link": {"channel": 132, "region": "US", "cards": [{"host": 5, "iface": "w"}]}}
+        )
+
+
+def test_validate_effective_rejects_empty_ssh_user():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "sshUser": ""}],
+                }
+            }
+        )
+
+
+def test_validate_effective_rejects_non_string_ssh_key():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "sshKey": 5}],
+                }
+            }
+        )
+
+
+def test_validate_effective_rejects_bad_txpower_string():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "txPowerDbm": "on"}],
+                }
+            }
+        )
+
+
+def test_validate_effective_rejects_bool_txpower():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "txPowerDbm": True}],
+                }
+            }
+        )

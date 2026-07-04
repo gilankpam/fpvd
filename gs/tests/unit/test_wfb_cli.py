@@ -4,6 +4,7 @@ import threading
 
 from fpvdgs.dynlink.stats_client import RxAnt, RxEvent, SessionInfo, SettingsEvent
 from fpvdgs.wfb.cli import main, render_frame
+from fpvdgs.wfb.cluster import cluster_wlan_id
 
 SES = SessionInfo(
     fec_type="swfec", fec_k=60, fec_n=30, epoch=1, interleave_depth=1, contract_version=3
@@ -74,6 +75,68 @@ def test_render_frame_marks_tx_selected_card_and_shows_counters():
 
     assert any("fec_rec=2" in ln and "lost=1" in ln and "bad=0" in ln for ln in lines)
     assert any("swfec" in ln and "k=60" in ln and "n=30" in ln and "epoch=1" in ln for ln in lines)
+
+
+def test_render_frame_shows_node_for_cluster_encoded_ant():
+    """A cluster-encoded wlan id (node ipv4 packed into the high bits, per
+    cluster.cluster_wlan_id) renders `node <ip> card <n>`, not a raw huge
+    integer `card <n>`."""
+    wlan_id = cluster_wlan_id("192.168.1.10", 0)
+    video = RxEvent(
+        timestamp=1.0,
+        id="video rx",
+        packets_window={"fec_rec": 0, "lost": 0, "bad": 0},
+        rx_ant_stats=[
+            _rx_ant(wlan_id << 8, 100, (-52, -48, -45), (26, 28, 30)),
+        ],
+        session=None,
+        tx_wlan=None,
+    )
+
+    out = render_frame([video])
+
+    assert "node 192.168.1.10 card 0" in out
+    assert "ant 0" in out
+
+
+def test_render_frame_local_ant_stays_plain_card():
+    """A plain local ant (small wlan id, no ipv4 in the high bits) keeps the
+    Phase 1 `card <n>` format, no `node` prefix."""
+    video = RxEvent(
+        timestamp=1.0,
+        id="video rx",
+        packets_window={"fec_rec": 0, "lost": 0, "bad": 0},
+        rx_ant_stats=[
+            _rx_ant(0x000, 100, (-52, -48, -45), (26, 28, 30)),
+        ],
+        session=None,
+        tx_wlan=None,
+    )
+
+    out = render_frame([video])
+
+    assert "node" not in out
+    assert any(ln.startswith("card 0") for ln in out.splitlines())
+
+
+def test_render_frame_marks_tx_selected_cluster_card():
+    """The tx-selected marker still matches on the full (cluster-encoded)
+    wlan id, unaffected by the node/card label rendering."""
+    wlan_id = cluster_wlan_id("192.168.1.10", 1)
+    video = RxEvent(
+        timestamp=1.0,
+        id="video rx",
+        packets_window={"fec_rec": 0, "lost": 0, "bad": 0},
+        rx_ant_stats=[
+            _rx_ant(wlan_id << 8, 100, (-52, -48, -45), (26, 28, 30)),
+        ],
+        session=None,
+        tx_wlan=wlan_id,
+    )
+
+    out = render_frame([video])
+    line = next(ln for ln in out.splitlines() if "node 192.168.1.10 card 1" in ln)
+    assert "*" in line
 
 
 SETTINGS_LINE = (

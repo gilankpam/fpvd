@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import socket
+import struct
 import sys
 from typing import Iterable, Iterator
 from urllib.parse import urlparse
@@ -111,6 +112,20 @@ def _fmt_triplet(lo: int, avg: int, hi: int) -> str:
     return f"{lo}/{avg}/{hi}"
 
 
+def _card_label(wlan: int) -> str:
+    """Render a wlan id as a card label. A cluster-encoded id (Phase 2 remote
+    cards, `wfb.cluster.cluster_wlan_id`: `(node_ipv4 << 24) | wlan_idx`)
+    carries the node's ipv4 in its high bits -- decode and show `node <ip>
+    card <n>`. A plain local wlan id (ipv4 part == 0) keeps the Phase 1
+    `card <n>` format unchanged."""
+    node_part = wlan >> 24
+    if node_part:
+        node_ip = socket.inet_ntoa(struct.pack("!L", node_part))
+        card_idx = wlan & 0xFFFFFF
+        return f"node {node_ip} card {card_idx}"
+    return f"card {wlan}"
+
+
 def render_frame(events: list) -> str:
     """Pure renderer: a batch of events for one window -> a terminal frame.
 
@@ -131,7 +146,7 @@ def render_frame(events: list) -> str:
                 ant_idx = ant.ant & 0xFF
                 marker = " *" if ev.tx_wlan is not None and wlan == ev.tx_wlan else ""
                 out.append(
-                    f"card {wlan}{marker} ant {ant_idx} | pkt {ant.pkt_recv} | "
+                    f"{_card_label(wlan)}{marker} ant {ant_idx} | pkt {ant.pkt_recv} | "
                     f"rssi {_fmt_triplet(ant.rssi_min, ant.rssi_avg, ant.rssi_max)} | "
                     f"snr {_fmt_triplet(ant.snr_min, ant.snr_avg, ant.snr_max)} | "
                     f"evm {_fmt_triplet(ant.evm_min, ant.evm_avg, ant.evm_max)}"
