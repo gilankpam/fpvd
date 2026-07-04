@@ -647,3 +647,83 @@ def test_teardown_clears_hub_but_run_polls_quietly_until_stop():
         assert got == []
     finally:
         engine.shutdown()
+
+
+# -- N1: `_teardown` must clear `self.hub` in the SAME breath as `hub.close()`
+# -- not after sequentially stopping statsd/tunnel/mav/children (hundreds of
+# ms to ~2s on real hardware). Before the fix, a held `_EngineStatsSource`
+# (see `client_factory()`) that re-reads `engine.hub` during that window gets
+# the already-closed-but-still-referenced hub back: `hub.subscribe()` on a
+# closed hub fires `closed_event` immediately (see `StatsHub.subscribe`), so
+# the inner `NativeStatsSource.run()` replays every session in `hub._sessions`
+# (the "replay current sessions so late subscribers see FEC params" step)
+# and returns right away -- and the outer `_EngineStatsSource.run()` loops
+# straight back and does it again, spinning at loop-turn frequency and
+# re-delivering the OLD hub's stale session as a duplicate SessionEvent on
+# every turn, for as long as teardown takes. This test stalls one teardown
+# step on a test-controlled gate and single-steps the loop with bare
+# `asyncio.sleep(0)` turns (no wall-clock races) to pin that window.
+
+
+def test_teardown_drops_hub_atomically_with_close_no_stale_session_spin():
+    import asyncio
+
+    from fpvdgs.dynlink.stats_client import SessionEvent
+
+    engine, rec = make_engine()
+
+    async def scenario():
+        assert await engine._setup() is True
+        hub1 = engine.hub
+        assert hub1 is not None
+        hub1.process_new_session(
+            "video_rx",
+            {"fec_type": "swfec", "fec_k": 1, "fec_n": 2, "epoch": 7, "contract_version": 3},
+        )
+
+        # Mimic DynamicLinkController/ConnectionMonitor: call client_factory()
+        # ONCE and hold a consumer subscribed across the upcoming teardown.
+        factory_cls = engine.client_factory()
+        events = []
+        client = factory_cls("tcp://ignored:0", events.append)
+        consumer_task = asyncio.ensure_future(client.run())
+        await asyncio.sleep(0)  # let run() subscribe to hub1 + replay the seeded session
+        assert any(isinstance(e, SessionEvent) and e.session.epoch == 7 for e in events)
+
+        # Gate `mav_service.stop()` -- a step several awaits AFTER the point
+        # where `self.hub` must already be cleared -- so we can hold
+        # `_teardown` mid-flight and observe/exercise that window
+        # deterministically instead of racing wall-clock thread scheduling.
+        gate = asyncio.Event()
+        real_stop = engine._mav_service.stop
+
+        async def _gated_stop():
+            await gate.wait()
+            await real_stop()
+
+        engine._mav_service.stop = _gated_stop
+
+        teardown_task = asyncio.ensure_future(engine._teardown())
+
+        # Give the held consumer's `_EngineStatsSource` loop many turns while
+        # teardown sits stuck on the gate. Pre-fix, `self.hub` is still hub1
+        # (closed, non-None) throughout this window, so every turn
+        # resubscribes and replays the seeded session again.
+        for _ in range(50):
+            await asyncio.sleep(0)
+
+        assert (
+            engine.hub is None
+        ), "self.hub must already be cleared while teardown is still in flight"
+        dup_epoch7 = sum(1 for e in events if isinstance(e, SessionEvent) and e.session.epoch == 7)
+        assert (
+            dup_epoch7 <= 1
+        ), f"stale closed hub replayed its session {dup_epoch7} times during the teardown window"
+
+        gate.set()
+        await teardown_task
+        client.stop()
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait_for(consumer_task, timeout=2.0)
+
+    asyncio.run(scenario())

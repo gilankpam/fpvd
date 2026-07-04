@@ -425,13 +425,24 @@ class WfbEngine:
 
     # ---- teardown -----------------------------------------------------------
     async def _teardown(self) -> None:
-        # Close BEFORE dropping the reference (see `client_factory`'s
-        # docstring): wakes every `NativeStatsSource.run()` subscribed to
-        # this hub immediately, so a held stats subscriber rebinds to the
-        # NEXT hub instead of blocking forever on a hub nobody aggregates
-        # into again once this restart's/stop's teardown proceeds.
+        # Close AND drop the reference together, before anything else: a
+        # closed-but-still-`self.hub`-visible window lets `_EngineStatsSource.
+        # run()` (see `client_factory`'s docstring) re-read `engine.hub`, get
+        # the already-closed hub, resubscribe (which fires its closed_event
+        # immediately and replays the hub's `_sessions` as duplicate
+        # SessionEvents), and loop right back -- spinning at loop-turn
+        # frequency and re-delivering stale session state for the whole
+        # teardown. Dropping the reference in the same breath as `close()`
+        # closes that window: the next `run()` iteration sees `hub is None`
+        # and falls into the poll-and-retry wait instead of re-subscribing to
+        # a dead hub. Nothing else in this function reads `self.hub` --
+        # `_ticker` (the only other reader, `self.hub.aggregate_window()`) is
+        # cancelled below and is always suspended at its own `asyncio.sleep`
+        # when `_teardown` runs (single-threaded event loop), so it cannot
+        # observe this hub again before that cancellation lands.
         with self._lock:
             hub = self.hub
+            self.hub = None
         if hub is not None:
             hub.close()
 
@@ -463,7 +474,6 @@ class WfbEngine:
         with self._lock:
             self._children = {}
             self._tx_selector = None
-            self.hub = None
         self._tx_parser_ids = {}
 
     # ---- TX antenna wiring (engine loop thread only) -------------------------
