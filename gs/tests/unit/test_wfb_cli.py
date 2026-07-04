@@ -167,3 +167,147 @@ def test_main_once_renders_a_window(capsys):
     assert "video rx" in out
     assert any(line.startswith("card 0") and "pkt 185" in line for line in out.splitlines())
     assert "profile=gs" in out
+
+
+def _start_fake_server_with_bad_contract_version():
+    """Server sends a record with unsupported contract_version, then a valid rx record."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+
+    def _serve():
+        conn, _ = srv.accept()
+        try:
+            conn.sendall(SETTINGS_LINE.encode())
+            # Send rx with unsupported contract_version=4
+            bad_rx = json.dumps(
+                {
+                    "type": "rx",
+                    "timestamp": 123.0,
+                    "id": "video rx",
+                    "tx_wlan": 0,
+                    "packets": {"fec_rec": [2, 2], "lost": [1, 1], "bad": [0, 0]},
+                    "rx_ant_stats": [
+                        {
+                            "ant": 0,
+                            "freq": 5660,
+                            "mcs": 5,
+                            "bw": 20,
+                            "pkt_recv": 185,
+                            "rssi_min": -52,
+                            "rssi_avg": -48,
+                            "rssi_max": -45,
+                            "snr_min": 26,
+                            "snr_avg": 28,
+                            "snr_max": 30,
+                        }
+                    ],
+                    "session": {
+                        "fec_type": "swfec",
+                        "fec_k": 60,
+                        "fec_n": 30,
+                        "epoch": 1,
+                        "contract_version": 4,  # unsupported!
+                    },
+                }
+            )
+            conn.sendall((bad_rx + "\n").encode())
+            # Send valid rx record
+            conn.sendall(RX_LINE.encode())
+        finally:
+            conn.close()
+            srv.close()
+
+    t = threading.Thread(target=_serve, daemon=True)
+    t.start()
+    return f"tcp://127.0.0.1:{port}", t
+
+
+def test_main_once_skips_bad_contract_version_record(capsys):
+    """Bad contract_version is skipped with a clean stderr message; valid record renders."""
+    endpoint, t = _start_fake_server_with_bad_contract_version()
+    main(["--endpoint", endpoint, "--once"])
+    t.join(timeout=2)
+
+    captured = capsys.readouterr()
+    out, err = captured.out, captured.err
+    # Valid rx record should render
+    assert "video rx" in out
+    assert any(line.startswith("card 0") and "pkt 185" in line for line in out.splitlines())
+    # Clean message on stderr (not a traceback)
+    assert "unsupported feed contract_version" in err
+    assert "Traceback" not in err
+
+
+def _start_fake_server_with_malformed_record():
+    """Server sends a record missing required fields (rssi_min), then a valid rx record."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+
+    def _serve():
+        conn, _ = srv.accept()
+        try:
+            conn.sendall(SETTINGS_LINE.encode())
+            # Send rx missing rssi_min
+            malformed_rx = json.dumps(
+                {
+                    "type": "rx",
+                    "timestamp": 123.0,
+                    "id": "video rx",
+                    "tx_wlan": 0,
+                    "packets": {"fec_rec": [2, 2], "lost": [1, 1], "bad": [0, 0]},
+                    "rx_ant_stats": [
+                        {
+                            "ant": 0,
+                            "freq": 5660,
+                            "mcs": 5,
+                            "bw": 20,
+                            "pkt_recv": 185,
+                            # Missing rssi_min!
+                            "rssi_avg": -48,
+                            "rssi_max": -45,
+                            "snr_min": 26,
+                            "snr_avg": 28,
+                            "snr_max": 30,
+                        }
+                    ],
+                    "session": {
+                        "fec_type": "swfec",
+                        "fec_k": 60,
+                        "fec_n": 30,
+                        "epoch": 1,
+                        "contract_version": 3,
+                    },
+                }
+            )
+            conn.sendall((malformed_rx + "\n").encode())
+            # Send valid rx record
+            conn.sendall(RX_LINE.encode())
+        finally:
+            conn.close()
+            srv.close()
+
+    t = threading.Thread(target=_serve, daemon=True)
+    t.start()
+    return f"tcp://127.0.0.1:{port}", t
+
+
+def test_main_once_skips_malformed_record(capsys):
+    """Malformed record is skipped with a clean stderr message; valid record renders."""
+    endpoint, t = _start_fake_server_with_malformed_record()
+    main(["--endpoint", endpoint, "--once"])
+    t.join(timeout=2)
+
+    captured = capsys.readouterr()
+    out, err = captured.out, captured.err
+    # Valid rx record should render
+    assert "video rx" in out
+    assert any(line.startswith("card 0") and "pkt 185" in line for line in out.splitlines())
+    # Clean message on stderr (not a traceback)
+    assert "skipping malformed record" in err
+    assert "Traceback" not in err

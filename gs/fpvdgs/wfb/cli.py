@@ -20,6 +20,7 @@ from typing import Iterable, Iterator
 from urllib.parse import urlparse
 
 from fpvdgs.dynlink.stats_client import (
+    ContractVersionError,
     Event,
     RxEvent,
     SessionEvent,
@@ -78,7 +79,18 @@ def _iter_windows(lines: Iterable[str]) -> Iterator[list[Event]]:
             raw = json.loads(line)
         except json.JSONDecodeError:
             continue
-        ev = parse_record(raw)
+        try:
+            ev = parse_record(raw)
+        except ContractVersionError:
+            sys.stderr.write(
+                "fpvd-stats: unsupported feed contract_version — showing raw lines may still work with --json\n"
+            )
+            continue
+        except (KeyError, ValueError, TypeError):
+            sys.stderr.write(
+                "fpvd-stats: skipping malformed record: KeyError/ValueError/TypeError\n"
+            )
+            continue
         if ev is None:
             continue
         if isinstance(ev, SettingsEvent):
