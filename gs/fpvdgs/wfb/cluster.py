@@ -167,11 +167,10 @@ def render_node_script(
         "",
         "_cleanup()",
         "{",
-        "  plist=$(jobs -p)",
-        '  if [ -n "$plist" ]',
-        "  then",
-        "      kill -TERM $plist || true",
-        "  fi",
+        # Kill the explicitly-tracked PIDs, not `jobs -p`: under dash (and any
+        # sh with job control off in a non-interactive script) `jobs -p` is
+        # empty, so the trap would reap nothing and leak the wfb children.
+        '  [ -n "$PIDS" ] && kill -TERM $PIDS 2>/dev/null',
         "  exit 1",
         "}",
         "",
