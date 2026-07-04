@@ -314,6 +314,7 @@ class NodeSession:
         argv_builder: Callable[[Any], list[str]] = ssh_argv,
         backoff: float = 2.0,
         max_backoff: float = 30.0,
+        stable_reset_s: float | None = None,
         on_state: Callable[[Any, bool], None] | None = None,
     ):
         self.node = node
@@ -321,6 +322,11 @@ class NodeSession:
         self._argv_builder = argv_builder
         self.backoff = backoff
         self.max_backoff = max_backoff
+        # A spawn that stayed up at least this long is "durable": the next
+        # exit resets the backoff to base instead of continuing to grow it.
+        # Defaults to max_backoff (one full worst-case interval of uptime
+        # is enough to call the session stable).
+        self._stable_reset_s = max_backoff if stable_reset_s is None else stable_reset_s
         self._on_state = on_state
 
         self.alive = False
@@ -329,6 +335,7 @@ class NodeSession:
         self._pump_task: asyncio.Task | None = None
         self._watch_task: asyncio.Task | None = None
         self._supervise = False
+        self._spawned_at: float | None = None
 
     # -- lifecycle ----------------------------------------------------------
     async def start(self) -> bool:
@@ -363,6 +370,7 @@ class NodeSession:
             log.warning("node[%s]: spawn failed: %s", self.node, e)
             self._proc = None
             self.alive = False
+            self._spawned_at = None
             return False
 
         self._proc = proc
@@ -380,6 +388,7 @@ class NodeSession:
                 # the (presumably imminent) exit and drive the retry.
 
         self.alive = True
+        self._spawned_at = asyncio.get_running_loop().time()
         return True
 
     async def _pump_stdout(self, proc: asyncio.subprocess.Process) -> None:
@@ -433,22 +442,34 @@ class NodeSession:
     async def _watch(self) -> None:
         """Sequence per the interface contract: an unexpected exit (or a
         failed initial `start()`) reports `on_state(node, False)`, then
-        backs off (exponential, capped at `max_backoff`, delay never resets
-        — a chronically-flapping node just settles at the slowest retry
-        rate and stays there) and keeps retrying the spawn *forever*
-        (structural spawn failures, e.g. `ssh` missing, loop right back
-        into the same backoff — never fatal), then reports
+        backs off (exponential, capped at `max_backoff`) and keeps retrying
+        the spawn *forever* (structural spawn failures, e.g. `ssh` missing,
+        loop right back into the same backoff — never fatal), then reports
         `on_state(node, True)` once a respawn lands. `stop()` cancels this
         task outright, so a deliberate stop is never treated as a crash.
+
+        A chronically-flapping node settles at the slowest retry rate and
+        stays there — but only while it keeps failing fast. If a spawn
+        stays up at least `_stable_reset_s` before exiting, that was a
+        durable session (e.g. one unrelated blip after hours stable), so
+        the backoff resets to base (`self.backoff`) before computing the
+        next retry delay: a stable node reconnects fast, only a genuine
+        crash-loop gets throttled toward `max_backoff`.
         """
         delay = self.backoff
         while True:
             proc = self._proc
             if proc is not None:
+                spawned_at = self._spawned_at
                 await proc.wait()
                 if not self._supervise:
                     return
                 self.alive = False
+                if (
+                    spawned_at is not None
+                    and asyncio.get_running_loop().time() - spawned_at >= self._stable_reset_s
+                ):
+                    delay = self.backoff
             self._notify(False)
 
             while True:

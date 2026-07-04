@@ -1,6 +1,7 @@
 import asyncio
 import socket
 import time
+from unittest.mock import patch
 
 from fpvdgs.wfb.cards import Card
 from fpvdgs.wfb.cluster import (
@@ -168,6 +169,65 @@ def test_node_session_respawns_with_backoff_then_stays_up():
             assert len(states) == settled
         finally:
             await session.stop()
+
+    run(main())
+
+
+def test_node_session_backoff_resets_after_durable_session():
+    """A node that flaps a couple of times (backoff grows), then stays up
+    for at least `stable_reset_s` before a later drop, should reconnect at
+    the BASE backoff on that next retry — not stay pinned near
+    max_backoff. We spy on `asyncio.sleep` (the only call site of it in
+    NodeSession._watch) to record the exact backoff delay requested for
+    each retry, and clamp the real wait so the test stays fast regardless
+    of the (tiny) nominal backoff/max_backoff values.
+    """
+    calls: list[int] = []
+    recorded_delays: list[float] = []
+    real_sleep = asyncio.sleep
+
+    def argv_builder(_node):
+        calls.append(1)
+        n = len(calls)
+        if n <= 2:
+            return _bash("exit 0")  # fast failures: backoff should grow
+        if n == 3:
+            return _bash("sleep 0.3")  # durable: exceeds stable_reset_s
+        return _bash("sleep 5")  # settle here so the test can finish
+
+    async def fast_sleep(delay, result=None):
+        recorded_delays.append(delay)
+        await real_sleep(min(delay, 0.01))
+        return result
+
+    async def main():
+        with patch("asyncio.sleep", new=fast_sleep):
+            session = NodeSession(
+                "n1",
+                "script\n",
+                argv_builder=argv_builder,
+                backoff=0.01,
+                max_backoff=0.03,
+                stable_reset_s=0.1,
+            )
+            try:
+                await session.start()
+                deadline = time.monotonic() + 3.0
+                while time.monotonic() < deadline and len(calls) < 4:
+                    await real_sleep(0.02)
+
+                assert len(calls) >= 4
+                # Two fast failures: backoff grows 0.01 -> 0.02 before the
+                # durable (0.3s) 3rd spawn.
+                assert recorded_delays[0] == 0.01
+                assert recorded_delays[1] == 0.02
+                # The 3rd spawn stayed up past stable_reset_s, so the
+                # retry after IT exits must be back at base backoff
+                # (0.01), not continuing to grow / staying capped at
+                # max_backoff (0.03).
+                assert recorded_delays[2] == 0.01
+            finally:
+                await session.stop()
 
     run(main())
 
