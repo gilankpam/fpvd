@@ -179,6 +179,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkProbe, enabled)
 
 struct DynamicLink {
     bool enabled{false};
+    bool txPowerControl{true}; // false => controller issues `iw set txpower auto`, no per-MCS push
     int healthTimeoutMs{10000};
     int applyStaggerMs{50};
     int applySubPaceMs{5};
@@ -186,9 +187,9 @@ struct DynamicLink {
     DynamicLinkCompute compute{};
     DynamicLinkProbe probe{};
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled, healthTimeoutMs,
-                                                applyStaggerMs, applySubPaceMs, roiQp, compute,
-                                                probe)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled, txPowerControl,
+                                                healthTimeoutMs, applyStaggerMs, applySubPaceMs,
+                                                roiQp, compute, probe)
 
 // OSD overlay (msposd message file). Top-level: the OSD is rendered whether or
 // not the dynamic link is enabled, so its enable flag lives outside dynamicLink.
