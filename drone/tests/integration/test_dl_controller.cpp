@@ -16,7 +16,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -50,6 +53,23 @@ TEST_CASE("controller starts and stops cleanly") {
 // ---------------------------------------------------------------------------
 
 namespace {
+
+// Temp bin dir with a stub `iw` that records argv; prepended to PATH.
+static std::filesystem::path setupIwStubCtl(const std::filesystem::path& tmp) {
+    namespace fs = std::filesystem;
+    fs::create_directories(tmp);
+    auto rec = tmp / "cmds.txt";
+    fs::remove(rec);
+    auto p = tmp / "iw";
+    std::ofstream s(p);
+    s << "#!/bin/sh\necho \"iw $*\" >> \"" << rec.string() << "\"\nexit 0\n";
+    s.close();
+    fs::permissions(p, fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
+                           fs::perms::others_read | fs::perms::others_exec);
+    std::string path = tmp.string() + ":" + (std::getenv("PATH") ? std::getenv("PATH") : "");
+    ::setenv("PATH", path.c_str(), 1);
+    return rec;
+}
 
 // Fake wfb_tx UDP control server. Binds 127.0.0.1:<ephemeral>, echoes every
 // request (req_id + rc=0) and records the parsed commands for assertions.
@@ -627,4 +647,63 @@ TEST_CASE("setConfig hot-reloads swfec overhead -> next decision re-emits FEC") 
         1000));
 
     c.stop();
+}
+
+// ---------------------------------------------------------------------------
+// txPowerControl: apply() (fixed) vs applyAuto() (auto)
+// ---------------------------------------------------------------------------
+
+TEST_CASE("controller: txPowerControl=false issues iw set txpower auto, not fixed") {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "fpvd-ctl-txauto";
+    fs::remove_all(tmp);
+    auto rec = setupIwStubCtl(tmp);
+
+    FakeWfbTx wfb;
+    FakeEnc enc;
+
+    Endpoints ep;
+    ep.listenAddr = "127.0.0.1";
+    ep.listenPort = 45809; // distinct fixed test port
+    ep.wfbCtlAddr = "127.0.0.1";
+    ep.wfbCtlPort = wfb.port;
+    ep.encHost = "127.0.0.1";
+    ep.encPort = static_cast<uint16_t>(enc.port);
+    ep.gsTunnelPort = 0;
+    ep.osdUpdateIntervalMs = 1000;
+
+    DlRuntimeConfig snap{};
+    snap.healthTimeoutMs = 10000;
+    snap.applyStaggerMs = 0;
+    snap.applySubPaceMs = 0;
+    snap.stbc = true;
+    snap.ldpc = true;
+    snap.linkWidthMhz = 20;
+    snap.iface = "wlan0";        // real name so the stub iw is invoked
+    snap.txPowerControl = false; // <-- the knob under test
+
+    DynamicLinkController c(ep);
+    c.start(snap);
+
+    Decision d{};
+    d.magic = kWireMagic;
+    d.version = kWireVersion;
+    d.sequence = 100;
+    d.mcs = 3;
+    d.bandwidth = 20;
+    bool sawAuto = waitFor(
+        [&] {
+            sendDecision(ep.listenPort, d);
+            std::ifstream f(rec);
+            std::string txt((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            return txt.find("set txpower auto") != std::string::npos;
+        },
+        1500);
+    c.stop();
+
+    std::ifstream f(rec);
+    std::string txt((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    CHECK(sawAuto);
+    CHECK(txt.find("set txpower fixed") == std::string::npos);
+    fs::remove_all(tmp);
 }

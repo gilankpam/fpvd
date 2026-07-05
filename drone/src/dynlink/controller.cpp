@@ -208,11 +208,18 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
                 lastProbeMcs_ = rung;
             }
         }
-        // Per-MCS tx power (operating-rung coupling): back off on the high-PAPR
-        // 64-QAM rungs to keep the PA linear, full power at low MCS for range.
-        // RadioTxpower::apply is diff-based, so iw only runs when the value changes.
-        if (radio_)
+    }
+    // TX power: when txPowerControl is enabled fpvd drives the per-MCS anti-
+    // overdrive curve via `iw set txpower fixed` (RadioTxpower::apply is
+    // diff-based, so iw only runs on change). When disabled, fpvd instead issues
+    // `iw set txpower auto` once — clearing any prior fixed target so the driver's
+    // per-rate TXAGC table governs. Evaluated every dispatch (both are diff-
+    // suppressed) so a live flip of txPowerControl takes effect within one tick.
+    if (radio_) {
+        if (cfg.txPowerControl)
             radio_->apply(d.txPowerDbm);
+        else
+            radio_->applyAuto();
     }
     lastTx_ = d;
 }
@@ -243,8 +250,12 @@ Decision DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
         lastProbeMcs_ = rung;
     }
     // Low MCS -> high power -> robust recovery (txPowerDbm == curve[0] from derive).
-    if (radio_)
-        radio_->applySafe(d.txPowerDbm);
+    if (radio_) {
+        if (cfg.txPowerControl)
+            radio_->applySafe(d.txPowerDbm);
+        else
+            radio_->applyAuto();
+    }
     return d;
 }
 
