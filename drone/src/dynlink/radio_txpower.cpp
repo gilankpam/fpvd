@@ -47,13 +47,46 @@ int RadioTxpower::runIw(int8_t dBm) {
     return 0;
 }
 
+int RadioTxpower::runIwAuto() {
+    char* const argv[] = {
+        const_cast<char*>("iw"),
+        const_cast<char*>("dev"),
+        const_cast<char*>(iface_.c_str()),
+        const_cast<char*>("set"),
+        const_cast<char*>("txpower"),
+        const_cast<char*>("auto"),
+        nullptr,
+    };
+    pid_t pid;
+    if (posix_spawnp(&pid, "iw", nullptr, nullptr, argv, environ) != 0)
+        return -1;
+    int status;
+    if (waitpid(pid, &status, 0) < 0)
+        return -1;
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        return -1;
+    return 0;
+}
+
+int RadioTxpower::applyAuto() {
+    if (auto_)
+        return 0; // already auto — diff suppressed
+    int rc = runIwAuto();
+    if (rc == 0) {
+        auto_ = true;
+        current_.reset();
+    }
+    return rc;
+}
+
 int RadioTxpower::apply(int8_t dBm) {
-    if (current_ && *current_ == dBm) {
+    if (!auto_ && current_ && *current_ == dBm) {
         return 0; // unchanged — diff suppressed
     }
     int rc = runIw(dBm);
     if (rc == 0) {
         current_ = dBm;
+        auto_ = false;
     }
     return rc;
 }
@@ -62,6 +95,7 @@ int RadioTxpower::applySafe(int8_t dBm) {
     int rc = runIw(dBm);
     if (rc == 0) {
         current_ = dBm;
+        auto_ = false;
     }
     return rc;
 }

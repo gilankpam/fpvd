@@ -42,6 +42,7 @@ struct DlRuntimeConfig {
     bool probeEnabled{false}; // dynamicLink.probe.enabled; gates children + airtime
     uint16_t probeCtlPort{0}; // probe wfb_tx -C port; 0 when probe disabled
     int probeMcsCeiling{7};
+    bool txPowerControl{true}; // dynamicLink.txPowerControl; false => controller runs iw auto
     std::string iface;
 };
 

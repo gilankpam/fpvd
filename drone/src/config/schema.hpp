@@ -2,6 +2,7 @@
 #include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -50,10 +51,40 @@ struct Beamforming {
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Beamforming, enabled, remoteMac, ackTimeout,
                                                 intervalMs)
 
+// link.txPowerDbm: a fixed dBm integer, or "auto" — hand power to the driver's
+// per-rate TXAGC table via `iw set txpower auto` (see per-rate-txpower.md).
+struct TxPower {
+    bool automatic{false};
+    int dbm{20}; // meaningful only when !automatic
+    TxPower() = default;
+    TxPower(int d) : automatic(false), dbm(d) {} // implicit: keeps `= 20` ergonomics
+};
+inline bool operator==(const TxPower& a, const TxPower& b) {
+    return a.automatic == b.automatic && (a.automatic || a.dbm == b.dbm);
+}
+inline bool operator!=(const TxPower& a, const TxPower& b) { return !(a == b); }
+inline void to_json(nlohmann::json& j, const TxPower& t) {
+    if (t.automatic)
+        j = "auto";
+    else
+        j = t.dbm;
+}
+inline void from_json(const nlohmann::json& j, TxPower& t) {
+    if (j.is_string()) {
+        if (j.get<std::string>() != "auto")
+            throw std::runtime_error("link.txPowerDbm string must be \"auto\"");
+        t.automatic = true;
+        t.dbm = 20;
+    } else {
+        t.automatic = false;
+        t.dbm = j.get<int>();
+    }
+}
+
 struct Link {
     int channel{132};
     int width{20};
-    int txPowerDbm{20};
+    TxPower txPowerDbm{20};
     int mcs{2};
     Fec fec{};
     bool stbc{true};
@@ -148,6 +179,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLinkProbe, enabled)
 
 struct DynamicLink {
     bool enabled{false};
+    bool txPowerControl{true}; // false => controller issues `iw set txpower auto`, no per-MCS push
     int healthTimeoutMs{10000};
     int applyStaggerMs{50};
     int applySubPaceMs{5};
@@ -155,9 +187,9 @@ struct DynamicLink {
     DynamicLinkCompute compute{};
     DynamicLinkProbe probe{};
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled, healthTimeoutMs,
-                                                applyStaggerMs, applySubPaceMs, roiQp, compute,
-                                                probe)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(DynamicLink, enabled, txPowerControl,
+                                                healthTimeoutMs, applyStaggerMs, applySubPaceMs,
+                                                roiQp, compute, probe)
 
 // OSD overlay (msposd message file). Top-level: the OSD is rendered whether or
 // not the dynamic link is enabled, so its enable flag lives outside dynamicLink.

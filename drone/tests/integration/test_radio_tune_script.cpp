@@ -86,6 +86,23 @@ TEST_CASE("radio-tune.sh: channel width tokens") {
     fs::remove_all(tmp);
 }
 
+TEST_CASE("radio-tune.sh: txpower \"auto\" -> iw set txpower auto") {
+    auto tmp = fs::temp_directory_path() / "fpvd-rt-txpower-auto";
+    fs::remove_all(tmp);
+    auto rec = setupStubs(tmp);
+
+    fpvd::Config c{};
+    c.link.txPowerDbm.automatic = true;
+
+    auto r = fpvd::tuneRadio("scripts/radio-tune.sh", "txpower", c, "wlan0", "8812eu");
+    REQUIRE(r.ok);
+    auto txt = readAllText(rec);
+    CHECK(txt.find("iw wlan0 set txpower auto") != std::string::npos);
+    CHECK(txt.find("set txpower fixed") == std::string::npos);
+
+    fs::remove_all(tmp);
+}
+
 TEST_CASE("radio-tune.sh: mtu via ip link") {
     auto tmp = fs::temp_directory_path() / "fpvd-rt-mtu";
     fs::remove_all(tmp);

@@ -18,7 +18,7 @@ TEST_CASE("classifyLinkChange: no change -> all false") {
 
 TEST_CASE("classifyLinkChange: txpower only") {
     Config a{}, b{};
-    b.link.txPowerDbm = a.link.txPowerDbm + 1;
+    b.link.txPowerDbm = a.link.txPowerDbm.dbm + 1;
     auto c = classifyLinkChange(a, b);
     CHECK(c.nicTxpower);
     CHECK_FALSE(c.nicChannel);
@@ -110,4 +110,14 @@ TEST_CASE("classifyLinkChange: rs k/n change ignored under swfec mode") {
     auto c = classifyLinkChange(a, b);
     CHECK_FALSE(c.videoFec);
     CHECK_FALSE(c.fullRestart);
+}
+
+TEST_CASE("classify: txPowerDbm auto vs fixed flips nicTxpower") {
+    fpvd::Config a{}, b{};
+    b.link.txPowerDbm.automatic = true;
+    CHECK(fpvd::classifyLinkChange(a, b).nicTxpower == true);  // fixed -> auto
+    CHECK(fpvd::classifyLinkChange(a, a).nicTxpower == false); // no change
+    fpvd::Config d{};
+    d.link.txPowerDbm = 15;
+    CHECK(fpvd::classifyLinkChange(a, d).nicTxpower == true); // 20 -> 15
 }

@@ -102,6 +102,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         tests/integration/test_orchestrator.cpp
         tests/integration/test_radio.cpp
         tests/integration/test_radio_tune_script.cpp
+        tests/integration/test_radio_txpower.cpp
         tests/integration/test_beamforming.cpp
         tests/integration/test_osd.cpp
         tests/integration/test_daemon.cpp

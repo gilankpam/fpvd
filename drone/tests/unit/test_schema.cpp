@@ -21,7 +21,7 @@ TEST_CASE("schema: round-trip a minimal config through json") {
                      "mode":"mirror","maxSeconds":300,"maxMB":500},
         "osd":{"enabled":true},
         "dynamicLink":{
-            "enabled":false,"healthTimeoutMs":10000,
+            "enabled":false,"txPowerControl":true,"healthTimeoutMs":10000,
             "applyStaggerMs":50,"applySubPaceMs":5,
             "roiQp":{"thresholdKbps":6000,"lowAnchorKbps":2000,
                      "floor":-24,"step":3},
@@ -76,6 +76,29 @@ TEST_CASE("schema: video.resilience defaults to off and round-trips") {
     CHECK(j["video"]["resilience"] == "fpv");
     auto c2 = j.get<fpvd::Config>();
     CHECK(c2.video.resilience == "fpv");
+}
+
+TEST_CASE("schema: link.txPowerDbm accepts int and \"auto\"") {
+    // Default is fixed 20 dBm, serializes to the bare int.
+    fpvd::Config c{};
+    CHECK(c.link.txPowerDbm.automatic == false);
+    CHECK(c.link.txPowerDbm.dbm == 20);
+    json def = json(c);
+    CHECK(def["link"]["txPowerDbm"] == 20);
+
+    // "auto" parses to automatic and round-trips as the string.
+    json j = json(c);
+    j["link"]["txPowerDbm"] = "auto";
+    auto c2 = j.get<fpvd::Config>();
+    CHECK(c2.link.txPowerDbm.automatic == true);
+    json out = c2;
+    CHECK(out["link"]["txPowerDbm"] == "auto");
+
+    // A bare int parses to a fixed value.
+    j["link"]["txPowerDbm"] = 7;
+    auto c3 = j.get<fpvd::Config>();
+    CHECK(c3.link.txPowerDbm.automatic == false);
+    CHECK(c3.link.txPowerDbm.dbm == 7);
 }
 
 TEST_CASE("schema: service entry round-trips") {
@@ -192,6 +215,20 @@ TEST_CASE("schema: link.videoEncryption defaults to true and round-trips") {
     CHECK(loaded2.link.videoEncryption == false);
     nlohmann::json out = loaded2;
     CHECK(out["link"]["videoEncryption"] == false);
+}
+
+TEST_CASE("schema: dynamicLink.txPowerControl defaults true and round-trips") {
+    fpvd::Config c{};
+    CHECK(c.dynamicLink.txPowerControl == true);
+    json def = json(c);
+    CHECK(def["dynamicLink"].contains("txPowerControl"));
+    CHECK(def["dynamicLink"]["txPowerControl"] == true);
+
+    c.dynamicLink.txPowerControl = false;
+    json j = c;
+    CHECK(j["dynamicLink"]["txPowerControl"] == false);
+    auto c2 = j.get<fpvd::Config>();
+    CHECK(c2.dynamicLink.txPowerControl == false);
 }
 
 TEST_CASE("schema: Config parses without dynamicLink key — defaults applied") {

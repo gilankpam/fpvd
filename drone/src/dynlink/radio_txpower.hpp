@@ -13,13 +13,17 @@ class RadioTxpower {
     void setIface(std::string iface) {
         iface_ = std::move(iface);
         current_.reset();
+        auto_ = false;
     }
     int apply(int8_t dBm);     // 0 ok/no-op, -1 iw failure
+    int applyAuto();           // `iw set txpower auto`; diff-suppressed while already auto
     int applySafe(int8_t dBm); // unconditional run (watchdog fallback)
   private:
     int runIw(int8_t dBm); // port run_iw
+    int runIwAuto();       // `iw dev <iface> set txpower auto`
     std::string iface_;
     std::optional<int8_t> current_{};
+    bool auto_{false}; // true after applyAuto until the next fixed apply/applySafe
 };
 
 } // namespace fpvd::dynlink

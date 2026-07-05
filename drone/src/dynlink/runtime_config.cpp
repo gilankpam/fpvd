@@ -36,6 +36,7 @@ DlRuntimeConfig buildDlSnapshot(const Config& c, const std::string& iface) {
     s.probeEnabled = c.dynamicLink.probe.enabled;
     s.probeCtlPort = c.dynamicLink.probe.enabled ? static_cast<uint16_t>(kProbeControlPort) : 0;
     s.probeMcsCeiling = kProbeMcsCeiling;
+    s.txPowerControl = c.dynamicLink.txPowerControl;
     s.iface = iface;
 
     return s;
