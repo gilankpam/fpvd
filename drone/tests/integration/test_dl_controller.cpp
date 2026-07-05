@@ -707,3 +707,58 @@ TEST_CASE("controller: txPowerControl=false issues iw set txpower auto, not fixe
     CHECK(txt.find("set txpower fixed") == std::string::npos);
     fs::remove_all(tmp);
 }
+
+TEST_CASE("controller: txPowerControl=true issues iw set txpower fixed, not auto") {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "fpvd-ctl-txfixed";
+    fs::remove_all(tmp);
+    auto rec = setupIwStubCtl(tmp);
+
+    FakeWfbTx wfb;
+    FakeEnc enc;
+
+    Endpoints ep;
+    ep.listenAddr = "127.0.0.1";
+    ep.listenPort = 45810; // distinct fixed test port
+    ep.wfbCtlAddr = "127.0.0.1";
+    ep.wfbCtlPort = wfb.port;
+    ep.encHost = "127.0.0.1";
+    ep.encPort = static_cast<uint16_t>(enc.port);
+    ep.gsTunnelPort = 0;
+    ep.osdUpdateIntervalMs = 1000;
+
+    DlRuntimeConfig snap{};
+    snap.healthTimeoutMs = 10000;
+    snap.applyStaggerMs = 0;
+    snap.applySubPaceMs = 0;
+    snap.stbc = true;
+    snap.ldpc = true;
+    snap.linkWidthMhz = 20;
+    snap.iface = "wlan0";       // real name so the stub iw is invoked
+    snap.txPowerControl = true; // <-- the knob under test (default path)
+
+    DynamicLinkController c(ep);
+    c.start(snap);
+
+    Decision d{};
+    d.magic = kWireMagic;
+    d.version = kWireVersion;
+    d.sequence = 100;
+    d.mcs = 3;
+    d.bandwidth = 20;
+    bool sawFixed = waitFor(
+        [&] {
+            sendDecision(ep.listenPort, d);
+            std::ifstream f(rec);
+            std::string txt((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            return txt.find("set txpower fixed") != std::string::npos;
+        },
+        1500);
+    c.stop();
+
+    std::ifstream f(rec);
+    std::string txt((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    CHECK(sawFixed);
+    CHECK(txt.find("set txpower auto") == std::string::npos);
+    fs::remove_all(tmp);
+}

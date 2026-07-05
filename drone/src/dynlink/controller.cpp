@@ -249,7 +249,8 @@ Decision DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
                             static_cast<uint8_t>(rung), false, 1);
         lastProbeMcs_ = rung;
     }
-    // Low MCS -> high power -> robust recovery (txPowerDbm == curve[0] from derive).
+    // Low MCS -> high power -> robust recovery (txPowerDbm == curve[0] from derive;
+    // ignored when txPowerControl=false -> applyAuto issues iw auto).
     if (radio_) {
         if (cfg.txPowerControl)
             radio_->applySafe(d.txPowerDbm);
