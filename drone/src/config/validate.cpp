@@ -67,8 +67,8 @@ std::vector<ValidationError> validate(const Config& c) {
         errs.push_back({"link.width", "40 MHz requires dynamicLink.enabled=false"});
     if (c.link.mcs < 0 || c.link.mcs > 7)
         errs.push_back({"link.mcs", "must be 0..7"});
-    if (c.link.txPowerDbm < -10 || c.link.txPowerDbm > 30)
-        errs.push_back({"link.txPowerDbm", "must be -10..30"});
+    if (!c.link.txPowerDbm.automatic && (c.link.txPowerDbm.dbm < -10 || c.link.txPowerDbm.dbm > 30))
+        errs.push_back({"link.txPowerDbm", "must be -10..30 or \"auto\""});
     if (c.link.fec.k < 1 || c.link.fec.k > 32 || c.link.fec.n < 1 || c.link.fec.n > 32 ||
         c.link.fec.k >= c.link.fec.n)
         errs.push_back({"link.fec", "require 1<=k<n<=32"});

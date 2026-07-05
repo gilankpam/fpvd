@@ -152,6 +152,14 @@ TEST_CASE("validate: link.txPowerDbm in [-10,30]") {
         CHECK(e.path != "link.txPowerDbm");
 }
 
+TEST_CASE("validate: txPowerDbm \"auto\" skips the range check") {
+    fpvd::Config c{};
+    c.link.txPowerDbm.automatic = true; // no dbm bound applies
+    auto errs = fpvd::validate(c);
+    for (auto& e : errs)
+        CHECK(e.path != "link.txPowerDbm");
+}
+
 TEST_CASE("validate: dynamicLink.healthTimeoutMs >= 1000") {
     Config c{};
     c.dynamicLink.healthTimeoutMs = 500;

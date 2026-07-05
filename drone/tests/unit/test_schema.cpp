@@ -78,6 +78,29 @@ TEST_CASE("schema: video.resilience defaults to off and round-trips") {
     CHECK(c2.video.resilience == "fpv");
 }
 
+TEST_CASE("schema: link.txPowerDbm accepts int and \"auto\"") {
+    // Default is fixed 20 dBm, serializes to the bare int.
+    fpvd::Config c{};
+    CHECK(c.link.txPowerDbm.automatic == false);
+    CHECK(c.link.txPowerDbm.dbm == 20);
+    json def = json(c);
+    CHECK(def["link"]["txPowerDbm"] == 20);
+
+    // "auto" parses to automatic and round-trips as the string.
+    json j = json(c);
+    j["link"]["txPowerDbm"] = "auto";
+    auto c2 = j.get<fpvd::Config>();
+    CHECK(c2.link.txPowerDbm.automatic == true);
+    json out = c2;
+    CHECK(out["link"]["txPowerDbm"] == "auto");
+
+    // A bare int parses to a fixed value.
+    j["link"]["txPowerDbm"] = 7;
+    auto c3 = j.get<fpvd::Config>();
+    CHECK(c3.link.txPowerDbm.automatic == false);
+    CHECK(c3.link.txPowerDbm.dbm == 7);
+}
+
 TEST_CASE("schema: service entry round-trips") {
     json j = json::parse(R"({
         "enabled":true,
