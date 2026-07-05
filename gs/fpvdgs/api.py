@@ -18,11 +18,9 @@ class Api:
         self,
         store,
         schema,
-        render_mod,
         runner,
         drone,
         status_fn,
-        cfg_out,
         dynlink=None,
         pixelpilot=None,
         probe=None,
@@ -30,14 +28,13 @@ class Api:
         wlans_resolver=None,
         armer_tick=None,
         idr_relay=None,
+        nodes_status_fn=None,
     ):
         self.store = store
         self.schema = schema
-        self.render_mod = render_mod
         self.runner = runner
         self.drone = drone
         self.status_fn = status_fn
-        self.cfg_out = cfg_out
         self.dynlink = dynlink
         self.pixelpilot = pixelpilot
         self.probe = probe
@@ -45,6 +42,7 @@ class Api:
         self.wlans_resolver = wlans_resolver
         self.armer_tick = armer_tick
         self.idr_relay = idr_relay
+        self.nodes_status_fn = nodes_status_fn
 
     def _json(self, body: bytes) -> dict:
         return json.loads(body or b"{}")
@@ -70,13 +68,14 @@ class Api:
                 return self._apply_gs()
             if key == ("POST", "/gs/reset"):
                 self.store.reset()
-                self.render_mod.write_cfg(
-                    self.cfg_out, self.render_mod.render_cfg(self.store.effective())
-                )
                 self.runner.restart()
                 return 200, {"reset": True}
             if key == ("GET", "/gs/status"):
                 return 200, self.status_fn()
+            if key == ("GET", "/gs/nodes"):
+                if self.nodes_status_fn is None:
+                    return 404, {"error": "not found"}
+                return 200, self.nodes_status_fn()
             return 404, {"error": "not found"}
         except SchemaError as e:
             return 400, {"error": str(e)}
@@ -89,8 +88,9 @@ class Api:
 
     @staticmethod
     def _tap_render_view(cfg):
-        """The (enabled, port) pair the rendered wfb cfg depends on — a
-        change here needs a runner bounce, unlike the rest of dynamicLink."""
+        """The (enabled, port) pair the native engine bakes into its
+        `wfb_rx -D` argv at spawn time — a change here needs a full engine
+        restart, unlike the rest of dynamicLink."""
         tap = ((cfg.get("dynamicLink") or {}).get("tap")) or {}
         return (bool(tap.get("enabled", True)), int(tap.get("port", 8110)))
 
@@ -107,13 +107,13 @@ class Api:
         ) or self._tap_render_view(pending) != self._tap_render_view(effective)
 
         if link_changed or wfb_changed:
-            # Render the cfg the runner reads on a (re)start, before applying.
-            self.render_mod.write_cfg(self.cfg_out, self.render_mod.render_cfg(pending))
             if not self._apply_link_local(
-                effective.get("link", {}), pending.get("link", {}), force_bounce=wfb_changed
+                effective.get("link", {}),
+                pending.get("link", {}),
+                pending,
+                force_bounce=wfb_changed,
             ):
-                self.render_mod.write_cfg(self.cfg_out, self.render_mod.render_cfg(effective))
-                self.runner.restart()
+                self.runner.restart(effective)
                 return 500, {
                     "applied": False,
                     "error": "apply failed; rolled back to last-good cfg",
@@ -156,9 +156,15 @@ class Api:
             return False
         return self._bw_class(old.get("width")) == self._bw_class(new.get("width"))
 
-    def _apply_link_local(self, old_link, new_link, force_bounce=False):
+    def _apply_link_local(self, old_link, new_link, new_config, force_bounce=False):
         """Apply the GS-local link delta: live retune when possible, else bounce.
-        No drone push (client orchestrates). Returns True on success."""
+        No drone push (client orchestrates). Returns True on success.
+
+        `new_config` is the full pending config handed to `runner.restart()` so
+        the native WfbEngine rebuilds from exactly the config being applied.
+        The store is not committed until after this call returns, so the
+        engine cannot read it from `store.effective()` yet — it needs
+        `new_config` passed explicitly instead."""
         non_bf_changed = any(
             k != "beamforming" and old_link.get(k) != new_link.get(k)
             for k in set(old_link) | set(new_link)
@@ -167,7 +173,7 @@ class Api:
             if self.retune(new_link):
                 return True
             # live retune failed -> fall back to a bounce
-        return self.runner.restart()
+        return self.runner.restart(new_config)
 
     def _route_idr_forward(self, old, new, pending):
         """Start/stop the always-available IDR relay on idrForward changes.

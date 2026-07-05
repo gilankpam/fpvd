@@ -30,15 +30,17 @@ TARGET="${GS_USER}@${GS_HOST}"
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o LogLevel=error)
 remote() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
 
-# Install into the GS's real site-packages (where wfb_ng already lives) so that
-# both `python3 -m fpvdgs.supervisor` and the spawned `python3 -m fpvdgs.runner`
-# import without any sys.path/PYTHONPATH hacks.
+# Install into the GS's real site-packages (where the wfb_rx/wfb_tx binaries'
+# support libs already live) so that `python3 -m fpvdgs.supervisor` imports
+# without any sys.path/PYTHONPATH hacks.
 SITE="$(remote 'python3 -c "import site; print(site.getsitepackages()[0])"')"
 echo "[push] fpvdgs -> $TARGET:$SITE/fpvdgs  (+ init)"
-remote "mkdir -p /etc/fpvd '$SITE/fpvdgs' '$SITE/fpvdgs/dynlink' '$SITE/fpvdgs/probe'"
+remote "mkdir -p /etc/fpvd '$SITE/fpvdgs' '$SITE/fpvdgs/dynlink' '$SITE/fpvdgs/probe' '$SITE/fpvdgs/wfb'"
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs"/*.py "$TARGET:$SITE/fpvdgs/"
 # dynlink subpackage (in-process GS dynamic-link controller)
 scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/dynlink"/*.py "$TARGET:$SITE/fpvdgs/dynlink/"
+# wfb subpackage (native wfb orchestration engine — spawns wfb_rx/wfb_tx)
+scp -O "${SSH_OPTS[@]}" "$GS/fpvdgs/wfb"/*.py "$TARGET:$SITE/fpvdgs/wfb/"
 # stale modules from older deploys (profile.py + JSON radio profiles) are
 # harmless leftovers; remove the profiles dir so imports can't resolve it.
 remote "rm -rf '$SITE/fpvdgs/dynlink/profiles' '$SITE/fpvdgs/dynlink/profile.py'* '$SITE/fpvdgs/dynlink/__pycache__/profile.'*"
@@ -56,14 +58,12 @@ remote '
     set -e
     # launcher: `fpvd` runs the now-importable package entrypoint
     printf "#!/bin/sh\nexec python3 -m fpvdgs.supervisor \"\$@\"\n" > /usr/bin/fpvd
-    chmod +x /usr/bin/fpvd /etc/init.d/S99fpvd
+    # launcher: `fpvd-stats` runs the wfb CLI entrypoint
+    printf "#!/bin/sh\nexec python3 -m fpvdgs.wfb.cli \"\$@\"\n" > /usr/bin/fpvd-stats
+    chmod +x /usr/bin/fpvd /usr/bin/fpvd-stats /etc/init.d/S99fpvd
 
     mkdir -p /root/fpvd-gs-rollback
-    # back up the stock cfg + init script ONCE; never clobber on re-deploy
-    # (the live /etc/wifibroadcast.cfg is fpvd-generated after the first install).
-    if [ ! -e /root/fpvd-gs-rollback/wifibroadcast.cfg.orig ]; then
-        cp -a /etc/wifibroadcast.cfg /root/fpvd-gs-rollback/wifibroadcast.cfg.orig 2>/dev/null || true
-    fi
+    # back up the stock init script ONCE; never clobber on re-deploy
     if [ -f /etc/init.d/S98wifibroadcast ] && [ ! -e /root/fpvd-gs-rollback/S98wifibroadcast ]; then
         cp -a /etc/init.d/S98wifibroadcast /root/fpvd-gs-rollback/
     fi

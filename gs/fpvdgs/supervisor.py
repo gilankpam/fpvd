@@ -8,7 +8,6 @@ import sys
 import time
 
 from . import __version__, radio, schema
-from . import render as render_mod
 from . import status as status_mod
 from .api import Api, make_http_server
 from .beamforming import BeamformingController
@@ -21,8 +20,10 @@ from .dynlink.config_build import make_dl_snapshot
 from .dynlink.controller import DynamicLinkController
 from .events import EventBus
 from .idr_relay import IdrRelay
+from .node_radio import nodes_status
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
-from .runner_supervisor import ProcessSupervisor, RunnerSupervisor, resolve_wlans
+from .runner_supervisor import ProcessSupervisor, _wfb_nics, resolve_wlans
+from .wfb.cards import has_remote, resolve_cards
 
 log = logging.getLogger(__name__)
 
@@ -90,10 +91,9 @@ class App:
 
 def build_app(
     config_path,
-    cfg_out,
     host,
     port,
-    runner_cmd,
+    *,
     ready_port=8103,
     ready_timeout=10.0,
     log_path=None,
@@ -103,20 +103,15 @@ def build_app(
     effective = store.effective()
     schema.validate_effective(effective)
 
-    # Render the cfg the runner will read.
-    render_mod.write_cfg(cfg_out, render_mod.render_cfg(effective))
+    from .wfb.engine import WfbEngine, reap_stale_wfb
 
-    profile = effective.get("wfb", {}).get("profile", "gs")
-    wlans = resolve_wlans(effective)
-    runner = RunnerSupervisor(
-        runner_cmd,
-        cfg_out=cfg_out,
-        profile=profile,
-        wlans=wlans,
-        ready_port=ready_port,
-        ready_timeout=ready_timeout,
-        log_path=log_path,
+    runner = WfbEngine(
+        config_provider=store.effective,
+        wlans_resolver=resolve_wlans,
+        stats_port=ready_port,
+        reap_fn=reap_stale_wfb,
     )
+    stats_client_factory = runner.client_factory()
 
     drone_cfg = effective.get("drone", {})
     drone_host = drone_cfg.get("host", "10.5.0.10")
@@ -137,12 +132,16 @@ def build_app(
     mon_drone = DroneClient(
         f"http://{drone_host}:{int(drone_cfg.get('apiPort', 8080))}", timeout=mon_cfg.http_timeout_s
     )
-    connection_monitor = ConnectionMonitor(bus, mon_drone, mon_cfg)
+    connection_monitor = ConnectionMonitor(
+        bus, mon_drone, mon_cfg, stats_client_factory=stats_client_factory
+    )
 
     idr_cfg = effective.get("idrForward", {})
     idr_relay = IdrRelay(drone_host, port=int(idr_cfg.get("port", 11223)))
 
-    dynlink = DynamicLinkController(make_dl_snapshot(effective), bus=bus)
+    dynlink = DynamicLinkController(
+        make_dl_snapshot(effective), bus=bus, stats_client_factory=stats_client_factory
+    )
 
     pixelpilot = ProcessSupervisor(
         argv=render_pixelpilot_argv(effective),
@@ -204,21 +203,39 @@ def build_app(
             connection=connection_monitor.status(),
         )
 
+    def _retune(lnk):
+        # A remote (SSH-attached) card's radio is tuned by its own node
+        # script, not by this process's `iw` -- a live retune can't reach
+        # it. Returning False here makes api._apply_link_local fall back to
+        # runner.restart(), which re-renders and re-pushes the node script
+        # with the new channel/width/etc. All-local is untouched: same real
+        # `radio.retune` call as before, over `resolve_wlans` (local ifaces
+        # only, unaffected by Phase 2 remote cards).
+        eff = store.effective()
+        if has_remote(resolve_cards(eff)):
+            return False
+        return radio.retune(resolve_wlans(eff), lnk)
+
+    def _nodes_status_fn():
+        # On-demand + slow (SSH); never called from status_fn/the /gs/status
+        # hot path. Same nic_detector as resolve_wlans so an all-local "auto"
+        # config expands to the same local cards.
+        return nodes_status(store.effective(), nic_detector=_wfb_nics)
+
     api = Api(
         store=store,
         schema=schema,
-        render_mod=render_mod,
         runner=runner,
         drone=drone,
         status_fn=status_fn,
-        cfg_out=cfg_out,
         dynlink=dynlink,
         pixelpilot=pixelpilot,
         probe=None,
-        retune=lambda lnk: radio.retune(resolve_wlans(store.effective()), lnk),
+        retune=_retune,
         wlans_resolver=resolve_wlans,
         armer_tick=armer.tick,
         idr_relay=idr_relay,
+        nodes_status_fn=_nodes_status_fn,
     )
 
     http_server = make_http_server(api, host, port)
@@ -242,21 +259,26 @@ def main(argv=None):
     p.add_argument(
         "--dump-config", action="store_true", help="print the full default config as JSON and exit"
     )
-    p.add_argument("--cfg-out", default="/etc/wifibroadcast.cfg")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--log", default=None)
-    p.add_argument(
-        "--runner", default=None, help="runner command (default: this python -m fpvdgs.runner)"
-    )
     args = p.parse_args(argv)
 
     if args.dump_config:
         print(json.dumps(default_config(), indent=2))
         return
 
-    runner_cmd = args.runner.split() if args.runner else [sys.executable, "-m", "fpvdgs.runner"]
-    app = build_app(args.config, args.cfg_out, args.host, args.port, runner_cmd, log_path=args.log)
+    # Configure Python logging so the engine/dynlink loggers actually surface
+    # (previously --log only redirected child process stdout; our own INFO/
+    # WARNING went nowhere under start-stop-daemon -b, hiding start failures).
+    # filename=None -> stderr.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        filename=args.log,
+    )
+
+    app = build_app(args.config, args.host, args.port, log_path=args.log)
 
     def _on_sigterm(signum, frame):
         raise KeyboardInterrupt

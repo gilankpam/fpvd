@@ -1,5 +1,7 @@
 """Validation rules. `link` is a normal mutable block in /config."""
 
+from .wfb.cards import parse_cards
+
 LINK_KEYS = {
     "channel",
     "width",
@@ -7,6 +9,13 @@ LINK_KEYS = {
     "region",
     "linkId",
     "beamforming",
+    "cards",
+    "serverAddress",
+    # legacy overlay key, pre-dates `cards` (Phase 2 remote cards): a plain
+    # list of local iface name strings, or "auto". `wfb.cards.parse_cards`
+    # still consumes it as a back-compat fallback — keep accepting it here
+    # (and never strip it in the tolerant loader) so old overlays/PATCHes
+    # that only set `wlans` keep working. Deprecated; prefer `cards`.
     "wlans",
     "videoEncryption",
 }
@@ -61,7 +70,9 @@ LEARNED_PRIOR_KEYS = {
     "recencyDecay",
 }
 TAP_KEYS = frozenset({"enabled", "port", "staleMs", "captureRaw"})
+CARD_KEYS = frozenset({"host", "iface", "sshUser", "sshPort", "sshKey", "txPowerDbm", "initScript"})
 VALID_WIDTHS = {10, 20, 40}  # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
+TX_SELECTOR_KEYS = frozenset({"rssiDeltaDb", "counterRelDelta", "counterAbsDelta"})
 
 
 _bf_capable = None  # callable(cfg) -> bool; None => unknown => allow
@@ -123,6 +134,13 @@ def validate_effective(cfg: dict) -> None:
     bf = link.get("beamforming")
     if bf is not None:
         _validate_beamforming(bf)
+    cards = link.get("cards")
+    if cards is not None and cards != "auto":
+        _validate_cards(cards)
+    _validate_single_remote_host(link)
+    server_addr = link.get("serverAddress")
+    if server_addr is not None and not isinstance(server_addr, str):
+        raise SchemaError("link.serverAddress must be a string or null")
     if bf is not None and bf.get("enabled") and _bf_capable is not None:
         if not _bf_capable(cfg):
             raise SchemaError(
@@ -144,6 +162,9 @@ def validate_effective(cfg: dict) -> None:
     dr = cfg.get("drone")
     if dr is not None:
         _validate_drone(dr)
+    wfb = cfg.get("wfb")
+    if wfb is not None:
+        _validate_wfb(wfb)
 
 
 def _validate_drone(dr: dict) -> None:
@@ -157,6 +178,37 @@ def _validate_drone(dr: dict) -> None:
         raise SchemaError("drone.apiPort must be an int in 1..65535")
 
 
+def _validate_wfb(wfb: dict) -> None:
+    if not isinstance(wfb, dict):
+        raise SchemaError("wfb must be an object")
+    txsel = wfb.get("txSelector")
+    if txsel is not None:
+        _validate_block_keys("wfb.txSelector", txsel, TX_SELECTOR_KEYS)
+        _validate_non_neg_num("wfb.txSelector.rssiDeltaDb", txsel.get("rssiDeltaDb"))
+        _validate_prob("wfb.txSelector.counterRelDelta", txsel.get("counterRelDelta"))
+        abs_delta = txsel.get("counterAbsDelta")
+        if abs_delta is not None and (
+            isinstance(abs_delta, bool) or not isinstance(abs_delta, int) or abs_delta < 0
+        ):
+            raise SchemaError("wfb.txSelector.counterAbsDelta must be a non-negative int")
+    mav = wfb.get("mavlink")
+    if mav is not None:
+        if not isinstance(mav, dict):
+            raise SchemaError("wfb.mavlink must be an object")
+        _validate_mavlink_peer("wfb.mavlink.peer", mav.get("peer"))
+
+
+def _validate_mavlink_peer(name: str, v) -> None:
+    if not isinstance(v, str) or not v:
+        raise SchemaError(f"{name} must be a non-empty string")
+    scheme, sep, rest = v.partition("://")
+    if not sep or scheme not in ("connect", "listen"):
+        raise SchemaError(f"{name} must match connect://host:port or listen://host:port")
+    host, sep2, port = rest.rpartition(":")
+    if not sep2 or not host or not port.isdigit():
+        raise SchemaError(f"{name} must match connect://host:port or listen://host:port")
+
+
 def _validate_beamforming(bf: dict) -> None:
     if not isinstance(bf, dict):
         raise SchemaError("link.beamforming must be an object")
@@ -165,6 +217,72 @@ def _validate_beamforming(bf: dict) -> None:
         raise SchemaError(f"unknown link.beamforming keys: {sorted(unknown)}")
     if not isinstance(bf.get("enabled", False), bool):
         raise SchemaError("link.beamforming.enabled must be a bool")
+
+
+def _validate_cards(cards) -> None:
+    if not isinstance(cards, list):
+        raise SchemaError("link.cards must be a list or 'auto'")
+    for c in cards:
+        if isinstance(c, str):
+            continue
+        if not isinstance(c, dict):
+            raise SchemaError("link.cards entries must be a string or an object")
+        if "iface" not in c:
+            raise SchemaError("link.cards object entries require 'iface'")
+        unknown = set(c) - CARD_KEYS
+        if unknown:
+            raise SchemaError(f"unknown link.cards keys: {sorted(unknown)}")
+        if "host" in c:
+            host = c["host"]
+            if not isinstance(host, str) or not host:
+                raise SchemaError("link.cards.host must be a non-empty string")
+        port = c.get("sshPort", 22)
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise SchemaError("link.cards.sshPort must be an int in 1..65535")
+        ssh_user = c.get("sshUser", "root")
+        if not isinstance(ssh_user, str) or not ssh_user:
+            raise SchemaError("link.cards.sshUser must be a non-empty string")
+        ssh_key = c.get("sshKey")
+        if ssh_key is not None and not isinstance(ssh_key, str):
+            raise SchemaError("link.cards.sshKey must be a string or absent")
+        if "txPowerDbm" in c:
+            txp = c["txPowerDbm"]
+            if (
+                txp is not None
+                and txp != "off"
+                and (isinstance(txp, bool) or not isinstance(txp, (int, float)))
+            ):
+                raise SchemaError("link.cards.txPowerDbm must be a number, 'off', or null")
+        if "initScript" in c:
+            s = c["initScript"]
+            if s is not None and not isinstance(s, str):
+                raise SchemaError("link.cards.initScript must be a string or null")
+
+
+def _validate_single_remote_host(link: dict) -> None:
+    # The engine derives ONE server_address from the first remote card's
+    # host and uses it for every remote node — correct for a single remote
+    # host, silently wrong for 2+ DISTINCT remote hosts (a second node would
+    # be told to send video to the wrong GS source address -> video loss ->
+    # GS reboots on sustained video loss). Per-node server_address is a
+    # future enhancement; until then, reject a multi-remote-host config
+    # outright rather than mis-wire it. Remote cards are always explicit
+    # (never "auto"), so resolve_cards' auto-expansion isn't needed here.
+    try:
+        cards = parse_cards(link)
+    except ValueError as exc:
+        # parse_cards' own invariants (e.g. a remote entry hiding in the
+        # legacy `wlans` list) — surface as a clean SchemaError rather than
+        # an uncaught ValueError.
+        raise SchemaError(str(exc)) from exc
+    if cards == "auto":
+        return
+    hosts = {c.host for c in cards if c.host is not None}
+    if len(hosts) > 1:
+        raise SchemaError(
+            "multiple remote-card hosts not yet supported (per-node server "
+            "address pending); use at most one remote host"
+        )
 
 
 def _validate_dynamic_link(dl: dict) -> None:

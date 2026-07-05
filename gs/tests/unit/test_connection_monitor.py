@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 from fpvdgs.connection_monitor import ConnectionMonitor, ConnectionMonitorConfig
 from fpvdgs.dynlink.stats_client import RxEvent
 from fpvdgs.events import DRONE_CONNECTED, DRONE_DISCONNECTED, EventBus
@@ -67,6 +69,11 @@ def _wait(pred, timeout=2.0):
             return True
         time.sleep(0.02)
     return pred()
+
+
+def test_connection_monitor_requires_a_stats_factory():
+    with pytest.raises(TypeError):
+        ConnectionMonitor(object(), object())  # no stats_client_factory
 
 
 def test_connects_when_tunnel_and_http_ok():
@@ -180,7 +187,7 @@ def test_enter_connected_payload_carries_radio_calibration():
     bus = EventBus()
     seen = []
     bus.subscribe(DRONE_CONNECTED, lambda p: seen.append(p))
-    m = ConnectionMonitor(bus, drone_client=None)
+    m = ConnectionMonitor(bus, drone_client=None, stats_client_factory=_stats_factory({}))
 
     snap = {
         "version": "vX",
@@ -201,7 +208,7 @@ def test_enter_connected_without_radio_block_omits_it():
     bus = EventBus()
     seen = []
     bus.subscribe(DRONE_CONNECTED, lambda p: seen.append(p))
-    m = ConnectionMonitor(bus, drone_client=None)
+    m = ConnectionMonitor(bus, drone_client=None, stats_client_factory=_stats_factory({}))
 
     m._enter_connected({"version": "vOld"}, now=1.0)
     assert "radio" not in seen[0]["drone"]

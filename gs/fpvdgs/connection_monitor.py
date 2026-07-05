@@ -22,7 +22,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .dynlink.stats_client import RxEvent, StatsClient
+from .dynlink.stats_client import RxEvent
 from .events import DRONE_CONNECTED, DRONE_DISCONNECTED
 
 log = logging.getLogger("fpvdgs.connection")
@@ -48,7 +48,7 @@ class ConnectionMonitor:
         cfg=None,
         *,
         stats_endpoint="tcp://127.0.0.1:8103",
-        stats_client_factory=StatsClient,
+        stats_client_factory,
         time_fn=time.monotonic,
     ):
         self._bus = bus

@@ -1,3 +1,5 @@
+import json
+
 from fpvdgs.config import ConfigStore
 from fpvdgs.supervisor import App
 
@@ -72,9 +74,6 @@ def test_build_app_wires_api_collaborators(tmp_path, monkeypatch):
     armer_tick) so /gs/apply can retune the GS and reconcile the beamformee."""
     import fpvdgs.supervisor as sup
 
-    monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
-    monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
-
     # Explicit wlans so every resolve_wlans() (supervisor AND probe.config_build)
     # short-circuits without shelling out to `wfb-nics`.
     config = tmp_path / "config.json"
@@ -82,7 +81,7 @@ def test_build_app_wires_api_collaborators(tmp_path, monkeypatch):
         '{"link": {"region": "US", "channel": 132, "width": 20, ' '"wlans": ["wlan0"]}}'
     )
 
-    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+    app = sup.build_app(str(config), "127.0.0.1", 0)
     assert app.api.retune is not None
     assert app.api.wlans_resolver is not None
     assert app.api.armer_tick is not None
@@ -125,15 +124,66 @@ def test_connection_monitor_stops_before_runner():
 def test_build_app_wires_connection_monitor_and_bus(tmp_path, monkeypatch):
     import fpvdgs.supervisor as sup
 
-    monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
-    monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
     config = tmp_path / "config.json"
     config.write_text(
         '{"link": {"region": "US", "channel": 132, "width": 20, ' '"wlans": ["wlan0"]}}'
     )
-    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+    app = sup.build_app(str(config), "127.0.0.1", 0)
     assert app.connection_monitor is not None
     assert app.bus is not None
+
+
+def test_build_app_retune_calls_radio_retune_when_all_local(tmp_path, monkeypatch):
+    """All-local retune behavior is unchanged: the wired retune callback
+    still calls radio.retune(local_wlans, link) and returns its result."""
+    import fpvdgs.supervisor as sup
+
+    calls = []
+
+    def _fake_retune(wlans, link):
+        calls.append((list(wlans), link))
+        return True
+
+    monkeypatch.setattr(sup.radio, "retune", _fake_retune)
+
+    config = tmp_path / "config.json"
+    config.write_text('{"link": {"region": "US", "channel": 132, "width": 20, "wlans": ["wlan0"]}}')
+    app = sup.build_app(str(config), "127.0.0.1", 0)
+
+    new_link = {"region": "US", "channel": 149, "width": 20}
+    assert app.api.retune(new_link) is True
+    assert calls == [(["wlan0"], new_link)]
+
+
+def test_build_app_retune_returns_false_when_remote_card_present(tmp_path, monkeypatch):
+    """A remote (SSH-attached) card can't be live-retuned by this process's
+    `iw` -- the retune callback must return False so api._apply_link_local
+    falls back to runner.restart() (re-pushing the node script)."""
+    import fpvdgs.supervisor as sup
+
+    calls = []
+    monkeypatch.setattr(sup.radio, "retune", lambda *a, **k: calls.append((a, k)) or True)
+
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps(
+            {
+                "link": {
+                    "region": "US",
+                    "channel": 132,
+                    "width": 20,
+                    "cards": [
+                        {"iface": "wlan0"},
+                        {"host": "192.168.1.10", "iface": "wlan0"},
+                    ],
+                }
+            }
+        )
+    )
+    app = sup.build_app(str(config), "127.0.0.1", 0)
+
+    assert app.api.retune({"region": "US", "channel": 149, "width": 20}) is False
+    assert calls == []
 
 
 def test_build_app_probe_is_bypassed(tmp_path, monkeypatch):
@@ -141,13 +191,11 @@ def test_build_app_probe_is_bypassed(tmp_path, monkeypatch):
     app.probe and app.api.probe must both be None even with dynamicLink enabled."""
     import fpvdgs.supervisor as sup
 
-    monkeypatch.setattr(sup.render_mod, "write_cfg", lambda *a, **k: None)
-    monkeypatch.setattr(sup.render_mod, "render_cfg", lambda eff: "")
     config = tmp_path / "config.json"
     config.write_text(
         '{"link": {"region": "US", "channel": 132, "width": 20, "wlans": ["wlan0"]}, '
         '"dynamicLink": {"enabled": true}}'
     )
-    app = sup.build_app(str(config), str(tmp_path / "out.cfg"), "127.0.0.1", 0, runner_cmd=["true"])
+    app = sup.build_app(str(config), "127.0.0.1", 0)
     assert app.probe is None, "probe bypass: no ProbeController must be constructed"
     assert app.api.probe is None

@@ -7,17 +7,14 @@ do NOT count toward the crash-loop budget and clear any prior fault.
 ProcessSupervisor is generic: parameterized by an argv (swappable at runtime
 via set_argv), an extra-env dict, and a readiness strategy:
   - probe  : ready as soon as ready_check() is True before the timeout; a
-             timeout (or early exit) is a failed start. (wfb: port :8103.)
+             timeout (or early exit) is a failed start.
   - settle : ready iff the process is still alive at the end of the timeout
              window (ready_check=None, ready_on_timeout=True); an early exit is
              a failed start. (pixelpilot: no port to probe.)
-
-RunnerSupervisor specializes it for the wfb data plane.
 """
 
 import os
 import signal
-import socket
 import subprocess
 import threading
 import time
@@ -29,18 +26,13 @@ def _wfb_nics() -> list[str]:
 
 
 def resolve_wlans(cfg: dict) -> list[str]:
-    wlans = cfg.get("link", {}).get("wlans", "auto")
-    if wlans == "auto" or wlans is None:
-        return _wfb_nics()
-    return list(wlans)
+    """Thin shim over the card model: every existing caller (status,
+    beamforming, retune) wants only LOCAL ifaces, same as before Phase 2's
+    remote cards. Local import avoids a circular import (wfb.cards falls
+    back to this module's `_wfb_nics` when no detector is passed)."""
+    from .wfb.cards import local_ifaces, resolve_cards
 
-
-def _port_open(port: int, host: str = "127.0.0.1") -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=0.3):
-            return True
-    except OSError:
-        return False
+    return local_ifaces(resolve_cards(cfg, nic_detector=_wfb_nics))
 
 
 class ProcessSupervisor:
@@ -201,7 +193,10 @@ class ProcessSupervisor:
             self._supervise = False
             self._kill_locked()
 
-    def restart(self):
+    def restart(self, config=None):
+        # `config` is accepted for interface parity with WfbEngine.restart but
+        # ignored: this supervisor's child re-reads the rendered cfg file, which
+        # api._apply_gs writes from the pending config before the restart.
         with self._lock:
             self.stop()
             self._restarts += 1
@@ -226,36 +221,3 @@ class ProcessSupervisor:
                 "lastExit": self._last_exit,
                 "fault": self._fault,
             }
-
-
-class RunnerSupervisor(ProcessSupervisor):
-    """The wfb data plane: argv = runner_cmd --profiles P --wlans W..., env sets
-    WIFIBROADCAST_CFG, readiness = the wfb-ng stats port (:8103) opening."""
-
-    def __init__(
-        self,
-        runner_cmd,
-        cfg_out,
-        profile,
-        wlans,
-        ready_port=8103,
-        ready_timeout=10.0,
-        log_path=None,
-        max_restarts=5,
-        restart_window=60.0,
-        poll_interval=0.5,
-        backoff=0.5,
-    ):
-        argv = list(runner_cmd) + ["--profiles", profile, "--wlans", *wlans]
-        super().__init__(
-            argv,
-            env={"WIFIBROADCAST_CFG": cfg_out},
-            ready_check=lambda: _port_open(ready_port),
-            ready_timeout=ready_timeout,
-            ready_on_timeout=False,
-            log_path=log_path,
-            max_restarts=max_restarts,
-            restart_window=restart_window,
-            poll_interval=poll_interval,
-            backoff=backoff,
-        )

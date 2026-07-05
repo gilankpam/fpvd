@@ -1,3 +1,4 @@
+import asyncio
 import json
 import socket
 import threading
@@ -7,6 +8,7 @@ import urllib.request
 import pytest
 
 from fpvdgs import supervisor
+from fpvdgs.wfb import engine as engine_mod
 
 
 def _free_port():
@@ -15,6 +17,61 @@ def _free_port():
     p = s.getsockname()[1]
     s.close()
     return p
+
+
+class _StubStatsSource:
+    """A `client_factory()`-compatible stand-in that just idles until stopped
+    -- these HTTP-wiring tests don't exercise the stats/dynlink data path."""
+
+    def __init__(self, *a, **k):
+        self._stop = None
+
+    async def run(self):
+        self._stop = asyncio.Event()
+        await self._stop.wait()
+
+    def stop(self):
+        if self._stop is not None:
+            self._stop.set()
+
+
+class _FakeWfbEngine:
+    """Stand-in for the real `WfbEngine` so these HTTP/wiring tests don't
+    need real wfb_rx/wfb_tx binaries or a real wireless nic -- only the
+    App/Api plumbing around the runner is under test here."""
+
+    def __init__(self, config_provider=None, wlans_resolver=None, stats_port=None, reap_fn=None):
+        self._running = False
+        self.restarts = 0
+
+    def start(self) -> bool:
+        self._running = True
+        return True
+
+    def restart(self, config=None) -> bool:
+        self.restarts += 1
+        self._running = True
+        return True
+
+    def stop(self) -> None:
+        self._running = False
+
+    def shutdown(self) -> None:
+        self._running = False
+
+    def state(self) -> dict:
+        return {
+            "running": self._running,
+            "pid": None,
+            "restarts": self.restarts,
+            "autoRestarts": 0,
+            "lastExit": None,
+            "fault": False,
+            "nodes": {},
+        }
+
+    def client_factory(self):
+        return _StubStatsSource
 
 
 def _req(base, method, path, body=None):
@@ -27,10 +84,9 @@ def _req(base, method, path, body=None):
 
 
 @pytest.fixture
-def daemon(tmp_path, fake_drone):
+def daemon(tmp_path, fake_drone, monkeypatch):
+    monkeypatch.setattr(engine_mod, "WfbEngine", _FakeWfbEngine)
     config_json = tmp_path / "config.json"
-    cfg_out = tmp_path / "wifibroadcast.cfg"
-    ready_port = _free_port()
     api_port = _free_port()
     config_json.write_text(
         json.dumps(
@@ -48,22 +104,10 @@ def daemon(tmp_path, fake_drone):
             }
         )
     )
-    fake_runner = [
-        "python3",
-        "-c",
-        (
-            "import socket,time;s=socket.socket();"
-            "s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);"
-            f"s.bind(('127.0.0.1',{ready_port}));s.listen(1);time.sleep(30)"
-        ),
-    ]
     app = supervisor.build_app(
         str(config_json),
-        cfg_out=str(cfg_out),
         host="127.0.0.1",
         port=api_port,
-        runner_cmd=fake_runner,
-        ready_port=ready_port,
         ready_timeout=5.0,
     )
     app.start()
@@ -71,38 +115,32 @@ def daemon(tmp_path, fake_drone):
     t.start()
     time.sleep(0.3)
     base = f"http://127.0.0.1:{api_port}"
-    yield base, cfg_out, fake_drone
+    yield base, fake_drone
     app.shutdown()
 
 
 def test_healthz_and_status(daemon):
-    base, _, _ = daemon
+    base, _ = daemon
     assert _req(base, "GET", "/healthz")[0] == 200
     code, st = _req(base, "GET", "/gs/status")
     assert code == 200
     assert st["runner"]["running"] is True
 
 
-def test_cfg_rendered_on_boot(daemon):
-    _, cfg_out, _ = daemon
-    text = cfg_out.read_text()
-    assert "wifi_channel = 132" in text
-
-
-def test_gs_apply_link_change_rerenders_cfg(daemon):
-    # A link change goes through /gs/config + /gs/apply and is a GS-local effect:
-    # the cfg is re-rendered (and the runner retunes/bounces). The drone push is
-    # now the client's job, not the GS's — so no drone /config call here.
-    base, cfg_out, fake_drone = daemon
+def test_gs_apply_link_change_applies_without_drone_push(daemon):
+    # A link change goes through /gs/config + /gs/apply and is a GS-local effect
+    # (the native engine retunes/bounces from its own config, no rendered cfg
+    # file involved). The drone push is now the client's job, not the GS's --
+    # so no drone /config call here.
+    base, fake_drone = daemon
     _req(base, "PATCH", "/gs/config", {"link": {"channel": 100}})
     code, _ = _req(base, "POST", "/gs/apply", {})
     assert code == 200
-    assert "wifi_channel = 100" in cfg_out.read_text()
     assert not any(p == "/config" for (_m, p, _b) in fake_drone["calls"])
 
 
 def test_air_proxy_roundtrip(daemon):
-    base, _, fake_drone = daemon
+    base, fake_drone = daemon
     code, _ = _req(base, "PATCH", "/air/config", {"video": {"bitrate": 9000}})
     assert code == 200
     assert any(p == "/config" for (_m, p, _b) in fake_drone["calls"])
@@ -161,9 +199,7 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
             }
         )
     )
-    cfg_out = tmp_path / "wfb.cfg"
-
-    app = supervisor.build_app(str(config_json), str(cfg_out), "127.0.0.1", 0, runner_cmd=["true"])
+    app = supervisor.build_app(str(config_json), "127.0.0.1", 0)
     code, body = app.api.handle("GET", "/gs/status", {}, b"")
     assert code == 200
     assert "dynamicLink" in body
@@ -236,14 +272,11 @@ def test_status_probe_bypassed_with_dynamiclink_enabled(tmp_path, monkeypatch):
             }
         )
     )
-    cfg_out = tmp_path / "wfb.cfg"
     api_port = _free_port()
     app = supervisor.build_app(
         str(config_json),
-        str(cfg_out),
         "127.0.0.1",
         api_port,
-        runner_cmd=["true"],
         probe_spawn=fake_spawn,
     )
     app.start()

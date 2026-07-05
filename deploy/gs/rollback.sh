@@ -14,7 +14,6 @@ ssh -o StrictHostKeyChecking=accept-new "$TARGET" '
     rm -rf "$SITE/fpvdgs"
     if [ -f /root/fpvd-gs-rollback/S98wifibroadcast ]; then
         cp -a /root/fpvd-gs-rollback/S98wifibroadcast /etc/init.d/S98wifibroadcast
-        cp -a /root/fpvd-gs-rollback/wifibroadcast.cfg.orig /etc/wifibroadcast.cfg 2>/dev/null || true
         chmod +x /etc/init.d/S98wifibroadcast
         /etc/init.d/S98wifibroadcast start
     fi

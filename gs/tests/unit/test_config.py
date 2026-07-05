@@ -187,6 +187,39 @@ def test_stale_tap_key_stripped_on_load():
     assert "removedKnob" not in pruned["dynamicLink"]["tap"]
 
 
+def test_wfb_tx_selector_defaults_present():
+    cfg = default_config()["wfb"]
+    assert cfg["txSelector"] == {
+        "rssiDeltaDb": 3,
+        "counterRelDelta": 0.1,
+        "counterAbsDelta": 3,
+    }
+
+
+def test_stale_tx_selector_key_stripped_on_load():
+    """A removed/renamed txSelector knob left in a stale config.json must be
+    stripped, not bricked — validate_effective is strict on wfb.txSelector
+    keys. Mirrors the dynamicLink.tap strip test."""
+    from fpvdgs.config import _warn_unknown
+
+    loaded = {"wfb": {"txSelector": {"rssiDeltaDb": 5, "removedKnob": 1}}}
+    pruned = _warn_unknown(loaded, default_config())
+    assert "removedKnob" not in pruned["wfb"]["txSelector"]
+    assert pruned["wfb"]["txSelector"]["rssiDeltaDb"] == 5
+
+
+def test_stale_tx_selector_key_does_not_brick_boot(tmp_path):
+    from fpvdgs import schema
+
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"wfb": {"txSelector": {"rssiDeltaDb": 2, "bogusKnob": 99}}}))
+    s = ConfigStore.load(str(cfg))  # warns + strips
+    schema.validate_effective(s.effective())  # must NOT raise (boot path)
+    txsel = s.effective()["wfb"]["txSelector"]
+    assert "bogusKnob" not in txsel
+    assert txsel["rssiDeltaDb"] == 2
+
+
 def test_learned_prior_known_key_survives_loader_bogus_key_stripped(tmp_path, caplog):
     """A valid learnedPrior knob in config.json must survive the tolerant loader;
     an unknown learnedPrior key must be stripped (not crash the boot path).

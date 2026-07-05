@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 
 [project.scripts]
 fpvd = "fpvdgs.supervisor:main"
-fpvd-runner = "fpvdgs.runner:main"
+fpvd-stats = "fpvdgs.wfb.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["fpvdgs*"]

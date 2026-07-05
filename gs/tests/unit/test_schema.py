@@ -456,3 +456,432 @@ def test_tap_bool_fields_type_checked():
         schema._validate_dynamic_link({"tap": {"enabled": "false"}})
     with pytest.raises(schema.SchemaError):
         schema._validate_dynamic_link({"tap": {"captureRaw": 1}})
+
+
+def test_wfb_engine_key_is_gone_from_defaults_and_not_required():
+    from fpvdgs.config_defaults import default_config
+    from fpvdgs.schema import validate_effective
+
+    cfg = default_config()
+    assert "engine" not in cfg["wfb"]
+    validate_effective(cfg)  # no engine key, still valid
+
+
+def test_wfb_tx_selector_valid_accepted():
+    schema.validate_effective(
+        {
+            "link": {"channel": 132, "region": "US"},
+            "wfb": {
+                "txSelector": {
+                    "rssiDeltaDb": 3,
+                    "counterRelDelta": 0.1,
+                    "counterAbsDelta": 3,
+                }
+            },
+        }
+    )
+
+
+def test_wfb_tx_selector_rejects_bad_rssi_delta():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"txSelector": {"rssiDeltaDb": -1}},
+            }
+        )
+
+
+def test_wfb_tx_selector_rejects_out_of_range_counter_rel_delta():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"txSelector": {"counterRelDelta": 1.5}},
+            }
+        )
+
+
+def test_wfb_tx_selector_rejects_negative_counter_abs_delta():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"txSelector": {"counterAbsDelta": -1}},
+            }
+        )
+
+
+def test_wfb_tx_selector_rejects_unknown_key():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"txSelector": {"bogus": 1}},
+            }
+        )
+
+
+def test_wfb_mavlink_peer_null_rejected():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"mavlink": {"peer": None}},
+            }
+        )
+
+
+def test_wfb_mavlink_peer_missing_rejected():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"mavlink": {}},
+            }
+        )
+
+
+def test_wfb_mavlink_peer_malformed_rejected():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"mavlink": {"peer": "http://127.0.0.1:14550"}},
+            }
+        )
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {"channel": 132, "region": "US"},
+                "wfb": {"mavlink": {"peer": "connect://127.0.0.1"}},
+            }
+        )
+
+
+def test_wfb_mavlink_peer_valid_schemes_accepted():
+    schema.validate_effective(
+        {
+            "link": {"channel": 132, "region": "US"},
+            "wfb": {"mavlink": {"peer": "connect://127.0.0.1:14550"}},
+        }
+    )
+    schema.validate_effective(
+        {
+            "link": {"channel": 132, "region": "US"},
+            "wfb": {"mavlink": {"peer": "listen://0.0.0.0:14550"}},
+        }
+    )
+
+
+def test_wfb_no_mavlink_block_is_allowed():
+    # wfb.mavlink is optional at the block level; only required WHEN present.
+    schema.validate_effective({"link": {"channel": 132, "region": "US"}, "wfb": {}})
+
+
+# ---- link.cards / link.serverAddress (wfb.cards migration) ----------------
+
+
+def test_config_patch_accepts_cards_and_server_address():
+    schema.validate_config_patch({"link": {"cards": ["wlan0"]}})  # no raise
+    schema.validate_config_patch({"link": {"serverAddress": "10.0.0.5"}})  # no raise
+
+
+def test_config_patch_still_accepts_legacy_wlans():
+    # Deprecated but must keep working — old clients/overlays only know it.
+    schema.validate_config_patch({"link": {"wlans": ["wlan0"]}})  # no raise
+
+
+def test_validate_effective_accepts_string_and_object_cards():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    "wlan0",
+                    {"host": "192.168.1.10", "iface": "wlan1", "txPowerDbm": 20},
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_accepts_cards_auto():
+    schema.validate_effective({"link": {"channel": 132, "region": "US", "cards": "auto"}})
+
+
+def test_validate_effective_rejects_card_object_without_iface():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {"link": {"channel": 132, "region": "US", "cards": [{"host": "x"}]}}
+        )
+
+
+def test_validate_effective_rejects_unknown_card_key():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {"link": {"channel": 132, "region": "US", "cards": [{"iface": "w", "bogus": 1}]}}
+        )
+
+
+def test_validate_effective_rejects_non_string_server_address():
+    with pytest.raises(SchemaError):
+        schema.validate_effective({"link": {"channel": 132, "region": "US", "serverAddress": 5}})
+
+
+def test_validate_effective_accepts_null_server_address():
+    schema.validate_effective({"link": {"channel": 132, "region": "US", "serverAddress": None}})
+
+
+def test_defaults_have_cards_and_server_address_not_wlans():
+    from fpvdgs.config_defaults import default_config
+
+    link = default_config()["link"]
+    assert link["cards"] == "auto"
+    assert link["serverAddress"] is None
+    assert "wlans" not in link
+
+
+# ---- link.cards remote-field hardening (Task 1 review fold-in) ------------
+
+
+def test_validate_effective_accepts_full_remote_card():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    {
+                        "host": "192.168.1.10",
+                        "iface": "wlan0",
+                        "sshUser": "root",
+                        "sshPort": 2222,
+                        "sshKey": "/root/.ssh/id_ed25519",
+                        "txPowerDbm": 20,
+                    }
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_accepts_txpower_off_and_null():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    {"host": "192.168.1.10", "iface": "wlan0", "txPowerDbm": "off"},
+                    {"host": "192.168.1.10", "iface": "wlan1", "txPowerDbm": None},
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_rejects_sshport_out_of_range():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "sshPort": 99999}],
+                }
+            }
+        )
+
+
+def test_validate_effective_rejects_sshport_non_int():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "sshPort": "x"}],
+                }
+            }
+        )
+
+
+def test_validate_effective_rejects_empty_host():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {"link": {"channel": 132, "region": "US", "cards": [{"host": "", "iface": "w"}]}}
+        )
+
+
+def test_validate_effective_rejects_non_string_host():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {"link": {"channel": 132, "region": "US", "cards": [{"host": 5, "iface": "w"}]}}
+        )
+
+
+def test_validate_effective_rejects_empty_ssh_user():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "sshUser": ""}],
+                }
+            }
+        )
+
+
+def test_validate_effective_rejects_non_string_ssh_key():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "sshKey": 5}],
+                }
+            }
+        )
+
+
+def test_validate_effective_rejects_bad_txpower_string():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "txPowerDbm": "on"}],
+                }
+            }
+        )
+
+
+def test_validate_effective_rejects_bool_txpower():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "txPowerDbm": True}],
+                }
+            }
+        )
+
+
+def test_validate_effective_accepts_string_init_script():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    {
+                        "host": "x",
+                        "iface": "w",
+                        "initScript": "iw phy phy0 interface add wlan0 type monitor || true",
+                    }
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_accepts_null_init_script():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [{"host": "x", "iface": "w", "initScript": None}],
+            }
+        }
+    )
+
+
+def test_validate_effective_rejects_non_string_init_script():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [{"host": "x", "iface": "w", "initScript": 123}],
+                }
+            }
+        )
+
+
+# ---- link.cards single-remote-host guard (final-review fold-in) -----------
+#
+# The engine derives ONE server_address from the first remote card's host and
+# uses it for every remote node. Correct for a single remote host; silently
+# wrong for 2+ DISTINCT remote hosts (a second node gets told to send video
+# to the wrong GS source address -> video loss -> GS reboots on sustained
+# video loss). Per-node server_address is a future enhancement; until then,
+# reject multi-remote-host configs outright.
+
+
+def test_validate_effective_accepts_two_remote_cards_same_host():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    {"host": "192.168.1.10", "iface": "wlan0"},
+                    {"host": "192.168.1.10", "iface": "wlan1"},
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_rejects_two_remote_cards_different_hosts():
+    with pytest.raises(SchemaError):
+        schema.validate_effective(
+            {
+                "link": {
+                    "channel": 132,
+                    "region": "US",
+                    "cards": [
+                        {"host": "192.168.1.10", "iface": "wlan0"},
+                        {"host": "192.168.1.11", "iface": "wlan1"},
+                    ],
+                }
+            }
+        )
+
+
+def test_validate_effective_accepts_one_remote_host_with_local_cards():
+    schema.validate_effective(
+        {
+            "link": {
+                "channel": 132,
+                "region": "US",
+                "cards": [
+                    "wlan0",
+                    "wlan1",
+                    {"host": "192.168.1.10", "iface": "wlan2"},
+                ],
+            }
+        }
+    )
+
+
+def test_validate_effective_accepts_cards_auto_with_remote_host_guard():
+    # "auto" only ever auto-detects local NICs, so zero remote hosts.
+    schema.validate_effective({"link": {"channel": 132, "region": "US", "cards": "auto"}})
+
+
+def test_validate_effective_accepts_legacy_wlans_with_remote_host_guard():
+    # Legacy wlans is local-only (parse_cards raises if it ever isn't), so
+    # zero remote hosts; the guard must not trip on it.
+    schema.validate_effective(
+        {"link": {"channel": 132, "region": "US", "wlans": ["wlan0", "wlan1"]}}
+    )
