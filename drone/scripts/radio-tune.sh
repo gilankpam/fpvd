@@ -19,9 +19,14 @@ case "$action" in
         esac
         ;;
     txpower)
-        # FPVD_TXPOWER_DBM is dBm; iw wants fixed mBm (dBm * 100). Matches the
-        # adaptive-link radio path (radio_txpower.cpp).
-        iw "$iface" set txpower fixed $(( ${FPVD_TXPOWER_DBM:-20} * 100 ))
+        # FPVD_TXPOWER_DBM is dBm, or the literal "auto" to hand power to the
+        # driver's per-rate TXAGC table (iw clears the user target). Otherwise
+        # iw wants fixed mBm (dBm * 100). Matches radio-up.sh + radio_txpower.cpp.
+        if [ "${FPVD_TXPOWER_DBM:-20}" = "auto" ]; then
+            iw "$iface" set txpower auto
+        else
+            iw "$iface" set txpower fixed $(( ${FPVD_TXPOWER_DBM:-20} * 100 ))
+        fi
         ;;
     mtu)
         ip link set "$iface" mtu "${FPVD_MTU:-1500}"
