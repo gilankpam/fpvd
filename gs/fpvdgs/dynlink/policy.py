@@ -261,10 +261,11 @@ class LeadingSelector:
         Returns (mcs, changed).
 
         Demote is reactive and one-step, gated by can_demote (Policy's shared
-        cooldown). Every loss-demote is classified (fade/flap/burst): fade
-        reports a raw-SNR knee sample, flap charges the damper and reports an
-        EWMA knee sample, burst does neither (last_fail carries the sample to
-        Policy). Any probation loss charges the damper regardless of class. Promote routes, in order: snap-back (recently-confirmed rung,
+        cooldown). Every loss-demote is classified (fade/flap/burst) for knee
+        teaching: fade reports a raw-SNR knee sample, flap an EWMA knee
+        sample, burst nothing (last_fail carries the sample to Policy).
+        Independently of class, a loss on a rung still on promote-probation
+        charges the flap damper. Promote routes, in order: snap-back (recently-confirmed rung,
         SNR recovered, slope >= 0 — bypasses dwell/knee/hold, never the
         damper), knee-gated climb (clean dwell + headroom over a confident
         knee), explore (cold knee — once-per-rung tuition; its first failure
