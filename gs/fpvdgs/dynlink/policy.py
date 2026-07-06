@@ -38,7 +38,8 @@ class SelectorConfig:
 
     Promote routes (in priority order):
       1. snap-back: a recently-confirmed rung whose operating SNR has nearly
-         recovered — re-entered at the fast rate limit, no dwell/knee gate.
+         recovered — re-entered at the fast rate limit, no dwell; respects
+         the knee gate (2026-07-06 spec A3).
       2. knee-gated: clean dwell + confident knee headroom (SNR above knee+margin).
       3. explore: cold knee on the target rung — promotes once as tuition.
     Demote: a caller-hysteresis-gated loss breach or a Channel-B emergency
@@ -88,9 +89,10 @@ class SelectorConfig:
     trial_window_ms: int = 10000
     # Fade signature: raw snr_w this far below the (lagging) snr_ewma.
     collapse_delta_db: float = 4.0
-    # Damper recovery: early suppression lift when snr_ewma exceeds the SNR
-    # recorded at the rung's last flap by this margin; one flap level forgiven
-    # per flap_decay_ms without a new flap on the rung.
+    # Damper recovery: early suppression lift when the rolling raw-SNR
+    # minimum (last ~2 s of snr_w samples) clears the SNR recorded at the
+    # rung's last flap by this margin; one flap level forgiven per
+    # flap_decay_ms without a new flap on the rung.
     flap_snr_release_db: float = 3.0
     flap_decay_ms: int = 60000
     # Snap-back: a rung confirmed within confirm_ttl_ms is re-entered at the
@@ -168,6 +170,12 @@ class LeadingSelector:
         self._snr_w_recent: deque[float] = deque(maxlen=RAW_MIN_RELEASE_WINDOW_TICKS)
         # Release channel currently allowing promotes to the target rung:
         # "timer" | "raw_min" | None. Per-tick observability for the flightlog.
+        # NOTE: "timer" has level semantics, not edge semantics — an expired
+        # window's entry lingers in _suppress_until_ms until the rung is
+        # re-entered and the dict cleaned (flap_reset_clean_dwell_ticks), so
+        # consecutive ticks can all report "timer" even though only the first
+        # one is the actual release. Offline analysis must dedupe consecutive
+        # ticks rather than counting each "timer" tick as a distinct release.
         self.last_release: str | None = None
         self._promote_suppressed = False
         # Trial: rung entered by promote, on probation for trial_window_ms.
@@ -208,7 +216,7 @@ class LeadingSelector:
         if snr_ewma is not None:
             self._snr_at_last_flap[rung] = snr_ewma
 
-    def _suppressed(self, rung: int, snr_ewma: float | None, ts_ms: float) -> bool:
+    def _suppressed(self, rung: int, ts_ms: float) -> bool:
         """Damper window live for `rung`? Early release (2026-07-06 spec A5):
         the rolling raw-SNR minimum must clear the flap-time SNR by
         flap_snr_release_db. The old EWMA-pop release lifted on ordinary
@@ -377,7 +385,7 @@ class LeadingSelector:
             self._reasons = reasons
             return st.current_mcs, False
 
-        self._promote_suppressed = self._suppressed(target, snr_ewma, ts_ms)
+        self._promote_suppressed = self._suppressed(target, ts_ms)
         within_rate = (ts_ms - st.last_change_time_ms) < self.cfg.min_between_changes_ms
         within_hold = (ts_ms - st.last_change_time_ms) < self.cfg.hold_modes_down_ms
         slope = 0.0 if slope is None else slope
@@ -387,7 +395,9 @@ class LeadingSelector:
             self._snapback_tgt = sb
             if sb is not None and sb > cur and slope >= 0.0 and not target_blocked:
                 # Route 1: return to recently-proven altitude at the fast rate
-                # limit — no dwell, no hold; 2026-07-06 spec A3: respects the knee gate — snap-back must not re-enter a rung the knee calls unviable (000036).
+                # limit — no dwell, no hold; 2026-07-06 spec A3: respects the
+                # knee gate — snap-back must not re-enter a rung the knee
+                # calls unviable (000036).
                 commit(target, f"snapback_promote tgt={sb}")
             elif (
                 not within_hold
