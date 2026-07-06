@@ -625,6 +625,7 @@ class Policy:
                 "slope": slope,
                 "predict_gated": predict_gated,
                 "tap_active": signals.tap_active,
+                "damper_release": self.leading.last_release,
             }
         )
         return Decision(

@@ -296,3 +296,14 @@ def test_promote_explores_cold_frontier_rung(tmp_path):
     decs = [p.tick(sig(1.0 + 0.1 * k)) for k in range(10)]
     p.close()
     assert [d.mcs for d in decs[-4:]] == [5, 5, 5, 5]  # reached 5 AND holds (no yo-yo)
+
+
+def test_record_carries_damper_release(tmp_path):
+    """2026-07-06 spec: per-tick damper-release source (timer | raw_min |
+    None) — the flight gate splits releases by channel."""
+    p = Policy(_cfg(tmp_path), _profile())
+    p.tick(_sig_snr(30.0, ts=1.0))
+    p.close()
+    last = _records(tmp_path)[-1]
+    assert "damper_release" in last
+    assert last["damper_release"] is None  # no damper activity this tick
