@@ -56,6 +56,24 @@ def make_graph_builder(argv_tag="v1"):
     return _build
 
 
+def make_probe_graph_builder(argv_tag="v1"):
+    """Mirrors real `graph.py`'s `dl.enabled AND dl.probe.enabled` gate: the
+    returned graph carries a `probe_rx` ServiceSpec-alike (parser="probe")
+    exactly when the effective config it is handed has both flags set --
+    same shape as `make_graph_builder`, plus that one extra field."""
+
+    def _build(effective, wlans, *, rand_suffix):
+        graph = make_graph_builder(argv_tag)(effective, wlans, rand_suffix=rand_suffix)
+        dl = effective.get("dynamicLink") or {}
+        probe_on = bool(dl.get("enabled", False)) and bool(
+            (dl.get("probe") or {}).get("enabled", False)
+        )
+        graph.probe_rx = make_spec("probe_rx", "rx") if probe_on else None
+        return graph
+
+    return _build
+
+
 class FakeTxParser:
     def __init__(self, unix_sockets=None):
         self.unix_sockets = dict(unix_sockets or {})
@@ -73,6 +91,7 @@ def make_child_cls(order, fail_names=frozenset()):
             self.spec = spec
             self.hub = hub
             self._on_fault = on_fault
+            self.kwargs = kw  # records e.g. sink=... passed for the probe leg
             self.running = False
             self._pid = _FakeChild._next_pid[0]
             _FakeChild._next_pid[0] += 1
@@ -150,6 +169,7 @@ def make_engine(
     mav_set_tx=None,
     tun_set_tx=None,
     tun_set_all=None,
+    graph_builder=None,
 ):
     order = order if order is not None else []
     radio_calls = radio_calls if radio_calls is not None else []
@@ -168,7 +188,7 @@ def make_engine(
     engine = WfbEngine(
         config_provider=lambda: cfg,
         wlans_resolver=lambda c: list(WLANS),
-        graph_builder=make_graph_builder(argv_tag),
+        graph_builder=graph_builder if graph_builder is not None else make_graph_builder(argv_tag),
         child_cls=make_child_cls(order, fail_names),
         radio_init=radio_init,
         stats_port=0,
@@ -216,6 +236,38 @@ def test_start_returns_true_radio_before_children_rx_before_tx():
         st = engine.state()
         assert st["running"] is True
         assert st["fault"] is False
+    finally:
+        engine.shutdown()
+
+
+# -- probe leg (2026-07-06 spec Part B): spawned with an in-process
+# ProbeFeed sink when dynamicLink.probe.enabled, absent + no feed otherwise.
+
+
+def test_engine_spawns_probe_leg_and_exposes_feed():
+    cfg = make_config(dynamicLink={"enabled": True, "probe": {"enabled": True}})
+    engine, rec = make_engine(config=cfg, graph_builder=make_probe_graph_builder())
+    try:
+        assert engine.start() is True
+
+        starts = [name for kind, name in rec["order"] if kind == "start"]
+        assert "probe_rx" in starts
+
+        assert engine.probe_feed is not None
+        probe_child = engine._children["probe_rx"]
+        assert probe_child.kwargs.get("sink") is engine.probe_feed
+    finally:
+        engine.shutdown()
+
+
+def test_engine_probe_disabled_no_leg_no_feed():
+    engine, rec = make_engine()
+    try:
+        assert engine.start() is True
+
+        starts = [name for kind, name in rec["order"] if kind == "start"]
+        assert "probe_rx" not in starts
+        assert engine.probe_feed is None
     finally:
         engine.shutdown()
 

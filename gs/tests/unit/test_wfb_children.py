@@ -355,6 +355,31 @@ def test_parser_none_child_skips_parser_and_settles_ready(tmp_path):
     run(main())
 
 
+# -- (h) spec.parser="probe" -> stdout goes to the sink, never the hub ------
+#
+# 2026-07-06 spec Part B: the probe leg's stdout must land in the in-process
+# `ProbeFeed` sink, and must NEVER reach StatsHub (no ant-selection/EOF
+# influence, no `:8103` visibility for probe records).
+
+
+def test_probe_parser_kind_uses_sink_not_hub():
+    lines = []
+
+    class Sink:
+        def feed_line(self, line):
+            lines.append(line)
+
+    spec = ServiceSpec(name="probe_rx", kind="rx", argv=["true"], parser="probe", unix_path=None)
+    hub = StubHub()
+    child = WfbChild(spec, hub, sink=Sink())
+    parser = child._make_parser()
+    parser.feed_line("1000\tPKT\t1:0:0:0:1:0:0:0:0:1:0")
+    assert lines == ["1000\tPKT\t1:0:0:0:1:0:0:0:0:1:0"]
+    assert hub.rx_windows == []
+    assert hub.sessions == []
+    assert hub.tx_windows == []
+
+
 def test_stop_terminates_process_group(tmp_path):
     async def main():
         spec = make_spec("video_rx", "rx", [write_fake_rx(tmp_path)])
