@@ -54,7 +54,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from .cards import Card, local_ifaces
-from .cluster import DEFAULT_STREAMS, SERVICE_ORDER, ClusterPlan, render_node_script
+from .cluster import ClusterPlan, render_node_script, streams_for
 from .mavproxy import MavlinkConfig
 from .tunnel import TunnelConfig
 
@@ -66,6 +66,8 @@ LOG_INTERVAL = 100
 BUF_R = 2097152
 BUF_S = 2097152
 VIDEO_UDP_PORT = 5600  # wfb-ng's gs_video default; independent of pixelpilot.rtpPort
+PROBE_RADIO_PORT = 50  # MUST match the drone's kProbeRadioPort
+PROBE_SINK_PORT = 7000  # throwaway -u destination; probe payload is never consumed
 
 # base profile: short_gi=False, stbc=1, ldpc=1, mcs_index=1
 GI = "long"
@@ -114,6 +116,7 @@ class GsGraph:
     local_forwarders: list[ServiceSpec] = field(default_factory=list)
     local_injectors: list[ServiceSpec] = field(default_factory=list)
     node_scripts: dict[str, str] = field(default_factory=dict)
+    probe_rx: ServiceSpec | None = None
 
 
 def _rx_common_tail(lid: int) -> list[str]:
@@ -294,6 +297,22 @@ def build_graph(effective: dict, wlans: list[str], *, rand_suffix: Callable[[], 
     mav_peer = MavlinkConfig(peer=mav_peer_url)
     tun_cfg = TunnelConfig(ifname="gs-wfb", ifaddr="10.5.0.1/24", mtu=1445, agg_timeout=0.005)
 
+    # -- probe (rx only, observe-only; 2026-07-06 spec Part B) --------------
+    probe_rx = None
+    if bool(dl.get("enabled", False)) and bool((dl.get("probe") or {}).get("enabled", False)):
+        probe_rx = ServiceSpec(
+            name="probe_rx",
+            kind="rx",
+            argv=_rx_argv(
+                head=["-p", str(PROBE_RADIO_PORT), "-c", "127.0.0.1", "-u", str(PROBE_SINK_PORT)],
+                key=key_flag,  # ALWAYS keyed, independent of videoEncryption
+                lid=lid,
+                tail=wlans,
+            ),
+            parser="probe",  # in-process ProbeFeed sink, never the StatsHub
+            unix_path=None,
+        )
+
     return GsGraph(
         video_rx=video_rx,
         mavlink_rx=mavlink_rx,
@@ -304,6 +323,7 @@ def build_graph(effective: dict, wlans: list[str], *, rand_suffix: Callable[[], 
         mav_peer=mav_peer,
         tun_rx_sock=tun_rx_sock,
         tun_cfg=tun_cfg,
+        probe_rx=probe_rx,
     )
 
 
@@ -346,6 +366,9 @@ def build_graph_remote(
     key_flag = ["-K", GS_KEY]
     video_key_flag = key_flag if link.get("videoEncryption", True) else []
     tap_flag = ["-D", str(tap.get("port", 8110))] if tap.get("enabled", True) else []
+    probe_enabled = bool(dl.get("enabled", False)) and bool(
+        (dl.get("probe") or {}).get("enabled", False)
+    )
 
     video_port = plan.server_port["video"]
     mav_port = plan.server_port["mavlink"]
@@ -434,14 +457,35 @@ def build_graph_remote(
     mav_peer = MavlinkConfig(peer=mav_peer_url)
     tun_cfg = TunnelConfig(ifname="gs-wfb", ifaddr="10.5.0.1/24", mtu=1445, agg_timeout=0.005)
 
+    # -- probe (rx only, aggregator; 2026-07-06 spec Part B) ----------------
+    # Consistency requirement: probe_enabled=True but plan built without probe
+    # would KeyError on plan.server_port["probe"] — that pairing is the
+    # engine's responsibility (Task 5 passes the same knob to both plan_cluster
+    # and the graph builder).
+    probe_rx = None
+    if probe_enabled:
+        probe_rx = ServiceSpec(
+            name="probe_rx",
+            kind="rx",
+            argv=_rx_argv(
+                head=["-p", str(PROBE_RADIO_PORT), "-c", "127.0.0.1", "-u", str(PROBE_SINK_PORT)],
+                key=key_flag,
+                lid=lid,
+                tail=[],
+                cluster_flag=["-a", str(plan.server_port["probe"])],
+            ),
+            parser="probe",
+            unix_path=None,
+        )
+
     # -- local forwarders/injectors (only if the local node has cards) ----
     local_forwarders: list[ServiceSpec] = []
     local_injectors: list[ServiceSpec] = []
     local_cards = plan.nodes.get(LOCAL_NODE, [])
     if local_cards:
         ifaces = local_ifaces(cards)
-        for service in SERVICE_ORDER:
-            streams = DEFAULT_STREAMS[service]
+        svc_streams = streams_for(probe_enabled)
+        for service, streams in svc_streams.items():
             rx_id = streams["rx"]
             if rx_id is not None:
                 fwd_argv = [
@@ -499,6 +543,7 @@ def build_graph_remote(
             link=link,
             link_id=lid,
             server_address=server_address,
+            streams=streams_for(probe_enabled),
         )
 
     return GsGraph(
@@ -514,4 +559,5 @@ def build_graph_remote(
         local_forwarders=local_forwarders,
         local_injectors=local_injectors,
         node_scripts=node_scripts,
+        probe_rx=probe_rx,
     )
