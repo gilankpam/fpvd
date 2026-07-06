@@ -266,7 +266,7 @@ class LeadingSelector:
         sample, burst nothing (last_fail carries the sample to Policy).
         Independently of class, a loss on a rung still on promote-probation
         charges the flap damper. Promote routes, in order: snap-back (recently-confirmed rung,
-        SNR recovered, slope >= 0 — bypasses dwell/knee/hold, never the
+        SNR recovered, slope >= 0, respects knee gate — bypasses dwell/hold, never the
         damper), knee-gated climb (clean dwell + headroom over a confident
         knee), explore (cold knee — once-per-rung tuition; its first failure
         plants the knee and self-converts the route to knee-gated)."""
@@ -352,10 +352,9 @@ class LeadingSelector:
         if not within_rate and not self._promote_suppressed:
             sb = self._snapback_target(float(snr_ewma), ts_ms)
             self._snapback_tgt = sb
-            if sb is not None and sb > cur and slope >= 0.0:
+            if sb is not None and sb > cur and slope >= 0.0 and not target_blocked:
                 # Route 1: return to recently-proven altitude at the fast rate
-                # limit — no dwell, no knee gate, no hold (fades never charged
-                # the damper, so frees snap back freely).
+                # limit — no dwell, no hold; 2026-07-06 spec A3: respects the knee gate — snap-back must not re-enter a rung the knee calls unviable (000036).
                 commit(target, f"snapback_promote tgt={sb}")
             elif (
                 not within_hold

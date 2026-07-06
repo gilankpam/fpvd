@@ -361,6 +361,29 @@ def test_confirmed_snr_rebases_after_ttl_lapse():
     assert s._confirmed_snr[3] == 24.0  # re-based, not max(30, 24)
 
 
+def test_snapback_blocked_by_confident_knee():
+    """2026-07-06 spec A3 (flight 000036): snap-back must not re-promote into
+    a rung the learned knee says is unviable at the live SNR."""
+    # trial_window_ms=3000: the 35-tick dwell (3.5 s) outlives the trial, so
+    # the loss classifies as settled burst (no damper charge) and the second
+    # snap-back attempt isn't damper-blocked.
+    s = mk(max_mcs=3, trial_window_ms=3000)
+    ts = T0
+    for _ in range(2):
+        ts = climb_one(s, ts)
+    for _ in range(35):  # confirm rung 3 at snr 30 (and outlive the trial)
+        ts += TICK
+        step(s, ts)
+    ts += TICK
+    step(s, ts, loss=0.2, loss_demote=True)  # settled burst -> at 2
+    ts += 300.0
+    step(s, ts, blocked=True)  # snr recovered BUT knee says rung 3 unviable
+    assert s.state.current_mcs == 2
+    ts += 300.0
+    step(s, ts, blocked=False)  # knee headroom back => snap-back
+    assert s.state.current_mcs == 3
+
+
 # ---- initial state ----------------------------------------------------------
 
 
