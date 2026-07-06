@@ -355,3 +355,10 @@ def test_operating_antenna_picked_by_snr():
     assert s.snr_w == 30.0  # best-SNR antenna, not best-RSSI (-40 -> 18)
     assert s.mcs_w == 5
     assert s.rssi_max_w == -40.0  # rssi_max_w stays the diversity max (observability)
+
+
+def test_signals_probe_field_defaults_none():
+    from fpvdgs.dynlink.signals import Signals
+
+    s = Signals()
+    assert s.probe is None

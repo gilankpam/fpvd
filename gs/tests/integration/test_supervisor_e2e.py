@@ -43,6 +43,7 @@ class _FakeWfbEngine:
     def __init__(self, config_provider=None, wlans_resolver=None, stats_port=None, reap_fn=None):
         self._running = False
         self.restarts = 0
+        self.probe_feed = None  # 2026-07-06 Part B: _probe_status() reads runner.probe_feed
 
     def start(self) -> bool:
         self._running = True

@@ -77,6 +77,11 @@ class Signals:
     windows_seen: int = 0
     ant_count: int = 0
 
+    # Probe readings (2026-07-06 spec Part B): {mcs: {per, snr, fresh}} from
+    # the native engine's ProbeFeed, or None when the probe is off/absent.
+    # Stamped by the controller per tick; never produced by the aggregator.
+    probe: dict | None = None
+
 
 def _ewma(prev: float | None, new: float, alpha: float) -> float:
     if prev is None:

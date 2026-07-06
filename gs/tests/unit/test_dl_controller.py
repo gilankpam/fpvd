@@ -493,3 +493,59 @@ def test_seed_noop_when_no_cached_state_or_bus():
     c2._bus = _Bus()
     c2._seed_from_cached_connection()
     assert c2._aggregator.reset_called is False  # never bound
+
+
+def test_tick_stamps_probe_snapshot_on_signals(monkeypatch):
+    from fpvdgs.dynlink.policy import Policy
+
+    snap = {6: {"per": 0.0, "snr": 25, "fresh": True}}
+
+    class FakeFeed:
+        def snapshot_fresh(self):
+            return snap
+
+    seen = []
+    orig = Policy.tick
+
+    def spy(self, signals):
+        seen.append(signals.probe)
+        return orig(self, signals)
+
+    monkeypatch.setattr(Policy, "tick", spy)
+    sock, port = _free_udp_port()
+    sock.settimeout(2.0)
+    c = DynamicLinkController(
+        _snapshot(port),
+        stats_client_factory=_OneShotStatsClient,
+        probe_feed_provider=lambda: FakeFeed(),
+    )
+    c.start()
+    try:
+        sock.recvfrom(64)  # a decision arrived => at least one tick ran
+    finally:
+        c.stop()
+        sock.close()
+    assert seen and seen[-1] == snap
+
+
+def test_tick_probe_none_without_provider(monkeypatch):
+    from fpvdgs.dynlink.policy import Policy
+
+    seen = []
+    orig = Policy.tick
+
+    def spy(self, signals):
+        seen.append(signals.probe)
+        return orig(self, signals)
+
+    monkeypatch.setattr(Policy, "tick", spy)
+    sock, port = _free_udp_port()
+    sock.settimeout(2.0)
+    c = DynamicLinkController(_snapshot(port), stats_client_factory=_OneShotStatsClient)
+    c.start()
+    try:
+        sock.recvfrom(64)
+    finally:
+        c.stop()
+        sock.close()
+    assert seen and seen[-1] is None
