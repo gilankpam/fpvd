@@ -57,6 +57,7 @@ def _dynamic_link_defaults() -> dict:
         # wfb_rx dynlink tap (2026-07-02 spec): enabled/port are render-
         # affecting (wfb runner bounce on change); staleMs/captureRaw hot.
         "tap": {"enabled": True, "port": 8110, "staleMs": 500, "captureRaw": False},
+        "probe": {"enabled": False},
     }
 
 

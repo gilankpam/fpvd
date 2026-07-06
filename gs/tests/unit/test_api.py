@@ -233,6 +233,35 @@ def test_apply_tap_stale_ms_change_is_hot():
     assert code == 200 and runner.restarts == 0
 
 
+def test_apply_probe_enable_bounces_runner():
+    """dynamicLink.probe.enabled is baked into the engine graph at spawn
+    time (2026-07-06 spec Part B) — flipping it (with dynamicLink enabled)
+    must bounce the runner, exactly like the tap render view."""
+    api, store, _, runner, retunes, ticks = _api()
+    # Must set width to 20 because 40 MHz blocks dynamicLink.enabled=true (schema invariant)
+    code, _ = api.handle(
+        "PATCH",
+        "/gs/config",
+        {},
+        b'{"link": {"width": 20}, "dynamicLink": {"enabled": true, "probe": {"enabled": true}}}',
+    )
+    assert code == 200
+    code, body = api.handle("POST", "/gs/apply", {}, b"")
+    assert code == 200 and runner.restarts == 1
+
+
+def test_apply_probe_enable_without_dl_enabled_is_hot():
+    """probe.enabled=true with dynamicLink.enabled=false renders no probe
+    leg (the conjunction is unchanged: false) — no runner bounce."""
+    api, store, _, runner, retunes, ticks = _api()
+    code, _ = api.handle(
+        "PATCH", "/gs/config", {}, b'{"dynamicLink": {"probe": {"enabled": true}}}'
+    )
+    assert code == 200
+    code, body = api.handle("POST", "/gs/apply", {}, b"")
+    assert code == 200 and runner.restarts == 0
+
+
 # --- dynamicLink apply routing ---
 class _FakeController:
     def __init__(self):

@@ -37,6 +37,7 @@ DYNAMIC_LINK_KEYS = {
     "flightlog",
     "learnedPrior",
     "tap",
+    "probe",
 }
 DRONE_KEYS = {"host", "apiPort"}  # the drone's address; reused by HTTP/IDR/DL
 SELECTOR_KEYS = {
@@ -70,6 +71,7 @@ LEARNED_PRIOR_KEYS = {
     "recencyDecay",
 }
 TAP_KEYS = frozenset({"enabled", "port", "staleMs", "captureRaw"})
+PROBE_KEYS = frozenset({"enabled"})
 CARD_KEYS = frozenset({"host", "iface", "sshUser", "sshPort", "sshKey", "txPowerDbm", "initScript"})
 VALID_WIDTHS = {10, 20, 40}  # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 TX_SELECTOR_KEYS = frozenset({"rssiDeltaDb", "counterRelDelta", "counterAbsDelta"})
@@ -318,6 +320,15 @@ def _validate_dynamic_link(dl: dict) -> None:
         stale = tap.get("staleMs", 500)
         if isinstance(stale, bool) or not isinstance(stale, (int, float)) or stale <= 0:
             raise SchemaError("dynamicLink.tap.staleMs must be > 0")
+    probe = dl.get("probe")
+    if probe is not None:
+        if not isinstance(probe, dict):
+            raise SchemaError("dynamicLink.probe must be an object")
+        unknown_probe = set(probe) - PROBE_KEYS
+        if unknown_probe:
+            raise SchemaError(f"unknown dynamicLink.probe keys: {sorted(unknown_probe)}")
+        if "enabled" in probe and not isinstance(probe["enabled"], bool):
+            raise SchemaError("dynamicLink.probe.enabled must be a bool")
     if not isinstance(dl.get("enabled", False), bool):
         raise SchemaError("dynamicLink.enabled must be a bool")
     sel = dl.get("selector")

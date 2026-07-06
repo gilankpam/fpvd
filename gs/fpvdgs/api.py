@@ -94,17 +94,28 @@ class Api:
         tap = ((cfg.get("dynamicLink") or {}).get("tap")) or {}
         return (bool(tap.get("enabled", True)), int(tap.get("port", 8110)))
 
+    @staticmethod
+    def _probe_render_view(cfg):
+        """Whether the engine graph renders a probe_rx child (2026-07-06
+        spec Part B): dynamicLink enabled AND the probe knob on. Baked in
+        at spawn time — a change needs a full engine restart, exactly like
+        the tap render view."""
+        dl = cfg.get("dynamicLink") or {}
+        probe = dl.get("probe") or {}
+        return bool(dl.get("enabled", False)) and bool(probe.get("enabled", False))
+
     def _apply_gs(self):
         pending = self.store.pending()
         effective = self.store.effective()
         self.schema.validate_effective(pending)
 
         link_changed = pending.get("link") != effective.get("link")
-        wfb_changed = self._without(
-            pending, "dynamicLink", "pixelpilot", "idrForward", "link"
-        ) != self._without(
-            effective, "dynamicLink", "pixelpilot", "idrForward", "link"
-        ) or self._tap_render_view(pending) != self._tap_render_view(effective)
+        wfb_changed = (
+            self._without(pending, "dynamicLink", "pixelpilot", "idrForward", "link")
+            != self._without(effective, "dynamicLink", "pixelpilot", "idrForward", "link")
+            or self._tap_render_view(pending) != self._tap_render_view(effective)
+            or self._probe_render_view(pending) != self._probe_render_view(effective)
+        )
 
         if link_changed or wfb_changed:
             if not self._apply_link_local(
