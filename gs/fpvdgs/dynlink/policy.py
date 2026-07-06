@@ -239,6 +239,20 @@ class LeadingSelector:
                     best = r
         return best
 
+    def external_demote(self, tgt: int, ts_ms: float) -> None:
+        """Commit a Policy-level (predict/snr) demote with full change
+        bookkeeping. 2026-07-06 spec A4: without the last_change_time_ms
+        stamp the same tick's select() rate limit doesn't see the change
+        and snap-back can cancel the demote on the spot (flight 000036)."""
+        tgt = max(0, min(tgt, self._cap_mcs))
+        if tgt == self.state.current_mcs:
+            return
+        self.state.current_mcs = tgt
+        self.state.last_change_time_ms = ts_ms
+        self.state.last_mcs_change_time_ms = ts_ms
+        self._clean_dwell = 0
+        self._trial_rung = None
+
     # ---- main entry ----
 
     def select(
@@ -479,9 +493,7 @@ class Policy:
                     ):
                         tgt = max(cur - 1, 0)
                         if tgt < cur:
-                            self.leading.state.current_mcs = tgt
-                            self.leading._clean_dwell = 0
-                            self.leading._trial_rung = None
+                            self.leading.external_demote(tgt, ts_ms)
                             predict_reason = f"predict_demote mcs{cur}->{tgt}"
                 else:
                     predict_gated = True
@@ -503,9 +515,7 @@ class Policy:
             ):
                 tgt = max(cur_snr - 1, 0)
                 if tgt < cur_snr:
-                    self.leading.state.current_mcs = tgt
-                    self.leading._clean_dwell = 0
-                    self.leading._trial_rung = None
+                    self.leading.external_demote(tgt, ts_ms)
                     snr_demote_reason = f"snr_demote mcs{cur_snr}->{tgt}"
         else:
             self._snr_demote_count = 0

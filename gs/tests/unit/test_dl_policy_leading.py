@@ -463,3 +463,25 @@ def test_emergency_demote_does_not_strike():
     assert changed and mcs == pre - 1
     assert s._flap_level == {}  # emergency never charges the damper
     assert s.last_fail is None  # emergency never teaches a failure
+
+
+def test_external_demote_blocks_same_and_next_tick_promote():
+    """2026-07-06 spec A4 (flight 000036): a Policy-level (predict/snr) demote
+    must update the rate-limit clock so select() cannot snap back within
+    min_between_changes_ms of it."""
+    s = mk(max_mcs=3)
+    ts = T0
+    for _ in range(2):
+        ts = climb_one(s, ts)
+    for _ in range(35):  # confirm rung 3 at snr 30
+        ts += TICK
+        step(s, ts)
+    s.external_demote(2, ts)
+    assert s.state.current_mcs == 2
+    assert s.state.last_change_time_ms == ts
+    step(s, ts, snr=30.0)  # same tick: inside min_between_changes (200 ms)
+    assert s.state.current_mcs == 2
+    step(s, ts + 100.0, snr=30.0)  # still inside
+    assert s.state.current_mcs == 2
+    step(s, ts + 300.0, snr=30.0)  # rate limit elapsed => snap-back allowed
+    assert s.state.current_mcs == 3

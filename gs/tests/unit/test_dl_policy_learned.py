@@ -65,6 +65,27 @@ def test_predictive_demote_on_confident_fade(tmp_path):
     p.close()
 
 
+def test_predict_demote_updates_selector_rate_clock(tmp_path):
+    """The predict demote must stamp last_change_time_ms so the same-tick
+    select() rate limit sees it (000036: 'snr_demote; snapback_promote' on
+    one tick)."""
+    prof = _profile()
+    p = Policy(
+        _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=1),
+        prof,
+    )
+    p.learned_prior._snr_model._knee[5] = 34.0
+    p.learned_prior._snr_model._count[5] = 12.0
+    p.leading.state.current_mcs = 5
+    p.tick(_sig_snr(34.0, ts=1.0))
+    dec = p.tick(_sig_snr(30.0, ts=1.1))  # predict-demote 5->4
+    assert dec.mcs == 4
+    assert "predict_demote" in dec.reason
+    assert "promote" not in dec.reason  # no same-tick promote of any route
+    assert p.leading.state.last_change_time_ms == 1.1 * 1000.0
+    p.close()
+
+
 def _cfg_fl(tmp_path):
     from fpvdgs.dynlink.flightlog import FlightLogConfig
     from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
