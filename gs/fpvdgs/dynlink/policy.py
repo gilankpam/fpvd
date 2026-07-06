@@ -323,8 +323,17 @@ class LeadingSelector:
             self._snr_at_last_flap.pop(cur, None)
             self._last_flap_ms.pop(cur, None)
         if self._clean_dwell >= self.cfg.promote_dwell_ticks and snr_ewma is not None:
+            # 2026-07-06 spec A2: high-water confirmation. While a
+            # confirmation is live the bar only rises; it re-bases only
+            # after the TTL lapses — degradation must not drag the
+            # snap-back bar down with the channel (flight 000003).
+            fresh = self._confirmed_until_ms.get(cur, 0.0) >= ts_ms
+            prev_conf = self._confirmed_snr.get(cur)
             self._confirmed_until_ms[cur] = ts_ms + self.cfg.confirm_ttl_ms
-            self._confirmed_snr[cur] = float(snr_ewma)
+            if fresh and prev_conf is not None:
+                self._confirmed_snr[cur] = max(prev_conf, float(snr_ewma))
+            else:
+                self._confirmed_snr[cur] = float(snr_ewma)
         if self._trial_rung is not None and ts_ms >= self._trial_until_ms:
             self._trial_rung = None  # probation survived
 

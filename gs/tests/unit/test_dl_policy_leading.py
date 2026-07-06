@@ -313,6 +313,54 @@ def test_confirmation_expires():
     assert s.state.current_mcs == 1
 
 
+def test_confirmed_snr_is_high_water_during_degradation():
+    """2026-07-06 spec A2 (flight 000003): during degradation the snap-back
+    bar must NOT slide down with the channel. Confirm rung 3 at 30 dB, dwell
+    clean at 24 dB (old code re-confirmed at 24), lose the rung: recovery to
+    24 dB must not snap back (bar is 30-3=27); 28 dB must."""
+    # trial_window_ms=3000: the 35-tick dwell (3.5 s) outlives the trial, so
+    # the loss below classifies as settled burst (no damper charge) — the
+    # snap-back assertions must not be damper-blocked.
+    s = mk(max_mcs=3, trial_window_ms=3000)
+    ts = T0
+    for _ in range(2):
+        ts = climb_one(s, ts)  # 1->2->3
+    for _ in range(35):  # confirm rung 3 at snr 30 (and outlive the trial)
+        ts += TICK
+        step(s, ts)
+    for _ in range(35):  # degraded but clean — old code overwrote the bar to 24
+        ts += TICK
+        step(s, ts, snr=24.0)
+    assert s._confirmed_snr[3] == 30.0  # high-water held
+    ts += TICK
+    step(s, ts, snr=24.0, loss=0.2, loss_demote=True)  # settled burst -> at 2, no charge
+    ts += 300.0
+    step(s, ts, snr=24.0)  # 24 < 30-3 => no snap-back
+    assert s.state.current_mcs == 2
+    ts += 300.0
+    step(s, ts, snr=28.0)  # 28 >= 27 => snap-back
+    assert s.state.current_mcs == 3
+    assert any("snapback_promote" in r for r in s.reasons)
+
+
+def test_confirmed_snr_rebases_after_ttl_lapse():
+    """After the confirmation TTL lapses the bar re-bases to current
+    conditions (fresh confirmation), it does not stay at the old high-water."""
+    s = mk(max_mcs=3, confirm_ttl_ms=1000)
+    ts = T0
+    for _ in range(2):
+        ts = climb_one(s, ts)
+    for _ in range(35):  # confirm rung 3 at 30
+        ts += TICK
+        step(s, ts)
+    assert s._confirmed_snr[3] == 30.0
+    ts += 1500.0  # TTL (1 s) lapses with no clean dwell extending it
+    for _ in range(35):  # fresh confirmation at 24
+        ts += TICK
+        step(s, ts, snr=24.0)
+    assert s._confirmed_snr[3] == 24.0  # re-based, not max(30, 24)
+
+
 # ---- initial state ----------------------------------------------------------
 
 
