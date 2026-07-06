@@ -27,7 +27,7 @@ fi
 
 if [ ! -e /sys/class/net/$WLAN_DEV ]; then
     if [ "$driver" != "88XXau" ]; then
-        modprobe "$driver" rtw_tx_pwr_by_rate=0 rtw_tx_pwr_lmt_enable=0 MaxTxBufLen=32
+        modprobe "$driver" rtw_tx_pwr_by_rate=1 rtw_tx_pwr_lmt_enable=0 MaxTxBufLen=32
     else
         modprobe "$driver" MaxTxBufLen=32
     fi
