@@ -607,3 +607,27 @@ def test_sustained_clean_probe_counts_toward_release(tmp_path):
     p.tick(_sig_probe(30.0, ts, None))  # probe gap resets
     assert p._probe_clean_ticks == 0
     p.close()
+
+
+def test_probe_clean_streak_resets_on_target_change(tmp_path):
+    """Clean-streak evidence is per-rung: a target change must reset the
+    counter (spec: sustained clean probe AT the damped rung)."""
+    from fpvdgs.dynlink.policy import PROBE_CLEAN_RELEASE_TICKS
+
+    p = Policy(_cfg(tmp_path), _profile())
+    p.leading.state.current_mcs = 2
+    clean_both = {
+        3: {"per": 0.0, "snr": 25, "fresh": True},
+        4: {"per": 0.0, "snr": 25, "fresh": True},
+    }
+    ts = 1.0
+    for _ in range(PROBE_CLEAN_RELEASE_TICKS - 5):
+        ts += 0.1
+        p.tick(_sig_probe(30.0, ts, clean_both))
+    assert p.leading.state.current_mcs == 2
+    assert p._probe_clean_ticks == PROBE_CLEAN_RELEASE_TICKS - 5
+    p.leading.state.current_mcs = 3  # target moves 3 -> 4
+    ts += 0.1
+    p.tick(_sig_probe(30.0, ts, clean_both))
+    assert p._probe_clean_ticks == 1  # streak restarted for the new rung
+    p.close()

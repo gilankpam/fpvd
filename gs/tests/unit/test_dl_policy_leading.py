@@ -589,3 +589,27 @@ def test_probe_release_lifts_damper_early():
     )
     assert s._promote_suppressed is False
     assert s.last_release == "probe"
+
+
+def test_probe_release_never_stamps_undamped_rung():
+    """A rung with no live damper window must not report a phantom
+    'probe' release just because clean probe data accrued."""
+    s = mk()
+    ts = T0
+    for _ in range(25):
+        ts += TICK
+        s.select(
+            snr_ewma=30.0,
+            snr_w=30.0,
+            slope=0.0,
+            loss_rate=0.0,
+            loss_demote=False,
+            target_confident=False,
+            target_blocked=False,
+            fec_pressure=0.0,
+            link_starved=False,
+            can_demote=True,
+            ts_ms=ts,
+            probe_release=True,
+        )
+        assert s.last_release is None

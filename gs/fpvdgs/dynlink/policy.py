@@ -230,15 +230,15 @@ class LeadingSelector:
         flap_snr_release_db. The old EWMA-pop release lifted on ordinary
         wobble in fast fading (flight 000003); the EWMA never sees the
         sub-second dips that caused the flap."""
-        if probe_release:
-            # 2026-07-06 spec Part B: a sustained clean probe at the damped
-            # rung is direct evidence it carries packets again — lift early.
-            self.last_release = "probe"
-            return False
         until = self._suppress_until_ms.get(rung, 0)
         if ts_ms >= until:
             if until:
                 self.last_release = "timer"
+            return False
+        if probe_release:
+            # 2026-07-06 spec Part B: a sustained clean probe at the damped
+            # rung is direct evidence it carries packets again — lift early.
+            self.last_release = "probe"
             return False
         laf = self._snr_at_last_flap.get(rung)
         if (
@@ -486,7 +486,11 @@ class Policy:
         # 0 on any committed demote (any path); incremented each tick.
         self._windows_since_demote = cfg.selector.demote_cooldown_windows
         # Probe gate: counter for sustained clean probe readings (2026-07-06 spec Part B).
+        # Tracked per-rung: the streak is evidence for the rung it was accrued
+        # AT, so a promote-target change must restart it (else a streak built
+        # against rung N carries over to arm release for rung N+1).
         self._probe_clean_ticks = 0
+        self._probe_clean_rung: int | None = None
         self.flightlog = FlightLog(cfg.flightlog)
 
     def tick(self, signals: Signals) -> Decision:
@@ -591,6 +595,9 @@ class Policy:
         pr = (signals.probe or {}).get(promote_target)
         probe_fresh = bool(pr and pr.get("fresh"))
         probe_veto = probe_fresh and pr["per"] >= PROBE_DIRTY_PER
+        if promote_target != self._probe_clean_rung:
+            self._probe_clean_ticks = 0
+        self._probe_clean_rung = promote_target
         if probe_fresh and pr["per"] <= PROBE_CLEAN_PER:
             self._probe_clean_ticks += 1
         else:
@@ -776,6 +783,7 @@ class Policy:
         self._snr_demote_count = 0
         self._windows_since_demote = self.cfg.selector.demote_cooldown_windows
         self._probe_clean_ticks = 0
+        self._probe_clean_rung = None
         self._snr_window.clear()
 
     def close(self) -> None:
