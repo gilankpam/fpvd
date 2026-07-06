@@ -521,6 +521,7 @@ class WfbEngine:
 
             probe_feed = ProbeFeed()
             leg_specs.append(("probe_rx", graph.probe_rx))
+            extra_rx_names.append("probe_rx")
 
         children: dict[str, object] = {}
         started_order: list[str] = []

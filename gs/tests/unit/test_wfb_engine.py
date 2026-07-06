@@ -272,6 +272,24 @@ def test_engine_probe_disabled_no_leg_no_feed():
         engine.shutdown()
 
 
+def test_engine_teardown_stops_probe_leg():
+    """Regression: the probe leg was appended to `leg_specs` (and started)
+    but never added to `self._extra_rx_names`, so `_teardown`'s
+    `RX_LEG_ORDER + tuple(self._extra_rx_names)` stop-list omitted it and
+    the probe_rx wfb_rx child leaked on every normal engine stop/restart."""
+    cfg = make_config(dynamicLink={"enabled": True, "probe": {"enabled": True}})
+    engine, rec = make_engine(config=cfg, graph_builder=make_probe_graph_builder())
+    try:
+        assert engine.start() is True
+        starts = [name for kind, name in rec["order"] if kind == "start"]
+        assert "probe_rx" in starts
+    finally:
+        engine.shutdown()
+
+    stops = [name for kind, name in rec["order"] if kind == "stop"]
+    assert "probe_rx" in stops
+
+
 # -- (b) tx child start failure -> start() False, everything torn down ------
 
 
