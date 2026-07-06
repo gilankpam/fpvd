@@ -485,3 +485,14 @@ def test_external_demote_blocks_same_and_next_tick_promote():
     assert s.state.current_mcs == 2
     step(s, ts + 300.0, snr=30.0)  # rate limit elapsed => snap-back allowed
     assert s.state.current_mcs == 3
+
+
+def test_backoff_ladder_caps_at_10s():
+    """2026-07-06 spec A5: balanced pacing — a rung is never locked out
+    longer than 10 s at a time (was 30 s)."""
+    s = mk()
+    assert s._flap_backoff_ms(1) == 2000
+    assert s._flap_backoff_ms(2) == 4000
+    assert s._flap_backoff_ms(3) == 8000
+    assert s._flap_backoff_ms(4) == 10000
+    assert s._flap_backoff_ms(10) == 10000

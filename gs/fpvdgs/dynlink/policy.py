@@ -73,7 +73,7 @@ class SelectorConfig:
     # promote->loss->demote flapping. See 2026-07-02 spec.
     flap_base_backoff_ms: int = 2000
     flap_backoff_mult: float = 2.0
-    flap_backoff_cap_ms: int = 30000
+    flap_backoff_cap_ms: int = 10000
     flap_reset_clean_dwell_ticks: int = 30
     # --- Probe-less promote (2026-07-02 spec) ---
     # Clean dwell at the current rung before a knee/explore promote.
