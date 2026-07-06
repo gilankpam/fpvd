@@ -123,11 +123,30 @@ def test_trial_flap_charges_damper_and_reports_fail():
     assert any("class=flap" in r for r in s.reasons)
 
 
-def test_fade_teaches_raw_snr_and_never_charges():
+def test_trial_fade_charges_damper_and_teaches_raw_snr():
+    """2026-07-06 spec A1 (flight 000003): a fade loss on a rung entered by
+    promote charges the damper — periodic fades otherwise re-arm snap-back
+    damper-free. Knee teaching keeps the fade class (raw snr_w sample)."""
     s = mk()
-    ts = climb_one(s, T0)  # at 2, on trial — fade wins over trial
+    ts = climb_one(s, T0)  # at 2, on trial
     ts += TICK
     step(s, ts, snr=25.0, snr_w=12.0, loss=0.3, loss_demote=True)  # collapse >= 4 dB
+    assert s.last_fail == (2, "fade", 12.0)
+    assert s._flap_level.get(2) == 1  # NEW: probation loss charges regardless of class
+    assert any("class=fade" in r for r in s.reasons)
+
+
+def test_settled_fade_teaches_but_never_charges():
+    """A fade at a SETTLED rung still charges nothing: holding altitude
+    through an isolated fade and snapping back stays free (spec A1 keeps
+    the original design intent where it is valid)."""
+    s = mk(max_mcs=2)  # cap so 150 clean ticks don't keep climbing
+    ts = climb_one(s, T0)  # at 2
+    for _ in range(150):  # outlive the 10 s trial window
+        ts += TICK
+        step(s, ts)
+    ts += TICK
+    step(s, ts, snr=25.0, snr_w=12.0, loss=0.3, loss_demote=True)
     assert s.last_fail == (2, "fade", 12.0)  # raw snr_w, NOT the lagging EWMA
     assert s._flap_level.get(2) is None
     assert any("class=fade" in r for r in s.reasons)

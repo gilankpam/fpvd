@@ -137,6 +137,8 @@ class LeadingSelector:
     loss breach (`loss_demote`) or a Channel-B emergency (fec_pressure or
     link_starved) steps exactly one rung down, gated by `can_demote`.
     Every loss-demote is classified (fade/flap/burst) for knee teaching.
+    Any probation loss charges the damper; fade/flap additionally report their
+    knee sample (burst teaches nothing).
     """
 
     def __init__(self, cfg: SelectorConfig):
@@ -262,7 +264,7 @@ class LeadingSelector:
         cooldown). Every loss-demote is classified (fade/flap/burst): fade
         reports a raw-SNR knee sample, flap charges the damper and reports an
         EWMA knee sample, burst does neither (last_fail carries the sample to
-        Policy). Promote routes, in order: snap-back (recently-confirmed rung,
+        Policy). Any probation loss charges the damper regardless of class. Promote routes, in order: snap-back (recently-confirmed rung,
         SNR recovered, slope >= 0 — bypasses dwell/knee/hold, never the
         damper), knee-gated climb (clean dwell + headroom over a confident
         knee), explore (cold knee — once-per-rung tuition; its first failure
@@ -287,6 +289,7 @@ class LeadingSelector:
         if emergency:
             if can_demote:
                 if loss_demote:
+                    on_trial = prev == self._trial_rung and ts_ms < self._trial_until_ms
                     klass = self._classify(prev, snr_ewma, snr_w, ts_ms)
                     commit(prev - 1, f"video_per_demote loss={loss_rate:.3f} class={klass}")
                     if st.current_mcs != prev:
@@ -294,6 +297,10 @@ class LeadingSelector:
                             self.last_fail = (prev, "fade", float(snr_w))
                         elif klass == "flap" and snr_ewma is not None:
                             self.last_fail = (prev, "flap", float(snr_ewma))
+                        if on_trial:
+                            # 2026-07-06 spec A1: any probation loss escalates
+                            # the damper, whatever its class — periodic fades
+                            # otherwise re-arm snap-back damper-free (000003).
                             self._charge_flap(prev, snr_ewma, ts_ms)
                 else:
                     commit(
