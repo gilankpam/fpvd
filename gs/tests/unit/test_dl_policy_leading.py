@@ -202,12 +202,37 @@ def test_backoff_escalates_and_suppresses():
     assert s._promote_suppressed is True
 
 
-def test_snr_release_lifts_suppression_early():
-    s = mk()
+def test_raw_min_release_lifts_suppression_early():
+    """2026-07-06 spec A5: release when the ROLLING RAW MIN clears the
+    flap-time SNR + margin — 2 s without a fade dip is genuine recovery."""
+    s = mk(flap_base_backoff_ms=10000)  # long window: release, not expiry
     ts = _flap_at(s, T0, 2)  # flapped at snr_ewma=30
-    ts += TICK
-    step(s, ts, snr=33.5)  # >= 30 + flap_snr_release_db (3.0)
+    for _ in range(20):  # fill the whole 2 s raw window above 30+3
+        ts += TICK
+        step(s, ts, snr=34.0)
     assert s._promote_suppressed is False
+    assert s.last_release == "raw_min"
+
+
+def test_ewma_pop_does_not_release_while_raw_still_dips():
+    """The old EWMA-pop release lifted the damper on ordinary wobble in a
+    fast-fading channel (flight 000003: 8+ early lifts). Raw dips must hold
+    the window even when the EWMA is far above the release bar."""
+    s = mk(flap_base_backoff_ms=10000)
+    ts = _flap_at(s, T0, 2)
+    for _ in range(20):
+        ts += TICK
+        step(s, ts, snr=34.0, snr_w=10.0)  # EWMA recovered, raw still dipping
+    assert s._promote_suppressed is True
+
+
+def test_timer_expiry_reports_release_source():
+    s = mk()
+    ts = _flap_at(s, T0, 2)  # level 1 => 2 s window
+    ts += 2100.0
+    step(s, ts, snr=30.0)
+    assert s._promote_suppressed is False
+    assert s.last_release == "timer"
 
 
 def test_time_decay_forgives_levels():

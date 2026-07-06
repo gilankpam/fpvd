@@ -23,6 +23,9 @@ from .signals import Signals
 
 log = logging.getLogger(__name__)
 
+# Rolling raw-SNR window backing the damper's early release (~2 s at 10 Hz).
+# Frozen calibration constant (2026-07-06 spec A5) — no config path.
+RAW_MIN_RELEASE_WINDOW_TICKS = 20
 
 # ------------------------------------------------------------------
 # Config dataclasses for the probe-driven selector + smoothing/learned-prior/flightlog.
@@ -160,6 +163,12 @@ class LeadingSelector:
         self._suppress_until_ms: dict[int, float] = {}
         self._snr_at_last_flap: dict[int, float] = {}
         self._last_flap_ms: dict[int, float] = {}
+        # Rolling raw snr_w samples for the damper's early release; raw min
+        # is the only axis that sees sub-second fades (2026-07-06 spec A5).
+        self._snr_w_recent: deque[float] = deque(maxlen=RAW_MIN_RELEASE_WINDOW_TICKS)
+        # Release channel currently allowing promotes to the target rung:
+        # "timer" | "raw_min" | None. Per-tick observability for the flightlog.
+        self.last_release: str | None = None
         self._promote_suppressed = False
         # Trial: rung entered by promote, on probation for trial_window_ms.
         self._trial_rung: int | None = None
@@ -200,16 +209,23 @@ class LeadingSelector:
             self._snr_at_last_flap[rung] = snr_ewma
 
     def _suppressed(self, rung: int, snr_ewma: float | None, ts_ms: float) -> bool:
-        """Damper window live for `rung`? SNR release: conditions provably
-        better than at the last flap lift the window early (level kept)."""
-        if ts_ms >= self._suppress_until_ms.get(rung, 0):
+        """Damper window live for `rung`? Early release (2026-07-06 spec A5):
+        the rolling raw-SNR minimum must clear the flap-time SNR by
+        flap_snr_release_db. The old EWMA-pop release lifted on ordinary
+        wobble in fast fading (flight 000003); the EWMA never sees the
+        sub-second dips that caused the flap."""
+        until = self._suppress_until_ms.get(rung, 0)
+        if ts_ms >= until:
+            if until:
+                self.last_release = "timer"
             return False
         laf = self._snr_at_last_flap.get(rung)
         if (
             laf is not None
-            and snr_ewma is not None
-            and snr_ewma >= laf + self.cfg.flap_snr_release_db
+            and len(self._snr_w_recent) == self._snr_w_recent.maxlen
+            and min(self._snr_w_recent) >= laf + self.cfg.flap_snr_release_db
         ):
+            self.last_release = "raw_min"
             return False
         return True
 
@@ -289,6 +305,9 @@ class LeadingSelector:
         reasons: list[str] = []
         self.last_fail = None
         self._snapback_tgt = None
+        self.last_release = None
+        if snr_w is not None:
+            self._snr_w_recent.append(float(snr_w))
 
         def commit(new_mcs: int, why: str) -> None:
             new_mcs = max(0, min(new_mcs, self._cap_mcs))
