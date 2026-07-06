@@ -198,6 +198,34 @@ def test_txpower_line_in_mbm():
     assert "iw dev wlan0 set txpower fixed 2000" in script
 
 
+def test_node_script_renders_probe_forwarder_when_streams_include_it():
+    from fpvdgs.wfb.cluster import streams_for
+
+    cards = [Card(host="192.168.1.10", iface="wlan0")]
+    plan = plan_cluster(cards, with_probe=True)
+    node = next(n for n in plan.nodes if n != "127.0.0.1")
+    script = render_node_script(
+        node,
+        plan.nodes[node],
+        plan,
+        link={"channel": 132, "width": 20},
+        link_id=123,
+        server_address="10.0.0.1",
+        streams=streams_for(True),
+    )
+    assert f"-u {plan.server_port['probe']} -p 50" in script
+    # default streams: no probe line
+    script_off = render_node_script(
+        node,
+        plan.nodes[node],
+        plan,
+        link={"channel": 132, "width": 20},
+        link_id=123,
+        server_address="10.0.0.1",
+    )
+    assert "-p 50" not in script_off
+
+
 _STUB_SLEEP = """#!/bin/sh
 echo "$0 $*" >> "{log}"
 sleep 5

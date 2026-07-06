@@ -47,6 +47,24 @@ DEFAULT_STREAMS = {
     "tunnel": {"rx": 32, "tx": 160},
 }
 
+# Probe (2026-07-06 spec Part B): rx-only observe stream on radio_port 50
+# (matches the drone's kProbeRadioPort). Opt-in and APPEND-ONLY: with_probe
+# must never change the allocation of the three base services (wfb-ng
+# parity, and a probe toggle must not re-plan a validated cluster).
+PROBE_SERVICE = "probe"
+PROBE_STREAMS = {"rx": 50, "tx": None}
+
+
+def service_order(with_probe: bool) -> tuple[str, ...]:
+    return SERVICE_ORDER + ((PROBE_SERVICE,) if with_probe else ())
+
+
+def streams_for(with_probe: bool) -> dict:
+    streams = dict(DEFAULT_STREAMS)
+    if with_probe:
+        streams[PROBE_SERVICE] = PROBE_STREAMS
+    return streams
+
 
 def node_key(card: Card) -> str:
     """The cluster node a card belongs to: its host, or the implicit
@@ -75,13 +93,15 @@ def plan_cluster(
     cards: list[Card],
     base_port_server: int = 10000,
     base_port_node: int = 11000,
+    with_probe: bool = False,
 ) -> ClusterPlan:
     nodes: dict[str, list[Card]] = {}
     for card in cards:
         nodes.setdefault(node_key(card), []).append(card)
 
+    services = service_order(with_probe)
     server_port_alloc = itertools.count(base_port_server)
-    server_port = {service: next(server_port_alloc) for service in SERVICE_ORDER}
+    server_port = {service: next(server_port_alloc) for service in services}
 
     node_allocators: dict[str, itertools.count] = {}
 
@@ -93,9 +113,9 @@ def plan_cluster(
         return alloc
 
     injector_base: dict[tuple[str, str], int] = {}
-    peers: dict[str, list[str]] = {service: [] for service in SERVICE_ORDER}
+    peers: dict[str, list[str]] = {service: [] for service in services}
 
-    for service in SERVICE_ORDER:
+    for service in services:
         for node in sorted(nodes):
             node_cards = nodes[node]
             alloc = get_allocator(node)
@@ -233,8 +253,7 @@ def render_node_script(
             lines.append(f"iw dev {wlan} set txpower fixed {mbm}")
         lines.append("")
 
-    for service in SERVICE_ORDER:
-        svc_streams = streams.get(service, {})
+    for service, svc_streams in streams.items():
         rx_id = svc_streams.get("rx")
         tx_id = svc_streams.get("tx")
         if rx_id is None and tx_id is None:
