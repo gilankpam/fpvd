@@ -187,6 +187,16 @@ def test_record_carries_link_width(tmp_path):
     assert _records(tmp_path)[-1]["width"] == 10
 
 
+def test_record_carries_probe_fields(tmp_path):
+    p = Policy(_cfg(tmp_path), _profile())
+    p.tick(_sig_snr(30.0, ts=1.0))
+    p.close()
+    last = _records(tmp_path)[-1]
+    assert last["probe_per"] is None  # no probe data this tick
+    assert last["probe_fresh"] is False
+    assert last["probe_veto"] is False
+
+
 def test_record_link_width_defaults_to_20(tmp_path):
     p = Policy(_cfg(tmp_path), _profile())
     p.tick(_sig(-50.0))

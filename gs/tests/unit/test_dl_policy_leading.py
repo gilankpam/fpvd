@@ -521,3 +521,71 @@ def test_backoff_ladder_caps_at_10s():
     assert s._flap_backoff_ms(3) == 8000
     assert s._flap_backoff_ms(4) == 10000
     assert s._flap_backoff_ms(10) == 10000
+
+
+def test_probe_veto_blocks_all_three_routes():
+    """2026-07-06 spec Part B: fresh dirty probe data vetoes snap-back,
+    knee, AND explore promotes."""
+    s = mk(max_mcs=3, trial_window_ms=3000)
+    ts = T0
+    for _ in range(2):
+        ts = climb_one(s, ts)
+    for _ in range(35):  # confirm rung 3 (snap-back target) and settle
+        ts += TICK
+        step(s, ts)
+    ts += TICK
+    step(s, ts, loss=0.2, loss_demote=True)  # settled burst -> at 2
+    for _ in range(35):  # dwell long enough that knee/explore would fire too
+        ts += 300.0
+        s.select(
+            snr_ewma=30.0,
+            snr_w=30.0,
+            slope=0.0,
+            loss_rate=0.0,
+            loss_demote=False,
+            target_confident=False,
+            target_blocked=False,
+            fec_pressure=0.0,
+            link_starved=False,
+            can_demote=True,
+            ts_ms=ts,
+            probe_veto=True,
+        )
+        assert s.state.current_mcs == 2  # no route fires under the veto
+    s.select(
+        snr_ewma=30.0,
+        snr_w=30.0,
+        slope=0.0,
+        loss_rate=0.0,
+        loss_demote=False,
+        target_confident=False,
+        target_blocked=False,
+        fec_pressure=0.0,
+        link_starved=False,
+        can_demote=True,
+        ts_ms=ts + 300.0,
+        probe_veto=False,
+    )
+    assert s.state.current_mcs == 3  # veto lifted -> promote resumes
+
+
+def test_probe_release_lifts_damper_early():
+    s = mk(flap_base_backoff_ms=10000)  # long window: probe, not timer
+    ts = _flap_at(s, T0, 2)  # flapped; rung 2 suppressed
+    ts += TICK
+    s.select(
+        snr_ewma=30.0,
+        snr_w=30.0,
+        slope=0.0,
+        loss_rate=0.0,
+        loss_demote=False,
+        target_confident=False,
+        target_blocked=False,
+        fec_pressure=0.0,
+        link_starved=False,
+        can_demote=True,
+        ts_ms=ts,
+        probe_release=True,
+    )
+    assert s._promote_suppressed is False
+    assert s.last_release == "probe"

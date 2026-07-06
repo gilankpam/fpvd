@@ -27,6 +27,14 @@ log = logging.getLogger(__name__)
 # Frozen calibration constant (2026-07-06 spec A5) — no config path.
 RAW_MIN_RELEASE_WINDOW_TICKS = 20
 
+# Probe gates (2026-07-06 spec Part B) — frozen, no config path.
+# Asymmetric by design: dirty probe = hard veto on every promote route;
+# clean probe = evidence that lifts the damper early, never permission to
+# skip the knee/dwell gates (the historical probe-optimism bug).
+PROBE_DIRTY_PER = 0.10
+PROBE_CLEAN_PER = 0.02
+PROBE_CLEAN_RELEASE_TICKS = 20  # ~2 s at 10 Hz of sustained clean readings
+
 # ------------------------------------------------------------------
 # Config dataclasses for the probe-driven selector + smoothing/learned-prior/flightlog.
 # ------------------------------------------------------------------
@@ -216,12 +224,17 @@ class LeadingSelector:
         if snr_ewma is not None:
             self._snr_at_last_flap[rung] = snr_ewma
 
-    def _suppressed(self, rung: int, ts_ms: float) -> bool:
+    def _suppressed(self, rung: int, ts_ms: float, probe_release: bool = False) -> bool:
         """Damper window live for `rung`? Early release (2026-07-06 spec A5):
         the rolling raw-SNR minimum must clear the flap-time SNR by
         flap_snr_release_db. The old EWMA-pop release lifted on ordinary
         wobble in fast fading (flight 000003); the EWMA never sees the
         sub-second dips that caused the flap."""
+        if probe_release:
+            # 2026-07-06 spec Part B: a sustained clean probe at the damped
+            # rung is direct evidence it carries packets again — lift early.
+            self.last_release = "probe"
+            return False
         until = self._suppress_until_ms.get(rung, 0)
         if ts_ms >= until:
             if until:
@@ -293,6 +306,8 @@ class LeadingSelector:
         link_starved: bool,
         can_demote: bool = True,
         ts_ms: float,
+        probe_veto: bool = False,
+        probe_release: bool = False,
     ) -> tuple[int, bool]:
         """Probe-less selector: three-route promote + reactive demote.
 
@@ -307,7 +322,10 @@ class LeadingSelector:
         SNR recovered, slope >= 0, respects knee gate — bypasses dwell/hold, never the
         damper), knee-gated climb (clean dwell + headroom over a confident
         knee), explore (cold knee — once-per-rung tuition; its first failure
-        plants the knee and self-converts the route to knee-gated)."""
+        plants the knee and self-converts the route to knee-gated). All three
+        promote routes are additionally gated by `probe_veto` (fresh dirty probe data
+        at the target rung vetoes all promotes). Damper release channels are timer /
+        raw-min / probe."""
         st = self.state
         prev = st.current_mcs
         reasons: list[str] = []
@@ -385,12 +403,12 @@ class LeadingSelector:
             self._reasons = reasons
             return st.current_mcs, False
 
-        self._promote_suppressed = self._suppressed(target, ts_ms)
+        self._promote_suppressed = self._suppressed(target, ts_ms, probe_release)
         within_rate = (ts_ms - st.last_change_time_ms) < self.cfg.min_between_changes_ms
         within_hold = (ts_ms - st.last_change_time_ms) < self.cfg.hold_modes_down_ms
         slope = 0.0 if slope is None else slope
 
-        if not within_rate and not self._promote_suppressed:
+        if not within_rate and not self._promote_suppressed and not probe_veto:
             sb = self._snapback_target(float(snr_ewma), ts_ms)
             self._snapback_tgt = sb
             if sb is not None and sb > cur and slope >= 0.0 and not target_blocked:
@@ -467,6 +485,8 @@ class Policy:
         # the cooldown so the first demote after boot is never blocked. Reset to
         # 0 on any committed demote (any path); incremented each tick.
         self._windows_since_demote = cfg.selector.demote_cooldown_windows
+        # Probe gate: counter for sustained clean probe readings (2026-07-06 spec Part B).
+        self._probe_clean_ticks = 0
         self.flightlog = FlightLog(cfg.flightlog)
 
     def tick(self, signals: Signals) -> Decision:
@@ -565,6 +585,18 @@ class Policy:
         )
         target_confident = self.learned_prior.snr_rung_confident(promote_target)
 
+        # Probe gates (2026-07-06 spec Part B): veto on fresh dirty data at
+        # the promote target; sustained fresh+clean data arms the damper's
+        # probe release. Stale/absent probe = both False (degrade-not-fail).
+        pr = (signals.probe or {}).get(promote_target)
+        probe_fresh = bool(pr and pr.get("fresh"))
+        probe_veto = probe_fresh and pr["per"] >= PROBE_DIRTY_PER
+        if probe_fresh and pr["per"] <= PROBE_CLEAN_PER:
+            self._probe_clean_ticks += 1
+        else:
+            self._probe_clean_ticks = 0
+        probe_release = self._probe_clean_ticks >= PROBE_CLEAN_RELEASE_TICKS
+
         new_mcs, _changed = self.leading.select(
             snr_ewma=signals.snr,
             snr_w=signals.snr_w,
@@ -577,6 +609,8 @@ class Policy:
             link_starved=sustained_starved,
             can_demote=cooldown_ok and self.leading.state.current_mcs == start_mcs,
             ts_ms=ts_ms,
+            probe_veto=probe_veto,
+            probe_release=probe_release,
         )
 
         if new_mcs < start_mcs:
@@ -636,6 +670,9 @@ class Policy:
                 "predict_gated": predict_gated,
                 "tap_active": signals.tap_active,
                 "damper_release": self.leading.last_release,
+                "probe_per": pr["per"] if pr else None,
+                "probe_fresh": probe_fresh,
+                "probe_veto": probe_veto,
             }
         )
         return Decision(
@@ -738,6 +775,7 @@ class Policy:
         self._predict_demote_count = 0
         self._snr_demote_count = 0
         self._windows_since_demote = self.cfg.selector.demote_cooldown_windows
+        self._probe_clean_ticks = 0
         self._snr_window.clear()
 
     def close(self) -> None:
