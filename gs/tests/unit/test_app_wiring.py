@@ -74,8 +74,8 @@ def test_build_app_wires_api_collaborators(tmp_path, monkeypatch):
     armer_tick) so /gs/apply can retune the GS and reconcile the beamformee."""
     import fpvdgs.supervisor as sup
 
-    # Explicit wlans so every resolve_wlans() (supervisor AND probe.config_build)
-    # short-circuits without shelling out to `wfb-nics`.
+    # Explicit wlans so every resolve_wlans() call (supervisor) short-circuits
+    # without shelling out to `wfb-nics`.
     config = tmp_path / "config.json"
     config.write_text(
         '{"link": {"region": "US", "channel": 132, "width": 20, ' '"wlans": ["wlan0"]}}'

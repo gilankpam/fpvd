@@ -184,6 +184,10 @@ class DynamicLinkController:
         probe_provider = self._probe_feed_provider
 
         def _probe_snapshot():
+            # Cross-thread contract: probe_provider() reads WfbEngine.probe_feed,
+            # which the engine publishes/clears under its own lock; a stale
+            # incarnation's feed is benign (internally locked, and readings
+            # decay to fresh=False within 0.5 s once the engine tears it down).
             if probe_provider is None:
                 return None
             feed = probe_provider()

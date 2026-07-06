@@ -177,13 +177,17 @@ class LeadingSelector:
         # is the only axis that sees sub-second fades (2026-07-06 spec A5).
         self._snr_w_recent: deque[float] = deque(maxlen=RAW_MIN_RELEASE_WINDOW_TICKS)
         # Release channel currently allowing promotes to the target rung:
-        # "timer" | "raw_min" | None. Per-tick observability for the flightlog.
+        # "timer" | "raw_min" | "probe" | None. Per-tick observability for the
+        # flightlog.
         # NOTE: "timer" has level semantics, not edge semantics — an expired
         # window's entry lingers in _suppress_until_ms until the rung is
         # re-entered and the dict cleaned (flap_reset_clean_dwell_ticks), so
         # consecutive ticks can all report "timer" even though only the first
-        # one is the actual release. Offline analysis must dedupe consecutive
-        # ticks rather than counting each "timer" tick as a distinct release.
+        # one is the actual release. "probe" is likewise level, not edge: it
+        # re-stamps every tick the same way for as long as a live probe window
+        # keeps reporting a clean streak at the target rung. Offline analysis
+        # must dedupe consecutive ticks for BOTH channels rather than counting
+        # each "timer"/"probe" tick as a distinct release.
         self.last_release: str | None = None
         self._promote_suppressed = False
         # Trial: rung entered by promote, on probation for trial_window_ms.
@@ -593,12 +597,13 @@ class Policy:
         # the promote target; sustained fresh+clean data arms the damper's
         # probe release. Stale/absent probe = both False (degrade-not-fail).
         pr = (signals.probe or {}).get(promote_target)
+        probe_per = pr.get("per") if pr else None
         probe_fresh = bool(pr and pr.get("fresh"))
-        probe_veto = probe_fresh and pr["per"] >= PROBE_DIRTY_PER
+        probe_veto = probe_fresh and probe_per is not None and probe_per >= PROBE_DIRTY_PER
         if promote_target != self._probe_clean_rung:
             self._probe_clean_ticks = 0
-        self._probe_clean_rung = promote_target
-        if probe_fresh and pr["per"] <= PROBE_CLEAN_PER:
+            self._probe_clean_rung = promote_target
+        if probe_fresh and probe_per is not None and probe_per <= PROBE_CLEAN_PER:
             self._probe_clean_ticks += 1
         else:
             self._probe_clean_ticks = 0
@@ -677,7 +682,7 @@ class Policy:
                 "predict_gated": predict_gated,
                 "tap_active": signals.tap_active,
                 "damper_release": self.leading.last_release,
-                "probe_per": pr["per"] if pr else None,
+                "probe_per": probe_per,
                 "probe_fresh": probe_fresh,
                 "probe_veto": probe_veto,
             }

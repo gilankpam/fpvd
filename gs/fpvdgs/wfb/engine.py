@@ -177,7 +177,7 @@ class WfbEngine:
         self._start_ok = False
 
         self._children: dict[str, object] = {}
-        self._extra_rx_names: list[str] = []  # remote-mode local forwarders
+        self._extra_rx_names: list[str] = []  # remote-mode local forwarders + probe_rx (local mode)
         self._extra_tx_names: list[str] = []  # remote-mode local injectors
         self._mav_service = None
         self._tunnel_service = None
