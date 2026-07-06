@@ -187,8 +187,9 @@ def test_build_app_retune_returns_false_when_remote_card_present(tmp_path, monke
 
 
 def test_build_app_probe_is_bypassed(tmp_path, monkeypatch):
-    """After the probe bypass, build_app must not wire a ProbeController:
-    app.probe and app.api.probe must both be None even with dynamicLink enabled."""
+    """The standalone ProbeController is retired (native engine owns the probe
+    leg via its render view, not a wired-in object): build_app must not
+    construct one, and Api carries no `probe` attribute at all."""
     import fpvdgs.supervisor as sup
 
     config = tmp_path / "config.json"
@@ -197,5 +198,5 @@ def test_build_app_probe_is_bypassed(tmp_path, monkeypatch):
         '"dynamicLink": {"enabled": true}}'
     )
     app = sup.build_app(str(config), "127.0.0.1", 0)
-    assert app.probe is None, "probe bypass: no ProbeController must be constructed"
-    assert app.api.probe is None
+    assert app.probe is None, "no standalone ProbeController must be constructed"
+    assert not hasattr(app.api, "probe")

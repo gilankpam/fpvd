@@ -9,7 +9,6 @@ from urllib.parse import parse_qs, urlparse
 
 from .dynlink.config_build import make_dl_snapshot
 from .pixelpilot import render_pixelpilot_argv, render_pixelpilot_env
-from .probe.config_build import make_probe_snapshot
 from .schema import SchemaError
 
 
@@ -23,7 +22,6 @@ class Api:
         status_fn,
         dynlink=None,
         pixelpilot=None,
-        probe=None,
         retune=None,
         wlans_resolver=None,
         armer_tick=None,
@@ -37,7 +35,6 @@ class Api:
         self.status_fn = status_fn
         self.dynlink = dynlink
         self.pixelpilot = pixelpilot
-        self.probe = probe
         self.retune = retune
         self.wlans_resolver = wlans_resolver
         self.armer_tick = armer_tick
@@ -202,29 +199,22 @@ class Api:
             self.idr_relay.start()
 
     def _route_dynamic_link(self, dl_old, dl_new, pending, width_changed=False):
-        """Start/stop/reconfigure the in-process controller AND the observe-only
-        probe (they share a lifecycle). Never bounces the wfb runner. A ground
-        width change (link block, not dynamicLink) also rebuilds the controller so
-        the learned prior re-keys to the new width and the selector resets."""
+        """Start/stop/reconfigure the in-process controller. Never bounces the
+        wfb runner. A ground width change (link block, not dynamicLink) also
+        rebuilds the controller so the learned prior re-keys to the new width
+        and the selector resets. The observe-only probe leg is owned by the
+        native engine's render view (`_probe_render_view`) and restarted with
+        the engine, not routed here."""
         if self.dynlink is None:
             return
         was, now = bool(dl_old.get("enabled")), bool(dl_new.get("enabled"))
         if not was and now:
             self.dynlink.set_config(make_dl_snapshot(pending))
             self.dynlink.start()
-            if self.probe is not None:
-                self.probe.set_config(make_probe_snapshot(pending))
-                self.probe.start()
         elif was and not now:
             self.dynlink.stop()
-            if self.probe is not None:
-                self.probe.stop()
         elif was and now and (dl_old != dl_new or width_changed):
             self.dynlink.set_config(make_dl_snapshot(pending))
-            # The probe snapshot is width-agnostic, so only re-tune it on an
-            # actual dynamicLink change — a width-only change must not bounce it.
-            if self.probe is not None and dl_old != dl_new:
-                self.probe.set_config(make_probe_snapshot(pending))
 
     def _route_pixelpilot(self, pp_old, pp_new, pending):
         """Start/stop/restart the PixelPilot child. Never bounces the wfb

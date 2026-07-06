@@ -97,7 +97,6 @@ def build_app(
     ready_port=8103,
     ready_timeout=10.0,
     log_path=None,
-    probe_spawn=None,
 ):
     store = ConfigStore.load(config_path)
     effective = store.effective()
@@ -237,7 +236,6 @@ def build_app(
         status_fn=status_fn,
         dynlink=dynlink,
         pixelpilot=pixelpilot,
-        probe=None,
         retune=_retune,
         wlans_resolver=resolve_wlans,
         armer_tick=armer.tick,
