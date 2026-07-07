@@ -23,7 +23,10 @@ sharing the wlan card list:
 
 `wfb_rx` never takes a `-B` (bandwidth) flag — only `wfb_tx` needs it, to
 pick its rate-table row. The two uplink tx legs (mavlink, tunnel) render
-`-B min(link.width, 20)`; the video rx leg renders no `-B` at all.
+`-B min(max(link.width, 10), 20)`; the video rx leg renders no `-B` at all.
+A 5 MHz channel has no valid radiotap bandwidth token, so it clamps up to
+the 10 MHz token — both 10 and 20 map to `BW_20` on-wire in the wfb-ng
+fork, so this is identical to width-10 behavior.
 
 `build_graph_remote` adds the cluster wiring used whenever any `link.cards`
 entry is remote (over SSH): every card becomes a `wfb_rx -f` forwarder
@@ -222,7 +225,7 @@ def build_graph(effective: dict, wlans: list[str], *, rand_suffix: Callable[[], 
     lid = link_id()
     wlans = list(wlans)
     width = link.get("width", 20)
-    uplink_bw = min(width, 20)
+    uplink_bw = min(max(width, 10), 20)
     key_flag = ["-K", GS_KEY]
     video_key_flag = key_flag if link.get("videoEncryption", True) else []
 
@@ -362,7 +365,7 @@ def build_graph_remote(
 
     lid = link_id()
     width = link.get("width", 20)
-    uplink_bw = min(width, 20)
+    uplink_bw = min(max(width, 10), 20)
     key_flag = ["-K", GS_KEY]
     video_key_flag = key_flag if link.get("videoEncryption", True) else []
     tap_flag = ["-D", str(tap.get("port", 8110))] if tap.get("enabled", True) else []

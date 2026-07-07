@@ -296,7 +296,23 @@ def test_width_10_narrows_uplink_bandwidth_only():
     cfg["link"]["width"] = 10
     g = _build(cfg)
 
-    # Uplink tx legs: -B = min(width, 20) = 10.
+    # Uplink tx legs: -B = min(max(width, 10), 20) = 10.
+    assert g.mavlink_tx.argv[g.mavlink_tx.argv.index("-B") + 1] == "10"
+    assert g.tunnel_tx.argv[g.tunnel_tx.argv.index("-B") + 1] == "10"
+
+    # wfb_rx never takes -B (video/mavlink/tunnel rx all lack the flag).
+    assert "-B" not in g.video_rx.argv
+    assert "-B" not in g.mavlink_rx.argv
+    assert "-B" not in g.tunnel_rx.argv
+
+
+def test_width_5_uplink_bandwidth_clamps_to_10():
+    # 5 MHz has no radiotap bandwidth token; the fork rejects -B 5. It uses
+    # 20 MHz modulation, so the uplink clamps to the 10 MHz token (BW_20 on-wire).
+    cfg = copy.deepcopy(default_config())
+    cfg["link"]["width"] = 5
+    g = _build(cfg)
+
     assert g.mavlink_tx.argv[g.mavlink_tx.argv.index("-B") + 1] == "10"
     assert g.tunnel_tx.argv[g.tunnel_tx.argv.index("-B") + 1] == "10"
 
