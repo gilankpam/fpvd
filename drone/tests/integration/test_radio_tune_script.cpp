@@ -73,6 +73,11 @@ TEST_CASE("radio-tune.sh: channel width tokens") {
     REQUIRE(fpvd::tuneRadio("scripts/radio-tune.sh", "channel", c, "wlan0", "8812eu").ok);
     CHECK(readAllText(rec).find("iw wlan0 set channel 100 10MHz") != std::string::npos);
 
+    c.link.width = 5;
+    fs::remove(rec);
+    REQUIRE(fpvd::tuneRadio("scripts/radio-tune.sh", "channel", c, "wlan0", "8812eu").ok);
+    CHECK(readAllText(rec).find("iw wlan0 set channel 100 5MHz") != std::string::npos);
+
     c.link.width = 40;
     fs::remove(rec);
     REQUIRE(fpvd::tuneRadio("scripts/radio-tune.sh", "channel", c, "wlan0", "8812eu").ok);
