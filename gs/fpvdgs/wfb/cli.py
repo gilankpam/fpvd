@@ -126,38 +126,73 @@ def _card_label(wlan: int) -> str:
     return f"card {wlan}"
 
 
+# Marker for a row (stream/antenna/counter) that exists but received nothing
+# in the current window -- see StickyRenderer.
+NO_DATA = "(no data)"
+
+
+def _settings_line(ev: SettingsEvent) -> str:
+    return f"[settings] profile={ev.profile} cluster={ev.is_cluster} wlans={','.join(ev.wlans)}"
+
+
+def _ant_line(ant, tx_wlan: int | None) -> str:
+    wlan = ant.ant >> 8
+    ant_idx = ant.ant & 0xFF
+    marker = " *" if tx_wlan is not None and wlan == tx_wlan else ""
+    return (
+        f"{_card_label(wlan)}{marker} ant {ant_idx} | pkt {ant.pkt_recv} | "
+        f"rssi {_fmt_triplet(ant.rssi_min, ant.rssi_avg, ant.rssi_max)} | "
+        f"snr {_fmt_triplet(ant.snr_min, ant.snr_avg, ant.snr_max)} | "
+        f"evm {_fmt_triplet(ant.evm_min, ant.evm_avg, ant.evm_max)}"
+    )
+
+
+def _ant_placeholder_line(ant_id: int, tx_wlan: int | None) -> str:
+    """A card+antenna slot that received nothing this window (sticky row)."""
+    wlan = ant_id >> 8
+    ant_idx = ant_id & 0xFF
+    marker = " *" if tx_wlan is not None and wlan == tx_wlan else ""
+    return f"{_card_label(wlan)}{marker} ant {ant_idx} | {NO_DATA}"
+
+
+def _counters_line(ev: RxEvent) -> str:
+    fec_rec = ev.packets_window.get("fec_rec", 0)
+    lost = ev.packets_window.get("lost", 0)
+    bad = ev.packets_window.get("bad", 0)
+    return f"  counters: fec_rec={fec_rec} lost={lost} bad={bad}"
+
+
+def _session_line(s) -> str:
+    return f"  session: {s.fec_type} k={s.fec_k}/n={s.fec_n} epoch={s.epoch}"
+
+
 def render_frame(events: list) -> str:
     """Pure renderer: a batch of events for one window -> a terminal frame.
 
     No I/O, no ANSI clear (the caller decides when to clear) -- kept
-    separate so it is trivially unit-testable.
+    separate so it is trivially unit-testable. Renders exactly the events it
+    is given; the sticky "keep empty rows in place" behavior lives in
+    StickyRenderer, which wraps this primitive's building blocks with
+    cross-window memory.
+
+    Streams and antennas are rendered in a fixed order (settings first, then
+    streams by `id`, then each stream's antennas by card+ant index) so the
+    frame stays put between windows: the raw feed carries streams in
+    window-arrival order and antennas in the producer's dict order, both of
+    which jitter, which would otherwise make the display shuffle every tick.
     """
     out: list[str] = []
+    events = sorted(events, key=lambda ev: (0, "") if isinstance(ev, SettingsEvent) else (1, ev.id))
     for ev in events:
         if isinstance(ev, SettingsEvent):
-            out.append(
-                f"[settings] profile={ev.profile} cluster={ev.is_cluster} "
-                f"wlans={','.join(ev.wlans)}"
-            )
+            out.append(_settings_line(ev))
         elif isinstance(ev, RxEvent):
             out.append(f"-- {ev.id} --")
-            for ant in ev.rx_ant_stats:
-                wlan = ant.ant >> 8
-                ant_idx = ant.ant & 0xFF
-                marker = " *" if ev.tx_wlan is not None and wlan == ev.tx_wlan else ""
-                out.append(
-                    f"{_card_label(wlan)}{marker} ant {ant_idx} | pkt {ant.pkt_recv} | "
-                    f"rssi {_fmt_triplet(ant.rssi_min, ant.rssi_avg, ant.rssi_max)} | "
-                    f"snr {_fmt_triplet(ant.snr_min, ant.snr_avg, ant.snr_max)} | "
-                    f"evm {_fmt_triplet(ant.evm_min, ant.evm_avg, ant.evm_max)}"
-                )
-            fec_rec = ev.packets_window.get("fec_rec", 0)
-            lost = ev.packets_window.get("lost", 0)
-            bad = ev.packets_window.get("bad", 0)
-            out.append(f"  counters: fec_rec={fec_rec} lost={lost} bad={bad}")
+            for ant in sorted(ev.rx_ant_stats, key=lambda a: a.ant):
+                out.append(_ant_line(ant, ev.tx_wlan))
+            out.append(_counters_line(ev))
             if ev.session is not None:
-                s = ev.session
-                out.append(f"  session: {s.fec_type} k={s.fec_k}/n={s.fec_n} epoch={s.epoch}")
+                out.append(_session_line(ev.session))
         elif isinstance(ev, SessionEvent):
             s = ev.session
             out.append(
@@ -167,6 +202,114 @@ def render_frame(events: list) -> str:
             sent = ev.packets_window.get("sent", 0)
             out.append(f"-- {ev.id} (tx) -- sent={sent}")
     return "\n".join(out) + "\n"
+
+
+class StickyRenderer:
+    """Stateful renderer that keeps every stream and card+antenna row in a
+    fixed slot once seen, so a row never collapses when it misses a window.
+
+    The raw feed only carries a stream (or an antenna within it) when it
+    received at least one packet in that 100 ms window, so on a marginal link
+    a row drops out for a window and the rows below shift up -- then it
+    reappears next window. This renderer remembers the union of stream ids and
+    `(card, ant)` keys seen and renders a `(no data)` placeholder for any that
+    are absent this window, so the layout stays put.
+
+    The remembered set is cleared when a stream starts a *new session* (its
+    session epoch changes -- wfb_rx restart / key-epoch roll), so stale rows
+    from a previous link don't linger forever.
+    """
+
+    def __init__(self) -> None:
+        # id -> "rx" | "tx" (first-seen; rendered sorted by id regardless)
+        self._streams: dict[str, str] = {}
+        # id -> set of ant ids (wlan<<8 | ant_idx) ever seen for that stream
+        self._ants: dict[str, set[int]] = {}
+        # id -> last-seen session epoch, to detect a new session
+        self._epoch: dict[str, int] = {}
+
+    def render(self, events: list) -> str:
+        self._maybe_reset(events)
+        settings, by_id = self._register(events)
+        out: list[str] = []
+        if settings is not None:
+            out.append(_settings_line(settings))
+        for sid in sorted(self._streams):
+            ev = by_id.get(sid)
+            if self._streams[sid] == "tx":
+                self._emit_tx(out, sid, ev)
+            else:
+                self._emit_rx(out, sid, ev)
+        return "\n".join(out) + "\n"
+
+    # -- state ---------------------------------------------------------------
+    def _session_epochs(self, events: list):
+        for ev in events:
+            if isinstance(ev, RxEvent) and ev.session is not None:
+                yield ev.id, ev.session.epoch
+            elif isinstance(ev, SessionEvent):
+                yield ev.id, ev.session.epoch
+
+    def _maybe_reset(self, events: list) -> None:
+        for sid, epoch in self._session_epochs(events):
+            if sid in self._epoch and self._epoch[sid] != epoch:
+                self._streams.clear()
+                self._ants.clear()
+                self._epoch.clear()
+                return
+
+    def _register(self, events: list):
+        """Fold this window into the known-row memory; return (settings,
+        {id: event}) for rendering."""
+        settings: SettingsEvent | None = None
+        by_id: dict[str, object] = {}
+        for ev in events:
+            if isinstance(ev, SettingsEvent):
+                settings = ev
+            elif isinstance(ev, RxEvent):
+                self._streams.setdefault(ev.id, "rx")
+                ants = self._ants.setdefault(ev.id, set())
+                ants.update(a.ant for a in ev.rx_ant_stats)
+                if ev.session is not None:
+                    self._epoch[ev.id] = ev.session.epoch
+                by_id[ev.id] = ev
+            elif isinstance(ev, TxEvent):
+                self._streams.setdefault(ev.id, "tx")
+                self._ants.setdefault(ev.id, set())
+                by_id[ev.id] = ev
+            elif isinstance(ev, SessionEvent):
+                self._streams.setdefault(ev.id, "rx")
+                self._ants.setdefault(ev.id, set())
+                self._epoch[ev.id] = ev.session.epoch
+                by_id.setdefault(ev.id, ev)  # only if no RxEvent this window
+        return settings, by_id
+
+    # -- rendering -----------------------------------------------------------
+    def _emit_rx(self, out: list[str], sid: str, ev) -> None:
+        out.append(f"-- {sid} --")
+        present = {a.ant: a for a in ev.rx_ant_stats} if isinstance(ev, RxEvent) else {}
+        tx_wlan = ev.tx_wlan if isinstance(ev, RxEvent) else None
+        for ant_id in sorted(self._ants[sid]):
+            ant = present.get(ant_id)
+            out.append(
+                _ant_line(ant, tx_wlan)
+                if ant is not None
+                else _ant_placeholder_line(ant_id, tx_wlan)
+            )
+        if isinstance(ev, RxEvent):
+            out.append(_counters_line(ev))
+            if ev.session is not None:
+                out.append(_session_line(ev.session))
+        else:
+            out.append(f"  counters: {NO_DATA}")
+            if isinstance(ev, SessionEvent):
+                out.append(_session_line(ev.session))
+
+    def _emit_tx(self, out: list[str], sid: str, ev) -> None:
+        if isinstance(ev, TxEvent):
+            out.append(f"-- {sid} (tx) -- sent={ev.packets_window.get('sent', 0)}")
+        else:
+            out.append(f"-- {sid} (tx) -- {NO_DATA}")
 
 
 def _run_json(lines: Iterable[str], *, once: bool) -> None:
@@ -183,10 +326,11 @@ def _run_json(lines: Iterable[str], *, once: bool) -> None:
 
 
 def _run_rendered(lines: Iterable[str], *, once: bool) -> None:
+    sticky = StickyRenderer()
     for window in _iter_windows(lines):
         if not once:
             sys.stdout.write(CLEAR)
-        sys.stdout.write(render_frame(window))
+        sys.stdout.write(sticky.render(window))
         sys.stdout.flush()
         if once:
             return
