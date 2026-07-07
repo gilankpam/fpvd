@@ -512,3 +512,12 @@ def test_idr_forward_apply_starts_and_stops():
     api.handle("PATCH", "/gs/config", {}, json.dumps({"idrForward": {"enabled": False}}).encode())
     api.handle("POST", "/gs/apply", {}, b"")
     assert relay.events[-1] == "stop"
+
+
+def test_bw_class_5mhz_is_20():
+    # 5 MHz shares the 20 MHz radiotap BW class, so a DL-off 20<->5 width change
+    # live-retunes via iw (no wfb bounce).
+    from fpvdgs.api import Api
+
+    assert Api._bw_class(5) == 20
+    assert Api._bw_class(5) == Api._bw_class(20)

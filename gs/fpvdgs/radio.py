@@ -9,7 +9,7 @@ restart. Mirrors the drone's radio-tune approach.
 import subprocess
 
 # width (MHz) -> iw HT/channel-width mode argument
-WIDTH_HTMODE = {10: "10MHz", 20: "HT20", 40: "HT40+"}
+WIDTH_HTMODE = {5: "5MHz", 10: "10MHz", 20: "HT20", 40: "HT40+"}
 
 
 def htmode(width: int) -> str:
