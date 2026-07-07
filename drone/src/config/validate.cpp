@@ -61,10 +61,10 @@ std::vector<ValidationError> validate(const Config& c) {
     std::vector<ValidationError> errs;
 
     // link
-    if (c.link.width != 10 && c.link.width != 20 && c.link.width != 40)
-        errs.push_back({"link.width", "must be 10, 20, or 40"});
-    if (c.dynamicLink.enabled && c.link.width == 40)
-        errs.push_back({"link.width", "40 MHz requires dynamicLink.enabled=false"});
+    if (c.link.width != 5 && c.link.width != 10 && c.link.width != 20 && c.link.width != 40)
+        errs.push_back({"link.width", "must be 5, 10, 20, or 40"});
+    if (c.dynamicLink.enabled && (c.link.width == 5 || c.link.width == 40))
+        errs.push_back({"link.width", "5/40 MHz requires dynamicLink.enabled=false"});
     if (c.link.mcs < 0 || c.link.mcs > 7)
         errs.push_back({"link.mcs", "must be 0..7"});
     if (!c.link.txPowerDbm.automatic && (c.link.txPowerDbm.dbm < -10 || c.link.txPowerDbm.dbm > 30))
