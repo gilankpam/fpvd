@@ -107,12 +107,12 @@ void DynamicLinkController::start(const DlRuntimeConfig& snap) {
     // Construct backend clients fresh from the snapshot + endpoints. They are
     // used only from the run() thread, so no locking is needed on them.
     wfb_ = std::make_unique<WfbControlClient>(ep_.wfbCtlAddr, ep_.wfbCtlPort);
-    // Probe retune client: built only when a control port is configured; a fresh
-    // unique_ptr per start() (reset first) so a stop()+start() cycle rebuilds it,
-    // mirroring wfb_. Held nullptr when the probe is disabled.
+    // Probe retune client: owned by the control thread and built lazily by
+    // reconcileProbeClient() at dispatch time, so both a start() and a
+    // setConfig() hot-flip of the probe knob take effect. Reset here so a
+    // stop()+start() cycle never carries a stale client across incarnations.
     probeWfb_.reset();
-    if (snap.probeCtlPort != 0)
-        probeWfb_ = std::make_unique<WfbControlClient>("127.0.0.1", snap.probeCtlPort);
+    probeWfbPort_ = 0;
     enc_.emplace(wb_, snap.roiQp);
     radio_.emplace(snap.iface);
     // osd_ is the daemon-owned always-on writer, injected via setOsdWriter().
@@ -174,7 +174,18 @@ void DynamicLinkController::stopLocked() {
 // differ), with sub-pacing (usleep applySubPaceMs) between sub-commands.
 // Updates lastTx_.
 // d.bandwidth is already the 20/40 radiotap value — passed directly.
+void DynamicLinkController::reconcileProbeClient(const DlRuntimeConfig& cfg) {
+    if (cfg.probeCtlPort == probeWfbPort_)
+        return;
+    probeWfb_.reset();
+    if (cfg.probeCtlPort != 0)
+        probeWfb_ = std::make_unique<WfbControlClient>("127.0.0.1", cfg.probeCtlPort);
+    probeWfbPort_ = cfg.probeCtlPort;
+    lastProbeMcs_ = -1; // fresh client: force a retune on this dispatch
+}
+
 void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const Decision& d) {
+    reconcileProbeClient(cfg);
     bool first = (lastTx_.magic != kWireMagic);
     bool emitted = false;
     useconds_t paceUs = static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
@@ -193,20 +204,25 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
                        /*ldpc=*/cfg.ldpc, /*shortGi=*/false,
                        /*bandwidth=*/d.bandwidth, /*mcs=*/d.mcs,
                        /*vhtMode=*/false, /*vhtNss=*/1);
-        // Retune the observe-only probe to current+1 (clamped), mirroring the
-        // video PHY flags. Best-effort: a soft failure (probe not yet up) is
-        // retried on the next decision. The probe rides its own radio_port, so
-        // this never touches the video stream.
-        if (probeWfb_) {
-            int rung = probeRungFor(d.mcs, cfg.probeMcsCeiling);
-            if (rung != lastProbeMcs_) {
-                probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc,
-                                    /*shortGi=*/false,
-                                    /*bandwidth=*/d.bandwidth,
-                                    /*mcs=*/static_cast<uint8_t>(rung),
-                                    /*vhtMode=*/false, /*vhtNss=*/1);
+    }
+    // Retune the observe-only probe to current+1 (clamped), mirroring the
+    // video PHY flags. Evaluated on EVERY dispatch — outside the video-radio
+    // diff gate — with its own rung diff: a soft failure (probe TX not yet
+    // answering) or a probe hot-flip must take effect on the next decision
+    // even when the video radiotap is unchanged (2026-07-07 bench: both were
+    // stranded until the next rung change). Latch the rung ONLY on success.
+    // The probe rides its own radio_port, so this never touches the video
+    // stream.
+    if (probeWfb_) {
+        int rung = probeRungFor(d.mcs, cfg.probeMcsCeiling);
+        if (rung != lastProbeMcs_) {
+            auto pres = probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc,
+                                            /*shortGi=*/false,
+                                            /*bandwidth=*/d.bandwidth,
+                                            /*mcs=*/static_cast<uint8_t>(rung),
+                                            /*vhtMode=*/false, /*vhtNss=*/1);
+            if (pres.ok)
                 lastProbeMcs_ = rung;
-            }
         }
     }
     // TX power: when txPowerControl is enabled fpvd drives the per-MCS anti-
@@ -229,6 +245,7 @@ void DynamicLinkController::dispatchTxApply(const DlRuntimeConfig& cfg, const De
 // drone-derives-the-rest). Bandwidth is pinned to the operating width — never
 // drop bandwidth on a watchdog trip.
 Decision DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
+    reconcileProbeClient(cfg);
     useconds_t paceUs = static_cast<useconds_t>(cfg.applySubPaceMs) * 1000u;
     Decision d{};
     d.mcs = kDlFailsafeMcs;
@@ -243,11 +260,13 @@ Decision DynamicLinkController::dispatchTxSafe(const DlRuntimeConfig& cfg) {
                    /*bandwidth=*/d.bandwidth, /*mcs=*/d.mcs,
                    /*vhtMode=*/false, /*vhtNss=*/1);
     // Move the probe down with the video so it never sits above the safe rung.
+    // Latch only on success (same retry contract as the decision path).
     if (probeWfb_) {
         int rung = probeRungFor(d.mcs, cfg.probeMcsCeiling);
-        probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc, false, d.bandwidth,
-                            static_cast<uint8_t>(rung), false, 1);
-        lastProbeMcs_ = rung;
+        auto pres = probeWfb_->setRadio(static_cast<uint8_t>(cfg.stbc ? 1 : 0), cfg.ldpc, false,
+                                        d.bandwidth, static_cast<uint8_t>(rung), false, 1);
+        if (pres.ok)
+            lastProbeMcs_ = rung;
     }
     // Low MCS -> high power -> robust recovery (txPowerDbm == curve[0] from derive;
     // ignored when txPowerControl=false -> applyAuto issues iw auto).

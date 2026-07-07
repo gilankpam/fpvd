@@ -33,11 +33,13 @@ class DynamicLinkController:
         stats_endpoint="tcp://127.0.0.1:8103",
         stats_client_factory,
         bus=None,
+        probe_feed_provider=None,
     ):
         self._snapshot = dict(snapshot)
         self._stats_endpoint = stats_endpoint
         self._make_stats = stats_client_factory
         self._bus = bus
+        self._probe_feed_provider = probe_feed_provider
         self._policy = None
         self._aggregator = None
         self._pending_cal = None
@@ -179,6 +181,18 @@ class DynamicLinkController:
                 emitSeq=self._status["emitSeq"] + 1,
             )
 
+        probe_provider = self._probe_feed_provider
+
+        def _probe_snapshot():
+            # Cross-thread contract: probe_provider() reads WfbEngine.probe_feed,
+            # which the engine publishes/clears under its own lock; a stale
+            # incarnation's feed is benign (internally locked, and readings
+            # decay to fresh=False within 0.5 s once the engine tears it down).
+            if probe_provider is None:
+                return None
+            feed = probe_provider()
+            return feed.snapshot_fresh() if feed is not None else None
+
         def _mark_tap_rx():
             was = _tap_alive()
             tap_state["last_rx"] = time.monotonic()
@@ -200,6 +214,7 @@ class DynamicLinkController:
                     _emit(d)
             tap_state["micros"] += 1
             if tap_state["micros"] % 10 == 0:
+                signals.probe = _probe_snapshot()
                 _emit(policy.tick(signals))
 
         def on_loss(rec):
@@ -233,6 +248,7 @@ class DynamicLinkController:
                     self._set(tapActive=False)
                     log.info("dynlink: tap stale — fallback to :8103 ticks")
                 signals = aggregator.consume(ev)
+                signals.probe = _probe_snapshot()
                 _emit(policy.tick(signals))
 
         tap_transport = None

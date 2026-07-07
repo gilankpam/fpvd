@@ -69,6 +69,7 @@ class WfbChild:
         restart_window: float = 60.0,
         backoff: float = 0.5,
         on_fault: Callable[["WfbChild"], None] | None = None,
+        sink=None,
     ):
         self.spec = spec
         self._hub = hub
@@ -77,6 +78,11 @@ class WfbChild:
         self.restart_window = restart_window
         self.backoff = backoff
         self._on_fault = on_fault
+        # In-process sink for `spec.parser == "probe"` (2026-07-06 spec Part
+        # B): the probe leg has no StatsHub to wire into, so its stdout is
+        # pumped into this object's `feed_line` instead. Unused (and may be
+        # left None) for every other parser kind.
+        self._sink = sink
 
         self._proc: asyncio.subprocess.Process | None = None
         self._parser: RxLineParser | TxLineParser | None = None
@@ -140,7 +146,16 @@ class WfbChild:
 
     # -- spawn + readiness ------------------------------------------------------
     def _make_parser(self) -> RxLineParser | TxLineParser:
-        if self.spec.kind == "tx":
+        if self.spec.parser == "probe":
+            # In-process probe sink (2026-07-06 spec Part B): lines go to the
+            # ProbeFeed, never the StatsHub — probe records must not perturb
+            # ant selection or :8103. Readiness for this leg is unaffected:
+            # it is `kind == "rx"`, so `_spawn_and_wait` still resolves it
+            # through `_check_rx_ready` (alive == ready, no handshake to
+            # wait on) exactly like any other rx leg — see that method's
+            # docstring for why it never depends on a parsed stats update.
+            return self._sink
+        if self.spec.parser == "tx":
             return TxLineParser(self.spec.name, self._hub.update_tx_stats)
         return RxLineParser(
             self.spec.name, self._hub.update_rx_stats, self._hub.process_new_session

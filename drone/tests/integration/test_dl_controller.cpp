@@ -85,6 +85,10 @@ struct FakeWfbTx {
     std::vector<std::pair<uint8_t, uint8_t>> radio;   // (mcs, bandwidth)
     std::vector<std::pair<uint8_t, bool>> radioFlags; // (stbc, ldpc) per setRadio
     std::atomic<int> unknownCmds{0};
+    // When true, requests are still received+recorded but never answered, so
+    // the client's sendAndRecv times out — models a wfb_tx that is up but
+    // unresponsive (or not yet ready) without closing the port.
+    std::atomic<bool> mute{false};
 
     FakeWfbTx() {
         fd = ::socket(AF_INET, SOCK_DGRAM, 0);
@@ -136,6 +140,9 @@ struct FakeWfbTx {
                 }
             }
 
+            if (mute.load())
+                continue; // recorded but unanswered -> client times out
+
             fpvd::WfbCmdResp resp{};
             resp.req_id = req.req_id; // echo (already network order)
             resp.rc = htonl(0);
@@ -157,6 +164,14 @@ struct FakeWfbTx {
             if (r.first == mcs && r.second == bw)
                 return true;
         return false;
+    }
+    int countRadio(uint8_t mcs, uint8_t bw) {
+        std::lock_guard<std::mutex> lk(mu);
+        int n = 0;
+        for (auto& r : radio)
+            if (r.first == mcs && r.second == bw)
+                ++n;
+        return n;
     }
     bool sawRadioFlags(uint8_t stbc, bool ldpc) {
         std::lock_guard<std::mutex> lk(mu);
@@ -500,6 +515,160 @@ TEST_CASE("setConfig hot-reloads knobs without restart") {
 
     c.stop();
     CHECK(c.status().running == false);
+}
+
+// 2026-07-07 bench regression: flipping dynamicLink.probe.enabled under a live
+// DL routes through setConfig(), which swaps cfg_ only — the probe retune
+// client (probeWfb_) was built exclusively in start(), so it stayed null and
+// the probe TX sat at its spawn MCS forever. The client must be reconciled
+// with the config on the control thread.
+TEST_CASE("setConfig hot-flip of the probe port builds the retune client") {
+    FakeWfbTx wfb;
+    FakeWfbTx probe;
+    FakeEnc enc;
+
+    Endpoints ep;
+    ep.listenAddr = "127.0.0.1";
+    ep.listenPort = 45807; // fixed test port
+    ep.wfbCtlAddr = "127.0.0.1";
+    ep.wfbCtlPort = wfb.port;
+    ep.encHost = "127.0.0.1";
+    ep.encPort = static_cast<uint16_t>(enc.port);
+    ep.gsTunnelPort = 0;
+    ep.osdUpdateIntervalMs = 1000;
+
+    DlRuntimeConfig snap{};
+    snap.healthTimeoutMs = 10000;
+    snap.applyStaggerMs = 0;
+    snap.applySubPaceMs = 0;
+    snap.debug = false;
+    snap.roiQp = RoiCurve{6000, 2000, -24, 3};
+    snap.linkWidthMhz = 40;
+    snap.iface = "wlan-test-nonexistent";
+    snap.probeCtlPort = 0; // probe disabled at controller start
+
+    DynamicLinkController c(ep);
+    c.start(snap);
+
+    // Decision 1 (probe off): video retunes, probe silent.
+    Decision d{};
+    d.magic = kWireMagic;
+    d.version = kWireVersion;
+    d.sequence = 1;
+    d.timestampMs = 1;
+    d.mcs = 4;
+    d.bandwidth = 20;
+    d.txPowerDbm = 10;
+    d.k = 4;
+    d.n = 6;
+    d.bitrateKbps = 4000;
+    d.fps = 60;
+    CHECK(waitFor(
+        [&] {
+            sendDecision(ep.listenPort, d);
+            return wfb.sawRadio(4, 40);
+        },
+        1000));
+    CHECK(probe.countRadio(5, 40) == 0);
+
+    // Hot-flip the probe on (models probe.enabled=true applied under live DL).
+    snap.probeCtlPort = probe.port;
+    c.setConfig(snap);
+
+    // Decision 2: the reconciled client must retune the probe to mcs+1.
+    d.sequence = 2;
+    d.mcs = 5;
+    CHECK(waitFor(
+        [&] {
+            sendDecision(ep.listenPort, d);
+            return probe.sawRadio(6, 40);
+        },
+        1000));
+
+    // And a hot-flip OFF must stop further probe pushes.
+    snap.probeCtlPort = 0;
+    c.setConfig(snap);
+    int before = probe.countRadio(5, 40) + probe.countRadio(6, 40) + probe.countRadio(7, 40);
+    d.sequence = 3;
+    d.mcs = 6;
+    CHECK(waitFor(
+        [&] {
+            sendDecision(ep.listenPort, d);
+            return wfb.sawRadio(6, 40);
+        },
+        1000));
+    int after = probe.countRadio(5, 40) + probe.countRadio(6, 40) + probe.countRadio(7, 40);
+    CHECK(after == before);
+
+    c.stop();
+}
+
+// Companion regression: the probe block latched lastProbeMcs_ even when
+// setRadio failed, so a soft failure (probe TX not yet answering) was never
+// retried at the same rung — contradicting its own comment. Only a
+// successful push may latch.
+TEST_CASE("probe retune failure is retried on the next decision") {
+    FakeWfbTx wfb;
+    FakeWfbTx probe;
+    FakeEnc enc;
+
+    Endpoints ep;
+    ep.listenAddr = "127.0.0.1";
+    ep.listenPort = 45808; // fixed test port
+    ep.wfbCtlAddr = "127.0.0.1";
+    ep.wfbCtlPort = wfb.port;
+    ep.encHost = "127.0.0.1";
+    ep.encPort = static_cast<uint16_t>(enc.port);
+    ep.gsTunnelPort = 0;
+    ep.osdUpdateIntervalMs = 1000;
+
+    DlRuntimeConfig snap{};
+    snap.healthTimeoutMs = 10000;
+    snap.applyStaggerMs = 0;
+    snap.applySubPaceMs = 0;
+    snap.debug = false;
+    snap.roiQp = RoiCurve{6000, 2000, -24, 3};
+    snap.linkWidthMhz = 40;
+    snap.iface = "wlan-test-nonexistent";
+    snap.probeCtlPort = probe.port;
+
+    probe.mute.store(true); // probe TX up but unresponsive -> setRadio fails
+
+    DynamicLinkController c(ep);
+    c.start(snap);
+
+    Decision d{};
+    d.magic = kWireMagic;
+    d.version = kWireVersion;
+    d.sequence = 1;
+    d.timestampMs = 1;
+    d.mcs = 4;
+    d.bandwidth = 20;
+    d.txPowerDbm = 10;
+    d.k = 4;
+    d.n = 6;
+    d.bitrateKbps = 4000;
+    d.fps = 60;
+    // First attempt: the muted probe records the request but the client
+    // times out -> the rung must NOT latch.
+    CHECK(waitFor(
+        [&] {
+            sendDecision(ep.listenPort, d);
+            return probe.countRadio(5, 40) >= 1;
+        },
+        3000));
+
+    probe.mute.store(false);
+    // Same rung again: a latched failure would skip this retune forever.
+    CHECK(waitFor(
+        [&] {
+            d.sequence += 1;
+            sendDecision(ep.listenPort, d);
+            return probe.countRadio(5, 40) >= 2;
+        },
+        3000));
+
+    c.stop();
 }
 
 TEST_CASE("controller swfec mode: decision + safe push carry overhead/deadline") {

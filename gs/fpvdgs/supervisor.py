@@ -97,7 +97,6 @@ def build_app(
     ready_port=8103,
     ready_timeout=10.0,
     log_path=None,
-    probe_spawn=None,
 ):
     store = ConfigStore.load(config_path)
     effective = store.effective()
@@ -140,7 +139,10 @@ def build_app(
     idr_relay = IdrRelay(drone_host, port=int(idr_cfg.get("port", 11223)))
 
     dynlink = DynamicLinkController(
-        make_dl_snapshot(effective), bus=bus, stats_client_factory=stats_client_factory
+        make_dl_snapshot(effective),
+        bus=bus,
+        stats_client_factory=stats_client_factory,
+        probe_feed_provider=lambda: runner.probe_feed,
     )
 
     pixelpilot = ProcessSupervisor(
@@ -179,9 +181,13 @@ def build_app(
         return {"enabled": True, **pixelpilot.state()}
 
     def _probe_status():
-        # Probe subsystem bypassed by the 2026-07-02 probe-less selector —
-        # retained in-tree for future experiments; never constructed or started.
-        return {"enabled": False, "running": False}
+        # Native probe (2026-07-06 spec Part B): enabled = config knob,
+        # running = the engine's current incarnation spawned a probe leg.
+        eff_probe = (store.effective().get("dynamicLink") or {}).get("probe") or {}
+        return {
+            "enabled": bool(eff_probe.get("enabled", False)),
+            "running": runner.probe_feed is not None,
+        }
 
     def status_fn():
         wlans = resolve_wlans(store.effective())
@@ -230,7 +236,6 @@ def build_app(
         status_fn=status_fn,
         dynlink=dynlink,
         pixelpilot=pixelpilot,
-        probe=None,
         retune=_retune,
         wlans_resolver=resolve_wlans,
         armer_tick=armer.tick,

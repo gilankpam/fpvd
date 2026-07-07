@@ -43,6 +43,7 @@ class _FakeWfbEngine:
     def __init__(self, config_provider=None, wlans_resolver=None, stats_port=None, reap_fn=None):
         self._running = False
         self.restarts = 0
+        self.probe_feed = None  # 2026-07-06 Part B: _probe_status() reads runner.probe_feed
 
     def start(self) -> bool:
         self._running = True
@@ -177,12 +178,8 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
             }
 
     monkeypatch.setattr(supervisor, "DynamicLinkController", _StubController)
-    # Avoid spawning the real runner / radio probing. make_probe_snapshot
-    # resolves wlans through its own module, so patch that too.
+    # Avoid spawning the real runner / radio probing.
     monkeypatch.setattr(supervisor, "resolve_wlans", lambda cfg: ["wlan0"])
-    from fpvdgs.probe import config_build as _probe_cb
-
-    monkeypatch.setattr(_probe_cb, "resolve_wlans", lambda cfg: ["wlan0"])
 
     config_json = tmp_path / "config.json"
     config_json.write_text(
@@ -211,14 +208,18 @@ def test_dynamiclink_assembled_into_status_and_controller_built(tmp_path, monkey
     assert "drone" not in body["dynamicLink"]
 
 
-def test_status_probe_bypassed_with_dynamiclink_enabled(tmp_path, monkeypatch):
-    """After the probe bypass, /gs/status.probe is always disabled even when
-    dynamicLink is enabled; no wfb_rx process is ever spawned."""
+def test_status_probe_disabled_by_default_with_dynamiclink_enabled(tmp_path, monkeypatch):
+    """dynamicLink.probe.enabled defaults false, so /gs/status.probe stays
+    disabled even with dynamicLink enabled — the native engine only renders a
+    probe_rx child when both dynamicLink AND the probe knob are on
+    (`_probe_render_view`); no probe leg is spawned here."""
     import json
 
     from fpvdgs import supervisor
+    from fpvdgs.wfb import engine as engine_mod
 
     monkeypatch.setattr(supervisor, "resolve_wlans", lambda cfg: ["wlan0"])
+    monkeypatch.setattr(engine_mod, "WfbEngine", _FakeWfbEngine)
 
     class _StubDl:
         def __init__(self, *a, **k):
@@ -237,24 +238,6 @@ def test_status_probe_bypassed_with_dynamiclink_enabled(tmp_path, monkeypatch):
             return {"running": self.started}
 
     monkeypatch.setattr(supervisor, "DynamicLinkController", _StubDl)
-
-    spawned = []
-
-    def fake_spawn(cmd):
-        spawned.append(cmd)
-
-        class _P:
-            stdout = type(
-                "S", (), {"readline": staticmethod(lambda: __import__("asyncio").sleep(3600))}
-            )()
-
-            def kill(self):
-                pass
-
-            async def wait(self):
-                return 0
-
-        return _P()
 
     config_json = tmp_path / "config.json"
     config_json.write_text(
@@ -277,7 +260,6 @@ def test_status_probe_bypassed_with_dynamiclink_enabled(tmp_path, monkeypatch):
         str(config_json),
         "127.0.0.1",
         api_port,
-        probe_spawn=fake_spawn,
     )
     app.start()
     t = threading.Thread(target=app.serve_forever, daemon=True)
@@ -286,10 +268,6 @@ def test_status_probe_bypassed_with_dynamiclink_enabled(tmp_path, monkeypatch):
     try:
         code, body = app.api.handle("GET", "/gs/status", {}, b"")
         assert code == 200
-        assert body["probe"] == {
-            "enabled": False,
-            "running": False,
-        }  # probe bypass — subsystem retained for experiments
-        assert len(spawned) == 0  # probe bypass: no wfb_rx spawned
+        assert body["probe"] == {"enabled": False, "running": False}
     finally:
         app.shutdown()

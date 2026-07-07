@@ -158,6 +158,11 @@ class WfbEngine:
         self._reap_fn = reap_fn
 
         self.hub: StatsHub | None = None  # current incarnation; read by statsd/CLI/tests
+        # Current incarnation's in-process probe sink (2026-07-06 spec Part
+        # B), or None when dynamicLink.probe.enabled is off (default) or the
+        # engine is down. Published under `self._lock` alongside `self.hub`;
+        # thread-safe to read.
+        self.probe_feed = None
 
         # Config for the next _setup, set by restart(config=...) and consumed once
         # (the store isn't committed until after the restart returns).
@@ -172,7 +177,7 @@ class WfbEngine:
         self._start_ok = False
 
         self._children: dict[str, object] = {}
-        self._extra_rx_names: list[str] = []  # remote-mode local forwarders
+        self._extra_rx_names: list[str] = []  # remote-mode local forwarders + probe_rx (local mode)
         self._extra_tx_names: list[str] = []  # remote-mode local injectors
         self._mav_service = None
         self._tunnel_service = None
@@ -414,6 +419,15 @@ class WfbEngine:
             parsed_cards = parse_cards(link)
             cards: list[Card] = [] if parsed_cards == "auto" else parsed_cards
             remote = has_remote(cards)
+            # Same conjunction the graph builder applies to decide
+            # `graph.probe_rx` (graph.py) — computed once here so the
+            # remote-mode `plan_cluster` call below is handed the identical
+            # decision (a probe leg without a matching cluster-plan port
+            # would KeyError on `plan.server_port["probe"]`).
+            dl_cfg = cfg.get("dynamicLink") or {}
+            probe_enabled = bool(dl_cfg.get("enabled", False)) and bool(
+                (dl_cfg.get("probe") or {}).get("enabled", False)
+            )
         except Exception:
             log.exception("wfb engine: failed to resolve config/cards")
             return False
@@ -445,7 +459,7 @@ class WfbEngine:
         server_address = None
         if remote:
             try:
-                plan = plan_cluster(cards)
+                plan = plan_cluster(cards, with_probe=probe_enabled)
                 first_remote = remote_cards(cards)[0]
                 server_address = derive_server_address(first_remote.host, link.get("serverAddress"))
             except Exception:
@@ -495,12 +509,27 @@ class WfbEngine:
                 leg_specs.append((spec.name, spec))
                 extra_tx_names.append(spec.name)
 
+        # Probe leg (2026-07-06 spec Part B): appended AFTER the remote
+        # extras above, keyed off the graph builder's own `probe_rx`
+        # decision (not `probe_enabled` directly) so this stays correct
+        # regardless of which builder ran. `graph.probe_rx` is None on the
+        # Phase-1-style fake graphs used by the non-probe engine tests
+        # (`getattr` default), same as any other pre-Part-B graph object.
+        probe_feed = None
+        if getattr(graph, "probe_rx", None) is not None:
+            from ..probe.feed import ProbeFeed
+
+            probe_feed = ProbeFeed()
+            leg_specs.append(("probe_rx", graph.probe_rx))
+            extra_rx_names.append("probe_rx")
+
         children: dict[str, object] = {}
         started_order: list[str] = []
         ok_all = True
         for name, spec in leg_specs:
             try:
-                child = self._child_cls(spec, hub, on_fault=self._on_child_fault)
+                kw = {"sink": probe_feed} if name == "probe_rx" else {}
+                child = self._child_cls(spec, hub, on_fault=self._on_child_fault, **kw)
                 ok = await child.start()
             except Exception:
                 log.exception("wfb engine: child %s failed to construct/start", name)
@@ -537,6 +566,7 @@ class WfbEngine:
                 self._tunnel_service = tunnel_service
                 self._tx_selector = tx_selector
                 self.hub = hub
+                self.probe_feed = probe_feed
             self._tx_parser_ids = {
                 "mavlink_tx": mav_child.tx_parser,
                 "tunnel_tx": tun_child.tx_parser,
@@ -571,6 +601,7 @@ class WfbEngine:
                 self._tunnel_service = None
                 self._tx_selector = None
                 self.hub = None
+                self.probe_feed = None
             return False
 
         # ---- remote node sessions (started AFTER local children; a node
@@ -682,6 +713,7 @@ class WfbEngine:
         with self._lock:
             hub = self.hub
             self.hub = None
+            self.probe_feed = None
         if hub is not None:
             hub.close()
 

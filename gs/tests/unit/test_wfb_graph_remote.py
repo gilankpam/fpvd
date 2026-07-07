@@ -387,3 +387,36 @@ def test_build_graph_all_local_is_byte_identical_to_phase1_golden():
     assert g.local_injectors == []
     assert g.node_scripts == {}
     assert isinstance(g, GsGraph)
+
+
+# ---- probe_rx service spec ------------------------------------------------
+
+
+def test_probe_rx_remote_aggregator_and_forwarder():
+    eff = default_config()
+    eff["dynamicLink"]["enabled"] = True
+    eff["dynamicLink"]["probe"] = {"enabled": True}
+    cards = [Card(host=None, iface="wlan0"), Card(host="192.168.1.10", iface="wlan0")]
+    plan = plan_cluster(cards, with_probe=True)
+    g = build_graph_remote(eff, cards, plan, "10.0.0.1", rand_suffix=lambda: "x")
+    spec = g.probe_rx
+    assert spec is not None and spec.parser == "probe"
+    a = spec.argv.index("-a")
+    assert spec.argv[a + 1] == str(plan.server_port["probe"])
+    assert spec.argv[spec.argv.index("-p") + 1] == "50"
+    # local node has a card -> probe forwarder rendered
+    fwd_names = [s.name for s in g.local_forwarders]
+    assert "probe fwd" in fwd_names
+    # remote node script includes the probe forwarder line
+    script = next(iter(g.node_scripts.values()))
+    assert f"-u {plan.server_port['probe']} -p 50" in script
+
+
+def test_probe_disabled_remote_graph_unchanged():
+    eff = default_config()
+    cards = [Card(host=None, iface="wlan0"), Card(host="192.168.1.10", iface="wlan0")]
+    plan = plan_cluster(cards)  # no probe in the plan
+    g = build_graph_remote(eff, cards, plan, "10.0.0.1", rand_suffix=lambda: "x")
+    assert g.probe_rx is None
+    assert all(s.name != "probe fwd" for s in g.local_forwarders)
+    assert "-p 50" not in next(iter(g.node_scripts.values()))

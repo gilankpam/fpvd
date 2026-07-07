@@ -123,11 +123,30 @@ def test_trial_flap_charges_damper_and_reports_fail():
     assert any("class=flap" in r for r in s.reasons)
 
 
-def test_fade_teaches_raw_snr_and_never_charges():
+def test_trial_fade_charges_damper_and_teaches_raw_snr():
+    """2026-07-06 spec A1 (flight 000003): a fade loss on a rung entered by
+    promote charges the damper — periodic fades otherwise re-arm snap-back
+    damper-free. Knee teaching keeps the fade class (raw snr_w sample)."""
     s = mk()
-    ts = climb_one(s, T0)  # at 2, on trial — fade wins over trial
+    ts = climb_one(s, T0)  # at 2, on trial
     ts += TICK
     step(s, ts, snr=25.0, snr_w=12.0, loss=0.3, loss_demote=True)  # collapse >= 4 dB
+    assert s.last_fail == (2, "fade", 12.0)
+    assert s._flap_level.get(2) == 1  # NEW: probation loss charges regardless of class
+    assert any("class=fade" in r for r in s.reasons)
+
+
+def test_settled_fade_teaches_but_never_charges():
+    """A fade at a SETTLED rung still charges nothing: holding altitude
+    through an isolated fade and snapping back stays free (spec A1 keeps
+    the original design intent where it is valid)."""
+    s = mk(max_mcs=2)  # cap so 150 clean ticks don't keep climbing
+    ts = climb_one(s, T0)  # at 2
+    for _ in range(150):  # outlive the 10 s trial window
+        ts += TICK
+        step(s, ts)
+    ts += TICK
+    step(s, ts, snr=25.0, snr_w=12.0, loss=0.3, loss_demote=True)
     assert s.last_fail == (2, "fade", 12.0)  # raw snr_w, NOT the lagging EWMA
     assert s._flap_level.get(2) is None
     assert any("class=fade" in r for r in s.reasons)
@@ -183,12 +202,37 @@ def test_backoff_escalates_and_suppresses():
     assert s._promote_suppressed is True
 
 
-def test_snr_release_lifts_suppression_early():
-    s = mk()
+def test_raw_min_release_lifts_suppression_early():
+    """2026-07-06 spec A5: release when the ROLLING RAW MIN clears the
+    flap-time SNR + margin — 2 s without a fade dip is genuine recovery."""
+    s = mk(flap_base_backoff_ms=10000)  # long window: release, not expiry
     ts = _flap_at(s, T0, 2)  # flapped at snr_ewma=30
-    ts += TICK
-    step(s, ts, snr=33.5)  # >= 30 + flap_snr_release_db (3.0)
+    for _ in range(20):  # fill the whole 2 s raw window above 30+3
+        ts += TICK
+        step(s, ts, snr=34.0)
     assert s._promote_suppressed is False
+    assert s.last_release == "raw_min"
+
+
+def test_ewma_pop_does_not_release_while_raw_still_dips():
+    """The old EWMA-pop release lifted the damper on ordinary wobble in a
+    fast-fading channel (flight 000003: 8+ early lifts). Raw dips must hold
+    the window even when the EWMA is far above the release bar."""
+    s = mk(flap_base_backoff_ms=10000)
+    ts = _flap_at(s, T0, 2)
+    for _ in range(20):
+        ts += TICK
+        step(s, ts, snr=34.0, snr_w=10.0)  # EWMA recovered, raw still dipping
+    assert s._promote_suppressed is True
+
+
+def test_timer_expiry_reports_release_source():
+    s = mk()
+    ts = _flap_at(s, T0, 2)  # level 1 => 2 s window
+    ts += 2100.0
+    step(s, ts, snr=30.0)
+    assert s._promote_suppressed is False
+    assert s.last_release == "timer"
 
 
 def test_time_decay_forgives_levels():
@@ -294,6 +338,77 @@ def test_confirmation_expires():
     assert s.state.current_mcs == 1
 
 
+def test_confirmed_snr_is_high_water_during_degradation():
+    """2026-07-06 spec A2 (flight 000003): during degradation the snap-back
+    bar must NOT slide down with the channel. Confirm rung 3 at 30 dB, dwell
+    clean at 24 dB (old code re-confirmed at 24), lose the rung: recovery to
+    24 dB must not snap back (bar is 30-3=27); 28 dB must."""
+    # trial_window_ms=3000: the 35-tick dwell (3.5 s) outlives the trial, so
+    # the loss below classifies as settled burst (no damper charge) — the
+    # snap-back assertions must not be damper-blocked.
+    s = mk(max_mcs=3, trial_window_ms=3000)
+    ts = T0
+    for _ in range(2):
+        ts = climb_one(s, ts)  # 1->2->3
+    for _ in range(35):  # confirm rung 3 at snr 30 (and outlive the trial)
+        ts += TICK
+        step(s, ts)
+    for _ in range(35):  # degraded but clean — old code overwrote the bar to 24
+        ts += TICK
+        step(s, ts, snr=24.0)
+    assert s._confirmed_snr[3] == 30.0  # high-water held
+    ts += TICK
+    step(s, ts, snr=24.0, loss=0.2, loss_demote=True)  # settled burst -> at 2, no charge
+    ts += 300.0
+    step(s, ts, snr=24.0)  # 24 < 30-3 => no snap-back
+    assert s.state.current_mcs == 2
+    ts += 300.0
+    step(s, ts, snr=28.0)  # 28 >= 27 => snap-back
+    assert s.state.current_mcs == 3
+    assert any("snapback_promote" in r for r in s.reasons)
+
+
+def test_confirmed_snr_rebases_after_ttl_lapse():
+    """After the confirmation TTL lapses the bar re-bases to current
+    conditions (fresh confirmation), it does not stay at the old high-water."""
+    s = mk(max_mcs=3, confirm_ttl_ms=1000)
+    ts = T0
+    for _ in range(2):
+        ts = climb_one(s, ts)
+    for _ in range(35):  # confirm rung 3 at 30
+        ts += TICK
+        step(s, ts)
+    assert s._confirmed_snr[3] == 30.0
+    ts += 1500.0  # TTL (1 s) lapses with no clean dwell extending it
+    for _ in range(35):  # fresh confirmation at 24
+        ts += TICK
+        step(s, ts, snr=24.0)
+    assert s._confirmed_snr[3] == 24.0  # re-based, not max(30, 24)
+
+
+def test_snapback_blocked_by_confident_knee():
+    """2026-07-06 spec A3 (flight 000036): snap-back must not re-promote into
+    a rung the learned knee says is unviable at the live SNR."""
+    # trial_window_ms=3000: the 35-tick dwell (3.5 s) outlives the trial, so
+    # the loss classifies as settled burst (no damper charge) and the second
+    # snap-back attempt isn't damper-blocked.
+    s = mk(max_mcs=3, trial_window_ms=3000)
+    ts = T0
+    for _ in range(2):
+        ts = climb_one(s, ts)
+    for _ in range(35):  # confirm rung 3 at snr 30 (and outlive the trial)
+        ts += TICK
+        step(s, ts)
+    ts += TICK
+    step(s, ts, loss=0.2, loss_demote=True)  # settled burst -> at 2
+    ts += 300.0
+    step(s, ts, blocked=True)  # snr recovered BUT knee says rung 3 unviable
+    assert s.state.current_mcs == 2
+    ts += 300.0
+    step(s, ts, blocked=False)  # knee headroom back => snap-back
+    assert s.state.current_mcs == 3
+
+
 # ---- initial state ----------------------------------------------------------
 
 
@@ -373,3 +488,128 @@ def test_emergency_demote_does_not_strike():
     assert changed and mcs == pre - 1
     assert s._flap_level == {}  # emergency never charges the damper
     assert s.last_fail is None  # emergency never teaches a failure
+
+
+def test_external_demote_blocks_same_and_next_tick_promote():
+    """2026-07-06 spec A4 (flight 000036): a Policy-level (predict/snr) demote
+    must update the rate-limit clock so select() cannot snap back within
+    min_between_changes_ms of it."""
+    s = mk(max_mcs=3)
+    ts = T0
+    for _ in range(2):
+        ts = climb_one(s, ts)
+    for _ in range(35):  # confirm rung 3 at snr 30
+        ts += TICK
+        step(s, ts)
+    s.external_demote(2, ts)
+    assert s.state.current_mcs == 2
+    assert s.state.last_change_time_ms == ts
+    step(s, ts, snr=30.0)  # same tick: inside min_between_changes (200 ms)
+    assert s.state.current_mcs == 2
+    step(s, ts + 100.0, snr=30.0)  # still inside
+    assert s.state.current_mcs == 2
+    step(s, ts + 300.0, snr=30.0)  # rate limit elapsed => snap-back allowed
+    assert s.state.current_mcs == 3
+
+
+def test_backoff_ladder_caps_at_10s():
+    """2026-07-06 spec A5: balanced pacing — a rung is never locked out
+    longer than 10 s at a time (was 30 s)."""
+    s = mk()
+    assert s._flap_backoff_ms(1) == 2000
+    assert s._flap_backoff_ms(2) == 4000
+    assert s._flap_backoff_ms(3) == 8000
+    assert s._flap_backoff_ms(4) == 10000
+    assert s._flap_backoff_ms(10) == 10000
+
+
+def test_probe_veto_blocks_all_three_routes():
+    """2026-07-06 spec Part B: fresh dirty probe data vetoes snap-back,
+    knee, AND explore promotes."""
+    s = mk(max_mcs=3, trial_window_ms=3000)
+    ts = T0
+    for _ in range(2):
+        ts = climb_one(s, ts)
+    for _ in range(35):  # confirm rung 3 (snap-back target) and settle
+        ts += TICK
+        step(s, ts)
+    ts += TICK
+    step(s, ts, loss=0.2, loss_demote=True)  # settled burst -> at 2
+    for _ in range(35):  # dwell long enough that knee/explore would fire too
+        ts += 300.0
+        s.select(
+            snr_ewma=30.0,
+            snr_w=30.0,
+            slope=0.0,
+            loss_rate=0.0,
+            loss_demote=False,
+            target_confident=False,
+            target_blocked=False,
+            fec_pressure=0.0,
+            link_starved=False,
+            can_demote=True,
+            ts_ms=ts,
+            probe_veto=True,
+        )
+        assert s.state.current_mcs == 2  # no route fires under the veto
+    s.select(
+        snr_ewma=30.0,
+        snr_w=30.0,
+        slope=0.0,
+        loss_rate=0.0,
+        loss_demote=False,
+        target_confident=False,
+        target_blocked=False,
+        fec_pressure=0.0,
+        link_starved=False,
+        can_demote=True,
+        ts_ms=ts + 300.0,
+        probe_veto=False,
+    )
+    assert s.state.current_mcs == 3  # veto lifted -> promote resumes
+
+
+def test_probe_release_lifts_damper_early():
+    s = mk(flap_base_backoff_ms=10000)  # long window: probe, not timer
+    ts = _flap_at(s, T0, 2)  # flapped; rung 2 suppressed
+    ts += TICK
+    s.select(
+        snr_ewma=30.0,
+        snr_w=30.0,
+        slope=0.0,
+        loss_rate=0.0,
+        loss_demote=False,
+        target_confident=False,
+        target_blocked=False,
+        fec_pressure=0.0,
+        link_starved=False,
+        can_demote=True,
+        ts_ms=ts,
+        probe_release=True,
+    )
+    assert s._promote_suppressed is False
+    assert s.last_release == "probe"
+
+
+def test_probe_release_never_stamps_undamped_rung():
+    """A rung with no live damper window must not report a phantom
+    'probe' release just because clean probe data accrued."""
+    s = mk()
+    ts = T0
+    for _ in range(25):
+        ts += TICK
+        s.select(
+            snr_ewma=30.0,
+            snr_w=30.0,
+            slope=0.0,
+            loss_rate=0.0,
+            loss_demote=False,
+            target_confident=False,
+            target_blocked=False,
+            fec_pressure=0.0,
+            link_starved=False,
+            can_demote=True,
+            ts_ms=ts,
+            probe_release=True,
+        )
+        assert s.last_release is None

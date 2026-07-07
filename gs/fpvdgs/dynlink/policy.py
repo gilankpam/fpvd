@@ -23,6 +23,17 @@ from .signals import Signals
 
 log = logging.getLogger(__name__)
 
+# Rolling raw-SNR window backing the damper's early release (~2 s at 10 Hz).
+# Frozen calibration constant (2026-07-06 spec A5) — no config path.
+RAW_MIN_RELEASE_WINDOW_TICKS = 20
+
+# Probe gates (2026-07-06 spec Part B) — frozen, no config path.
+# Asymmetric by design: dirty probe = hard veto on every promote route;
+# clean probe = evidence that lifts the damper early, never permission to
+# skip the knee/dwell gates (the historical probe-optimism bug).
+PROBE_DIRTY_PER = 0.10
+PROBE_CLEAN_PER = 0.02
+PROBE_CLEAN_RELEASE_TICKS = 20  # ~2 s at 10 Hz of sustained clean readings
 
 # ------------------------------------------------------------------
 # Config dataclasses for the probe-driven selector + smoothing/learned-prior/flightlog.
@@ -35,7 +46,8 @@ class SelectorConfig:
 
     Promote routes (in priority order):
       1. snap-back: a recently-confirmed rung whose operating SNR has nearly
-         recovered — re-entered at the fast rate limit, no dwell/knee gate.
+         recovered — re-entered at the fast rate limit, no dwell; respects
+         the knee gate (2026-07-06 spec A3).
       2. knee-gated: clean dwell + confident knee headroom (SNR above knee+margin).
       3. explore: cold knee on the target rung — promotes once as tuition.
     Demote: a caller-hysteresis-gated loss breach or a Channel-B emergency
@@ -73,7 +85,7 @@ class SelectorConfig:
     # promote->loss->demote flapping. See 2026-07-02 spec.
     flap_base_backoff_ms: int = 2000
     flap_backoff_mult: float = 2.0
-    flap_backoff_cap_ms: int = 30000
+    flap_backoff_cap_ms: int = 10000
     flap_reset_clean_dwell_ticks: int = 30
     # --- Probe-less promote (2026-07-02 spec) ---
     # Clean dwell at the current rung before a knee/explore promote.
@@ -85,9 +97,10 @@ class SelectorConfig:
     trial_window_ms: int = 10000
     # Fade signature: raw snr_w this far below the (lagging) snr_ewma.
     collapse_delta_db: float = 4.0
-    # Damper recovery: early suppression lift when snr_ewma exceeds the SNR
-    # recorded at the rung's last flap by this margin; one flap level forgiven
-    # per flap_decay_ms without a new flap on the rung.
+    # Damper recovery: early suppression lift when the rolling raw-SNR
+    # minimum (last ~2 s of snr_w samples) clears the SNR recorded at the
+    # rung's last flap by this margin; one flap level forgiven per
+    # flap_decay_ms without a new flap on the rung.
     flap_snr_release_db: float = 3.0
     flap_decay_ms: int = 60000
     # Snap-back: a rung confirmed within confirm_ttl_ms is re-entered at the
@@ -137,6 +150,8 @@ class LeadingSelector:
     loss breach (`loss_demote`) or a Channel-B emergency (fec_pressure or
     link_starved) steps exactly one rung down, gated by `can_demote`.
     Every loss-demote is classified (fade/flap/burst) for knee teaching.
+    Any probation loss charges the damper; fade/flap additionally report their
+    knee sample (burst teaches nothing).
     """
 
     def __init__(self, cfg: SelectorConfig):
@@ -158,6 +173,22 @@ class LeadingSelector:
         self._suppress_until_ms: dict[int, float] = {}
         self._snr_at_last_flap: dict[int, float] = {}
         self._last_flap_ms: dict[int, float] = {}
+        # Rolling raw snr_w samples for the damper's early release; raw min
+        # is the only axis that sees sub-second fades (2026-07-06 spec A5).
+        self._snr_w_recent: deque[float] = deque(maxlen=RAW_MIN_RELEASE_WINDOW_TICKS)
+        # Release channel currently allowing promotes to the target rung:
+        # "timer" | "raw_min" | "probe" | None. Per-tick observability for the
+        # flightlog.
+        # NOTE: "timer" has level semantics, not edge semantics — an expired
+        # window's entry lingers in _suppress_until_ms until the rung is
+        # re-entered and the dict cleaned (flap_reset_clean_dwell_ticks), so
+        # consecutive ticks can all report "timer" even though only the first
+        # one is the actual release. "probe" is likewise level, not edge: it
+        # re-stamps every tick the same way for as long as a live probe window
+        # keeps reporting a clean streak at the target rung. Offline analysis
+        # must dedupe consecutive ticks for BOTH channels rather than counting
+        # each "timer"/"probe" tick as a distinct release.
+        self.last_release: str | None = None
         self._promote_suppressed = False
         # Trial: rung entered by promote, on probation for trial_window_ms.
         self._trial_rung: int | None = None
@@ -197,17 +228,29 @@ class LeadingSelector:
         if snr_ewma is not None:
             self._snr_at_last_flap[rung] = snr_ewma
 
-    def _suppressed(self, rung: int, snr_ewma: float | None, ts_ms: float) -> bool:
-        """Damper window live for `rung`? SNR release: conditions provably
-        better than at the last flap lift the window early (level kept)."""
-        if ts_ms >= self._suppress_until_ms.get(rung, 0):
+    def _suppressed(self, rung: int, ts_ms: float, probe_release: bool = False) -> bool:
+        """Damper window live for `rung`? Early release (2026-07-06 spec A5):
+        the rolling raw-SNR minimum must clear the flap-time SNR by
+        flap_snr_release_db. The old EWMA-pop release lifted on ordinary
+        wobble in fast fading (flight 000003); the EWMA never sees the
+        sub-second dips that caused the flap."""
+        until = self._suppress_until_ms.get(rung, 0)
+        if ts_ms >= until:
+            if until:
+                self.last_release = "timer"
+            return False
+        if probe_release:
+            # 2026-07-06 spec Part B: a sustained clean probe at the damped
+            # rung is direct evidence it carries packets again — lift early.
+            self.last_release = "probe"
             return False
         laf = self._snr_at_last_flap.get(rung)
         if (
             laf is not None
-            and snr_ewma is not None
-            and snr_ewma >= laf + self.cfg.flap_snr_release_db
+            and len(self._snr_w_recent) == self._snr_w_recent.maxlen
+            and min(self._snr_w_recent) >= laf + self.cfg.flap_snr_release_db
         ):
+            self.last_release = "raw_min"
             return False
         return True
 
@@ -237,6 +280,20 @@ class LeadingSelector:
                     best = r
         return best
 
+    def external_demote(self, tgt: int, ts_ms: float) -> None:
+        """Commit a Policy-level (predict/snr) demote with full change
+        bookkeeping. 2026-07-06 spec A4: without the last_change_time_ms
+        stamp the same tick's select() rate limit doesn't see the change
+        and snap-back can cancel the demote on the spot (flight 000036)."""
+        tgt = max(0, min(tgt, self._cap_mcs))
+        if tgt == self.state.current_mcs:
+            return
+        self.state.current_mcs = tgt
+        self.state.last_change_time_ms = ts_ms
+        self.state.last_mcs_change_time_ms = ts_ms
+        self._clean_dwell = 0
+        self._trial_rung = None
+
     # ---- main entry ----
 
     def select(
@@ -253,25 +310,34 @@ class LeadingSelector:
         link_starved: bool,
         can_demote: bool = True,
         ts_ms: float,
+        probe_veto: bool = False,
+        probe_release: bool = False,
     ) -> tuple[int, bool]:
         """Probe-less selector: three-route promote + reactive demote.
 
         Returns (mcs, changed).
 
         Demote is reactive and one-step, gated by can_demote (Policy's shared
-        cooldown). Every loss-demote is classified (fade/flap/burst): fade
-        reports a raw-SNR knee sample, flap charges the damper and reports an
-        EWMA knee sample, burst does neither (last_fail carries the sample to
-        Policy). Promote routes, in order: snap-back (recently-confirmed rung,
-        SNR recovered, slope >= 0 — bypasses dwell/knee/hold, never the
+        cooldown). Every loss-demote is classified (fade/flap/burst) for knee
+        teaching: fade reports a raw-SNR knee sample, flap an EWMA knee
+        sample, burst nothing (last_fail carries the sample to Policy).
+        Independently of class, a loss on a rung still on promote-probation
+        charges the flap damper. Promote routes, in order: snap-back (recently-confirmed rung,
+        SNR recovered, slope >= 0, respects knee gate — bypasses dwell/hold, never the
         damper), knee-gated climb (clean dwell + headroom over a confident
         knee), explore (cold knee — once-per-rung tuition; its first failure
-        plants the knee and self-converts the route to knee-gated)."""
+        plants the knee and self-converts the route to knee-gated). All three
+        promote routes are additionally gated by `probe_veto` (fresh dirty probe data
+        at the target rung vetoes all promotes). Damper release channels are timer /
+        raw-min / probe."""
         st = self.state
         prev = st.current_mcs
         reasons: list[str] = []
         self.last_fail = None
         self._snapback_tgt = None
+        self.last_release = None
+        if snr_w is not None:
+            self._snr_w_recent.append(float(snr_w))
 
         def commit(new_mcs: int, why: str) -> None:
             new_mcs = max(0, min(new_mcs, self._cap_mcs))
@@ -287,6 +353,7 @@ class LeadingSelector:
         if emergency:
             if can_demote:
                 if loss_demote:
+                    on_trial = prev == self._trial_rung and ts_ms < self._trial_until_ms
                     klass = self._classify(prev, snr_ewma, snr_w, ts_ms)
                     commit(prev - 1, f"video_per_demote loss={loss_rate:.3f} class={klass}")
                     if st.current_mcs != prev:
@@ -294,6 +361,10 @@ class LeadingSelector:
                             self.last_fail = (prev, "fade", float(snr_w))
                         elif klass == "flap" and snr_ewma is not None:
                             self.last_fail = (prev, "flap", float(snr_ewma))
+                        if on_trial:
+                            # 2026-07-06 spec A1: any probation loss escalates
+                            # the damper, whatever its class — periodic fades
+                            # otherwise re-arm snap-back damper-free (000003).
                             self._charge_flap(prev, snr_ewma, ts_ms)
                 else:
                     commit(
@@ -315,8 +386,17 @@ class LeadingSelector:
             self._snr_at_last_flap.pop(cur, None)
             self._last_flap_ms.pop(cur, None)
         if self._clean_dwell >= self.cfg.promote_dwell_ticks and snr_ewma is not None:
+            # 2026-07-06 spec A2: high-water confirmation. While a
+            # confirmation is live the bar only rises; it re-bases only
+            # after the TTL lapses — degradation must not drag the
+            # snap-back bar down with the channel (flight 000003).
+            fresh = self._confirmed_until_ms.get(cur, 0.0) >= ts_ms
+            prev_conf = self._confirmed_snr.get(cur)
             self._confirmed_until_ms[cur] = ts_ms + self.cfg.confirm_ttl_ms
-            self._confirmed_snr[cur] = float(snr_ewma)
+            if fresh and prev_conf is not None:
+                self._confirmed_snr[cur] = max(prev_conf, float(snr_ewma))
+            else:
+                self._confirmed_snr[cur] = float(snr_ewma)
         if self._trial_rung is not None and ts_ms >= self._trial_until_ms:
             self._trial_rung = None  # probation survived
 
@@ -327,18 +407,19 @@ class LeadingSelector:
             self._reasons = reasons
             return st.current_mcs, False
 
-        self._promote_suppressed = self._suppressed(target, snr_ewma, ts_ms)
+        self._promote_suppressed = self._suppressed(target, ts_ms, probe_release)
         within_rate = (ts_ms - st.last_change_time_ms) < self.cfg.min_between_changes_ms
         within_hold = (ts_ms - st.last_change_time_ms) < self.cfg.hold_modes_down_ms
         slope = 0.0 if slope is None else slope
 
-        if not within_rate and not self._promote_suppressed:
+        if not within_rate and not self._promote_suppressed and not probe_veto:
             sb = self._snapback_target(float(snr_ewma), ts_ms)
             self._snapback_tgt = sb
-            if sb is not None and sb > cur and slope >= 0.0:
+            if sb is not None and sb > cur and slope >= 0.0 and not target_blocked:
                 # Route 1: return to recently-proven altitude at the fast rate
-                # limit — no dwell, no knee gate, no hold (fades never charged
-                # the damper, so frees snap back freely).
+                # limit — no dwell, no hold; 2026-07-06 spec A3: respects the
+                # knee gate — snap-back must not re-enter a rung the knee
+                # calls unviable (000036).
                 commit(target, f"snapback_promote tgt={sb}")
             elif (
                 not within_hold
@@ -408,6 +489,12 @@ class Policy:
         # the cooldown so the first demote after boot is never blocked. Reset to
         # 0 on any committed demote (any path); incremented each tick.
         self._windows_since_demote = cfg.selector.demote_cooldown_windows
+        # Probe gate: counter for sustained clean probe readings (2026-07-06 spec Part B).
+        # Tracked per-rung: the streak is evidence for the rung it was accrued
+        # AT, so a promote-target change must restart it (else a streak built
+        # against rung N carries over to arm release for rung N+1).
+        self._probe_clean_ticks = 0
+        self._probe_clean_rung: int | None = None
         self.flightlog = FlightLog(cfg.flightlog)
 
     def tick(self, signals: Signals) -> Decision:
@@ -463,9 +550,7 @@ class Policy:
                     ):
                         tgt = max(cur - 1, 0)
                         if tgt < cur:
-                            self.leading.state.current_mcs = tgt
-                            self.leading._clean_dwell = 0
-                            self.leading._trial_rung = None
+                            self.leading.external_demote(tgt, ts_ms)
                             predict_reason = f"predict_demote mcs{cur}->{tgt}"
                 else:
                     predict_gated = True
@@ -487,9 +572,7 @@ class Policy:
             ):
                 tgt = max(cur_snr - 1, 0)
                 if tgt < cur_snr:
-                    self.leading.state.current_mcs = tgt
-                    self.leading._clean_dwell = 0
-                    self.leading._trial_rung = None
+                    self.leading.external_demote(tgt, ts_ms)
                     snr_demote_reason = f"snr_demote mcs{cur_snr}->{tgt}"
         else:
             self._snr_demote_count = 0
@@ -510,6 +593,22 @@ class Policy:
         )
         target_confident = self.learned_prior.snr_rung_confident(promote_target)
 
+        # Probe gates (2026-07-06 spec Part B): veto on fresh dirty data at
+        # the promote target; sustained fresh+clean data arms the damper's
+        # probe release. Stale/absent probe = both False (degrade-not-fail).
+        pr = (signals.probe or {}).get(promote_target)
+        probe_per = pr.get("per") if pr else None
+        probe_fresh = bool(pr and pr.get("fresh"))
+        probe_veto = probe_fresh and probe_per is not None and probe_per >= PROBE_DIRTY_PER
+        if promote_target != self._probe_clean_rung:
+            self._probe_clean_ticks = 0
+            self._probe_clean_rung = promote_target
+        if probe_fresh and probe_per is not None and probe_per <= PROBE_CLEAN_PER:
+            self._probe_clean_ticks += 1
+        else:
+            self._probe_clean_ticks = 0
+        probe_release = self._probe_clean_ticks >= PROBE_CLEAN_RELEASE_TICKS
+
         new_mcs, _changed = self.leading.select(
             snr_ewma=signals.snr,
             snr_w=signals.snr_w,
@@ -522,6 +621,8 @@ class Policy:
             link_starved=sustained_starved,
             can_demote=cooldown_ok and self.leading.state.current_mcs == start_mcs,
             ts_ms=ts_ms,
+            probe_veto=probe_veto,
+            probe_release=probe_release,
         )
 
         if new_mcs < start_mcs:
@@ -580,6 +681,10 @@ class Policy:
                 "slope": slope,
                 "predict_gated": predict_gated,
                 "tap_active": signals.tap_active,
+                "damper_release": self.leading.last_release,
+                "probe_per": probe_per,
+                "probe_fresh": probe_fresh,
+                "probe_veto": probe_veto,
             }
         )
         return Decision(
@@ -682,6 +787,8 @@ class Policy:
         self._predict_demote_count = 0
         self._snr_demote_count = 0
         self._windows_since_demote = self.cfg.selector.demote_cooldown_windows
+        self._probe_clean_ticks = 0
+        self._probe_clean_rung = None
         self._snr_window.clear()
 
     def close(self) -> None:

@@ -187,6 +187,37 @@ def test_stale_tap_key_stripped_on_load():
     assert "removedKnob" not in pruned["dynamicLink"]["tap"]
 
 
+def test_dynamic_link_probe_defaults_off():
+    from fpvdgs.config_defaults import default_config
+
+    dl = default_config()["dynamicLink"]
+    assert dl["probe"] == {"enabled": False}
+
+
+def test_probe_block_validates():
+    import pytest
+
+    from fpvdgs import schema
+    from fpvdgs.config_defaults import default_config
+
+    # Test: valid probe block passes
+    cfg = default_config()
+    cfg["dynamicLink"]["probe"] = {"enabled": True}
+    schema.validate_effective(cfg)  # must not raise
+
+    # Test: unknown probe key raises
+    cfg = default_config()
+    cfg["dynamicLink"]["probe"] = {"enabled": True, "bogus": 1}
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(cfg)
+
+    # Test: enabled non-bool raises
+    cfg = default_config()
+    cfg["dynamicLink"]["probe"] = {"enabled": "yes"}
+    with pytest.raises(schema.SchemaError):
+        schema.validate_effective(cfg)
+
+
 def test_wfb_tx_selector_defaults_present():
     cfg = default_config()["wfb"]
     assert cfg["txSelector"] == {

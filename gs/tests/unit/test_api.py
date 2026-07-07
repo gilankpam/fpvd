@@ -233,6 +233,35 @@ def test_apply_tap_stale_ms_change_is_hot():
     assert code == 200 and runner.restarts == 0
 
 
+def test_apply_probe_enable_bounces_runner():
+    """dynamicLink.probe.enabled is baked into the engine graph at spawn
+    time (2026-07-06 spec Part B) — flipping it (with dynamicLink enabled)
+    must bounce the runner, exactly like the tap render view."""
+    api, store, _, runner, retunes, ticks = _api()
+    # Must set width to 20 because 40 MHz blocks dynamicLink.enabled=true (schema invariant)
+    code, _ = api.handle(
+        "PATCH",
+        "/gs/config",
+        {},
+        b'{"link": {"width": 20}, "dynamicLink": {"enabled": true, "probe": {"enabled": true}}}',
+    )
+    assert code == 200
+    code, body = api.handle("POST", "/gs/apply", {}, b"")
+    assert code == 200 and runner.restarts == 1
+
+
+def test_apply_probe_enable_without_dl_enabled_is_hot():
+    """probe.enabled=true with dynamicLink.enabled=false renders no probe
+    leg (the conjunction is unchanged: false) — no runner bounce."""
+    api, store, _, runner, retunes, ticks = _api()
+    code, _ = api.handle(
+        "PATCH", "/gs/config", {}, b'{"dynamicLink": {"probe": {"enabled": true}}}'
+    )
+    assert code == 200
+    code, body = api.handle("POST", "/gs/apply", {}, b"")
+    assert code == 200 and runner.restarts == 0
+
+
 # --- dynamicLink apply routing ---
 class _FakeController:
     def __init__(self):
@@ -436,103 +465,6 @@ def test_patch_config_accepts_pixelpilot(tmp_path):
     )
     assert code == 200
     assert store.pending()["pixelpilot"]["screenMode"] == "1280x720@60"
-
-
-# --- probe lifecycle rides the dynamicLink transition (no probe config) ---
-class _FakeProbe:
-    def __init__(self):
-        self.started = False
-        self.cfgs = []
-
-    def start(self):
-        self.started = True
-
-    def stop(self):
-        self.started = False
-
-    def set_config(self, snap):
-        self.cfgs.append(snap)
-
-    def status(self):
-        return {"running": self.started, "streams": 1, "mcs": {}}
-
-
-def _api_with_dl_and_probe(tmp_path):
-    from fpvdgs.api import Api
-    from fpvdgs.config import ConfigStore
-    from fpvdgs.drone_client import DroneClient
-
-    # link.wlans is an explicit list so make_probe_snapshot's resolve_wlans
-    # returns it directly (no wfb-nics / hardware probe).
-    defaults = {
-        "link": {
-            "channel": 132,
-            "width": 20,
-            "region": "US",
-            "linkId": 7669206,
-            "wlans": ["wlan0"],
-        },
-        "wfb": {"profile": "gs", "raw": {}},
-        "drone": {"endpoint": "http://10.5.0.10:8080"},
-        "dynamicLink": {
-            "enabled": False,
-            "maxMcs": 5,
-            "dronePort": 9999,
-        },
-    }
-    store = ConfigStore(defaults)
-    ctrl = _FakeController()  # existing fake dynlink controller in this file
-    probe = _FakeProbe()
-    runner = _FakeRunner()
-    api = Api(
-        store=store,
-        schema=schema,
-        runner=runner,
-        drone=DroneClient("http://127.0.0.1:1"),
-        status_fn=lambda: {},
-        dynlink=ctrl,
-        probe=probe,
-    )
-    return api, store, ctrl, probe, runner
-
-
-def test_enable_dynamiclink_starts_probe(tmp_path):
-    api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path)
-    store.patch({"dynamicLink": {"enabled": True}})
-    code, _ = api.handle("POST", "/gs/apply", {}, b"")
-    assert code == 200
-    assert ("start", None) in ctrl.calls and probe.started is True
-    assert runner.restarts == 0  # no video bounce
-
-
-def test_disable_dynamiclink_stops_probe(tmp_path):
-    api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path)
-    store.patch({"dynamicLink": {"enabled": True}})
-    api.handle("POST", "/gs/apply", {}, b"")
-    store.patch({"dynamicLink": {"enabled": False}})
-    code, _ = api.handle("POST", "/gs/apply", {}, b"")
-    assert code == 200
-    assert probe.started is False and runner.restarts == 0
-
-
-def test_width_only_change_does_not_bounce_probe(tmp_path):
-    """Regression guard: a width-only change rebuilds the DL controller (so it
-    re-keys the learned prior) but must NOT call probe.set_config — the probe
-    snapshot is width-agnostic and bouncing it would interrupt the uplink."""
-    api, store, ctrl, probe, runner = _api_with_dl_and_probe(tmp_path)
-    # Enable DL first so the controller is running.
-    store.patch({"dynamicLink": {"enabled": True}})
-    api.handle("POST", "/gs/apply", {}, b"")
-    # Clear both controllers' recorded calls before the width change.
-    ctrl.calls.clear()
-    probe.cfgs.clear()
-    # Apply a width-only change (link.width 20 -> 10; dynamicLink unchanged).
-    store.patch({"link": {"width": 10}})
-    api.handle("POST", "/gs/apply", {}, b"")
-    # Controller must have been reconfigured (prior re-key + selector reset).
-    assert any(c[0] == "set_config" for c in ctrl.calls)
-    # Probe must NOT have been reconfigured.
-    assert probe.cfgs == []
 
 
 class FakeRelay:

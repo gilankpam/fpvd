@@ -384,3 +384,31 @@ def test_rx_only_wlan_ids_reach_tx_selector(monkeypatch):
         assert captured["rx_only_wlan_ids"] == expected_plan.rx_only_wlan_ids
     finally:
         engine.shutdown()
+
+
+# -- (f) remote + probe: plan_cluster(with_probe)/build_graph_remote pairing -
+# starts AND stops the probe leg (mirrors test_engine_teardown_stops_probe_leg
+# in test_wfb_engine.py, but for the remote path, which lays out the probe
+# leg via plan_cluster(with_probe=...) + build_graph_remote instead of the
+# all-local graph builder) --------------------------------------------------
+
+
+def test_remote_teardown_stops_probe_leg():
+    order = []
+    cfg = make_remote_config()
+    cfg["dynamicLink"] = {"enabled": True, "probe": {"enabled": True}}
+
+    # Default graph_builder_remote (a spy delegating to the real
+    # `build_graph_remote`) so this exercises the real
+    # `plan_cluster(with_probe=...)` <-> `build_graph_remote` pairing, not a
+    # fake graph's hand-rolled `probe_rx` field.
+    engine, rec = make_engine(order=order, config=cfg)
+    try:
+        assert engine.start() is True
+        starts = [name for kind, name in rec["order"] if kind == "start"]
+        assert "probe_rx" in starts
+    finally:
+        engine.shutdown()
+
+    stops = [name for kind, name in rec["order"] if kind == "stop"]
+    assert "probe_rx" in stops

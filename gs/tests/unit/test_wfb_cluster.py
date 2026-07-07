@@ -36,6 +36,32 @@ def test_cluster_wlan_id_encoding():
     assert cluster_wlan_id("127.0.0.1", 1) == ((0x7F000001) << 24) | 1
 
 
+def test_plan_with_probe_appends_after_existing_services():
+    """Probe allocation is append-only: every existing service's ports are
+    byte-identical with and without the probe (parity preservation)."""
+    cards = LOCAL + REMOTE
+    base = plan_cluster(cards)
+    probed = plan_cluster(cards, with_probe=True)
+    assert probed.server_port["video"] == base.server_port["video"]
+    assert probed.server_port["mavlink"] == base.server_port["mavlink"]
+    assert probed.server_port["tunnel"] == base.server_port["tunnel"]
+    assert probed.server_port["probe"] == base.server_port["tunnel"] + 1
+    for key, val in base.injector_base.items():
+        assert probed.injector_base[key] == val
+    assert "probe" in probed.peers
+    assert "probe" not in base.server_port
+
+
+def test_service_order_and_streams_for():
+    from fpvdgs.wfb.cluster import PROBE_STREAMS, service_order, streams_for
+
+    assert service_order(False) == ("video", "mavlink", "tunnel")
+    assert service_order(True) == ("video", "mavlink", "tunnel", "probe")
+    assert "probe" not in streams_for(False)
+    assert streams_for(True)["probe"] == PROBE_STREAMS
+    assert PROBE_STREAMS == {"rx": 50, "tx": None}
+
+
 # -- derive_server_address ----------------------------------------------------
 
 

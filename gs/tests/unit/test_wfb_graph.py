@@ -357,3 +357,43 @@ def test_wlans_appended_in_order_for_multiple_cards():
 
 def test_gs_graph_is_the_documented_type():
     assert isinstance(_build(), GsGraph)
+
+
+# ---- probe_rx service spec ------------------------------------------------
+
+
+def _probe_cfg(video_encryption=True):
+    cfg = default_config()
+    cfg["dynamicLink"]["enabled"] = True
+    cfg["dynamicLink"]["probe"] = {"enabled": True}
+    cfg["link"]["videoEncryption"] = video_encryption
+    return cfg
+
+
+def test_probe_rx_absent_by_default():
+    assert _build().probe_rx is None
+
+
+def test_probe_rx_absent_when_dl_disabled():
+    cfg = _probe_cfg()
+    cfg["dynamicLink"]["enabled"] = False
+    assert _build(cfg).probe_rx is None
+
+
+def test_probe_rx_local_argv():
+    g = _build(_probe_cfg())
+    spec = g.probe_rx
+    assert spec is not None and spec.name == "probe_rx" and spec.kind == "rx"
+    assert spec.parser == "probe" and spec.unix_path is None
+    argv = spec.argv
+    assert argv[0].endswith("wfb_rx")
+    assert argv[argv.index("-p") + 1] == "50"
+    assert argv[argv.index("-u") + 1] == "7000"
+    assert argv[argv.index("-K") + 1] == "/etc/gs.key"
+    assert argv[-2:] == ["wlan0", "wlan1"]
+
+
+def test_probe_rx_keyed_even_when_video_plaintext():
+    g = _build(_probe_cfg(video_encryption=False))
+    assert "-K" not in g.video_rx.argv  # plaintext video (existing behavior)
+    assert "-K" in g.probe_rx.argv  # probe stays keyed

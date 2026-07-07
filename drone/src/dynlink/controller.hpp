@@ -66,6 +66,13 @@ class DynamicLinkController {
     // Decision dispatch helpers (run on the control thread only — no locking).
     void dispatchTxApply(const DlRuntimeConfig& cfg, const Decision& d);
     Decision dispatchTxSafe(const DlRuntimeConfig& cfg);
+    // setConfig() swaps cfg_ without touching run()-thread state, so the probe
+    // retune client must be reconciled ON the control thread: rebuild it when
+    // the configured port changes (probe knob flipped under a live DL — the
+    // 2026-07-07 bench found the client stayed null and the probe TX sat at
+    // its spawn MCS forever). Called at the top of both dispatch paths; no-op
+    // while the port is unchanged.
+    void reconcileProbeClient(const DlRuntimeConfig& cfg);
 
     Endpoints ep_;
     WaybeamClient wb_; // transport for enc_; built from ep_ in the ctor
@@ -85,7 +92,8 @@ class DynamicLinkController {
     // because their ctors take args and they are (re)constructed per start().
     std::unique_ptr<WfbControlClient> wfb_;
     std::unique_ptr<WfbControlClient> probeWfb_; // probe tx retune (nullptr if disabled)
-    int lastProbeMcs_{-1};                       // last rung pushed to the probe
+    uint16_t probeWfbPort_{0};                   // port probeWfb_ was built for (0 = none)
+    int lastProbeMcs_{-1};                       // last rung SUCCESSFULLY pushed to the probe
     std::optional<EncoderClient> enc_;
     std::optional<RadioTxpower> radio_;
     osd::OsdWriter* osd_{nullptr}; // non-owning; set via setOsdWriter()

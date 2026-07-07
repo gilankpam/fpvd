@@ -65,6 +65,27 @@ def test_predictive_demote_on_confident_fade(tmp_path):
     p.close()
 
 
+def test_predict_demote_updates_selector_rate_clock(tmp_path):
+    """The predict demote must stamp last_change_time_ms so the same-tick
+    select() rate limit sees it (000036: 'snr_demote; snapback_promote' on
+    one tick)."""
+    prof = _profile()
+    p = Policy(
+        _cfg(tmp_path, min_samples=3, predictive_horizon_ticks=3, predictive_debounce_windows=1),
+        prof,
+    )
+    p.learned_prior._snr_model._knee[5] = 34.0
+    p.learned_prior._snr_model._count[5] = 12.0
+    p.leading.state.current_mcs = 5
+    p.tick(_sig_snr(34.0, ts=1.0))
+    dec = p.tick(_sig_snr(30.0, ts=1.1))  # predict-demote 5->4
+    assert dec.mcs == 4
+    assert "predict_demote" in dec.reason
+    assert "promote" not in dec.reason  # no same-tick promote of any route
+    assert p.leading.state.last_change_time_ms == 1.1 * 1000.0
+    p.close()
+
+
 def _cfg_fl(tmp_path):
     from fpvdgs.dynlink.flightlog import FlightLogConfig
     from fpvdgs.dynlink.learned_prior import LearnedPriorConfig
@@ -223,6 +244,18 @@ def _settle_snr_knee(policy, rung, snr, clean=True, n=12):
 def _sig_snr(snr, ts):
     return Signals(
         rssi=None, snr=snr, residual_loss_w=0.0, fec_work=0.0, link_starved_w=False, timestamp=ts
+    )
+
+
+def _sig_probe(snr, ts, probe):
+    return Signals(
+        snr=snr,
+        snr_w=snr,
+        residual_loss_w=0.0,
+        fec_work=0.0,
+        link_starved_w=False,
+        timestamp=ts,
+        probe=probe,
     )
 
 
@@ -518,4 +551,83 @@ def test_planted_knee_deadband_blocks_then_headroom_promotes(tmp_path):
         tick_snr(21.5)
     assert p.leading.state.current_mcs == 2
 
+    p.close()
+
+
+def test_dirty_fresh_probe_vetoes_explore_promote(tmp_path):
+    """Cold knee + clean dwell would explore-promote; a fresh dirty probe at
+    the target rung must hold it. Stale probe data is neutral."""
+    p = Policy(_cfg(tmp_path), _profile())
+    p.leading.state.current_mcs = 2
+    dirty = {3: {"per": 0.5, "snr": 20, "fresh": True}}
+    ts = 1.0
+    for _ in range(40):  # well past promote dwell
+        ts += 0.1
+        dec = p.tick(_sig_probe(30.0, ts, dirty))
+    assert dec.mcs == 2  # explore held by the veto
+    stale = {3: {"per": 0.5, "snr": 20, "fresh": False}}
+    # Check that stale probe unblocks at least one promotion
+    promoted = False
+    for _ in range(40):
+        ts += 0.1
+        dec = p.tick(_sig_probe(30.0, ts, stale))
+        if dec.mcs > 2:
+            promoted = True
+            break
+    assert promoted  # stale probe = neutral -> explore fires
+    p.close()
+
+
+def test_blackout_pinned_per_vetoes_while_fresh(tmp_path):
+    p = Policy(_cfg(tmp_path), _profile())
+    p.leading.state.current_mcs = 2
+    blackout = {3: {"per": 1.0, "snr": 20, "fresh": True}}
+    ts = 1.0
+    for _ in range(40):
+        ts += 0.1
+        dec = p.tick(_sig_probe(30.0, ts, blackout))
+    assert dec.mcs == 2
+    p.close()
+
+
+def test_sustained_clean_probe_counts_toward_release(tmp_path):
+    """PROBE_CLEAN_RELEASE_TICKS consecutive fresh+clean target readings set
+    probe_release; any dirty/stale tick resets the counter."""
+    from fpvdgs.dynlink.policy import PROBE_CLEAN_RELEASE_TICKS
+
+    p = Policy(_cfg(tmp_path), _profile())
+    p.leading.state.current_mcs = 2
+    clean = {3: {"per": 0.0, "snr": 25, "fresh": True}}
+    ts = 1.0
+    for i in range(PROBE_CLEAN_RELEASE_TICKS - 1):
+        ts += 0.1
+        p.tick(_sig_probe(30.0, ts, clean))
+    assert p._probe_clean_ticks == PROBE_CLEAN_RELEASE_TICKS - 1
+    ts += 0.1
+    p.tick(_sig_probe(30.0, ts, None))  # probe gap resets
+    assert p._probe_clean_ticks == 0
+    p.close()
+
+
+def test_probe_clean_streak_resets_on_target_change(tmp_path):
+    """Clean-streak evidence is per-rung: a target change must reset the
+    counter (spec: sustained clean probe AT the damped rung)."""
+    from fpvdgs.dynlink.policy import PROBE_CLEAN_RELEASE_TICKS
+
+    p = Policy(_cfg(tmp_path), _profile())
+    p.leading.state.current_mcs = 2
+    clean_both = {
+        3: {"per": 0.0, "snr": 25, "fresh": True},
+        4: {"per": 0.0, "snr": 25, "fresh": True},
+    }
+    ts = 1.0
+    for _ in range(PROBE_CLEAN_RELEASE_TICKS - 5):
+        ts += 0.1
+        p.tick(_sig_probe(30.0, ts, clean_both))
+    assert p.leading.state.current_mcs == 2
+    assert p._probe_clean_ticks == PROBE_CLEAN_RELEASE_TICKS - 5
+    p.leading.state.current_mcs = 3  # target moves 3 -> 4
+    ts += 0.1
+    p.tick(_sig_probe(30.0, ts, clean_both))
+    assert p._probe_clean_ticks == 1  # streak restarted for the new rung
     p.close()

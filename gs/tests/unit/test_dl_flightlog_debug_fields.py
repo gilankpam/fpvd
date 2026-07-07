@@ -187,6 +187,16 @@ def test_record_carries_link_width(tmp_path):
     assert _records(tmp_path)[-1]["width"] == 10
 
 
+def test_record_carries_probe_fields(tmp_path):
+    p = Policy(_cfg(tmp_path), _profile())
+    p.tick(_sig_snr(30.0, ts=1.0))
+    p.close()
+    last = _records(tmp_path)[-1]
+    assert last["probe_per"] is None  # no probe data this tick
+    assert last["probe_fresh"] is False
+    assert last["probe_veto"] is False
+
+
 def test_record_link_width_defaults_to_20(tmp_path):
     p = Policy(_cfg(tmp_path), _profile())
     p.tick(_sig(-50.0))
@@ -296,3 +306,14 @@ def test_promote_explores_cold_frontier_rung(tmp_path):
     decs = [p.tick(sig(1.0 + 0.1 * k)) for k in range(10)]
     p.close()
     assert [d.mcs for d in decs[-4:]] == [5, 5, 5, 5]  # reached 5 AND holds (no yo-yo)
+
+
+def test_record_carries_damper_release(tmp_path):
+    """2026-07-06 spec: per-tick damper-release source (timer | raw_min |
+    None) — the flight gate splits releases by channel."""
+    p = Policy(_cfg(tmp_path), _profile())
+    p.tick(_sig_snr(30.0, ts=1.0))
+    p.close()
+    last = _records(tmp_path)[-1]
+    assert "damper_release" in last
+    assert last["damper_release"] is None  # no damper activity this tick
