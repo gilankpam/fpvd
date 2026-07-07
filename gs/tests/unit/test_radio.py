@@ -25,6 +25,18 @@ def test_iw_args_10mhz():
     ]
 
 
+def test_iw_args_5mhz():
+    assert radio.iw_args("wlan0", 132, 5) == [
+        "iw",
+        "dev",
+        "wlan0",
+        "set",
+        "channel",
+        "132",
+        "5MHz",
+    ]
+
+
 def test_iw_args_ht40():
     assert radio.iw_args("wlan1", 132, 40) == [
         "iw",

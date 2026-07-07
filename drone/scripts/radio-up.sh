@@ -36,9 +36,10 @@ fi
 ifconfig $WLAN_DEV up
 ifconfig $WLAN_DEV mtu "${FPVD_MTU:-1500}"
 iw $WLAN_DEV set monitor none
-# 10MHz uses a dedicated channel-width token (baseband underclocked, 20MHz
-# modulation); 40 => HT40+; everything else => HT20.
+# 5/10 MHz use dedicated tokens (baseband underclock, 20 MHz modulation);
+# 40 => HT40+; everything else => HT20.
 case "${FPVD_WIDTH:-20}" in
+    5)  iw $WLAN_DEV set channel "${FPVD_CHANNEL:-161}" 5MHz ;;
     10) iw $WLAN_DEV set channel "${FPVD_CHANNEL:-161}" 10MHz ;;
     40) iw $WLAN_DEV set channel "${FPVD_CHANNEL:-161}" HT40+ ;;
     *)  iw $WLAN_DEV set channel "${FPVD_CHANNEL:-161}" HT20 ;;

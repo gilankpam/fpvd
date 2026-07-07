@@ -36,6 +36,21 @@ def test_validate_effective_accepts_10mhz():
     validate_effective({"link": {"channel": 132, "width": 10, "region": "US"}})
 
 
+def test_validate_effective_accepts_5mhz_dl_off():
+    # 5 MHz is a static long-range width; valid only with dynamic link off.
+    validate_effective({"link": {"channel": 132, "width": 5, "region": "US"}})
+
+
+def test_validate_effective_rejects_5mhz_with_dynamic_link():
+    with pytest.raises(SchemaError):
+        validate_effective(
+            {
+                "link": {"channel": 132, "width": 5, "region": "US"},
+                "dynamicLink": {"enabled": True},
+            }
+        )
+
+
 def test_validate_effective_rejects_40mhz_with_dynamic_link():
     with pytest.raises(SchemaError):
         validate_effective(

@@ -10,7 +10,7 @@ TEST_CASE("validate: default config is valid") {
     CHECK(errs.empty());
 }
 
-TEST_CASE("validate: width must be 10, 20, or 40") {
+TEST_CASE("validate: width must be 5, 10, 20, or 40") {
     Config c{};
     c.link.width = 80;
     auto errs = validate(c);
@@ -18,7 +18,21 @@ TEST_CASE("validate: width must be 10, 20, or 40") {
     CHECK(errs[0].path == "link.width");
 
     Config ok{};
-    ok.link.width = 10;
+    ok.link.width = 5;
+    CHECK(validate(ok).empty());
+}
+
+TEST_CASE("validate: 5 MHz requires dynamicLink disabled") {
+    Config c{};
+    c.link.width = 5;
+    c.dynamicLink.enabled = true;
+    auto errs = validate(c);
+    REQUIRE(errs.size() == 1);
+    CHECK(errs[0].path == "link.width");
+
+    Config ok{};
+    ok.link.width = 5;
+    ok.dynamicLink.enabled = false;
     CHECK(validate(ok).empty());
 }
 

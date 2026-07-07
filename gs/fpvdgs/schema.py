@@ -73,7 +73,12 @@ LEARNED_PRIOR_KEYS = {
 TAP_KEYS = frozenset({"enabled", "port", "staleMs", "captureRaw"})
 PROBE_KEYS = frozenset({"enabled"})
 CARD_KEYS = frozenset({"host", "iface", "sshUser", "sshPort", "sshKey", "txPowerDbm", "initScript"})
-VALID_WIDTHS = {10, 20, 40}  # 10 MHz = underclocked baseband (20 MHz modulation); matches the drone
+VALID_WIDTHS = {
+    5,
+    10,
+    20,
+    40,
+}  # 5/10 MHz = underclocked baseband (20 MHz modulation); matches the drone
 TX_SELECTOR_KEYS = frozenset({"rssiDeltaDb", "counterRelDelta", "counterAbsDelta"})
 
 
@@ -125,10 +130,11 @@ def validate_effective(cfg: dict) -> None:
     width = link.get("width")
     if width is not None and width not in VALID_WIDTHS:
         raise SchemaError(f"link.width must be one of {sorted(VALID_WIDTHS)}")
-    # 40 MHz under DL is rejected: its TX-power backoff is unvalidated at true
-    # 40 MHz modulation. Mirrors the drone (drone/src/config/validate.cpp).
-    if width == 40 and bool((cfg.get("dynamicLink") or {}).get("enabled", False)):
-        raise SchemaError("link.width 40 MHz requires dynamicLink.enabled=false")
+    # 5 and 40 MHz are static widths: rejected under DL (5 MHz has too little
+    # dynamic range; 40 MHz TX-power backoff is unvalidated at true 40 MHz
+    # modulation). Mirrors the drone (drone/src/config/validate.cpp).
+    if width in (5, 40) and bool((cfg.get("dynamicLink") or {}).get("enabled", False)):
+        raise SchemaError("link.width 5/40 MHz requires dynamicLink.enabled=false")
     if not link.get("region"):
         raise SchemaError("link.region is required")
     if not link.get("channel"):
