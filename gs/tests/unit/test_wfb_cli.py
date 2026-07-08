@@ -3,12 +3,18 @@ import socket
 import threading
 
 from fpvdgs.dynlink.stats_client import RxAnt, RxEvent, SessionInfo, SettingsEvent
-from fpvdgs.wfb.cli import main, render_frame
+from fpvdgs.wfb.cli import StickyRenderer, main, render_frame
 from fpvdgs.wfb.cluster import cluster_wlan_id
 
 SES = SessionInfo(
     fec_type="swfec", fec_k=60, fec_n=30, epoch=1, interleave_depth=1, contract_version=3
 )
+
+
+def _ses(epoch):
+    return SessionInfo(
+        fec_type="swfec", fec_k=60, fec_n=30, epoch=epoch, interleave_depth=1, contract_version=3
+    )
 
 
 def _rx_ant(ant, pkt_recv, rssi, snr, evm=(-1, -1, -1)):
@@ -75,6 +81,171 @@ def test_render_frame_marks_tx_selected_card_and_shows_counters():
 
     assert any("fec_rec=2" in ln and "lost=1" in ln and "bad=0" in ln for ln in lines)
     assert any("swfec" in ln and "k=60" in ln and "n=30" in ln and "epoch=1" in ln for ln in lines)
+
+
+def test_render_frame_orders_streams_and_antennas_stably():
+    """Streams and antennas render in a fixed order regardless of the order
+    they arrive in the window batch (streams by id, antennas by card+ant
+    index) -- so the frame doesn't shuffle between windows."""
+    settings = SettingsEvent(
+        profile="gs", is_cluster=False, wlans=["wlan0", "wlan1"], settings={}, timestamp=1.0
+    )
+    # Antennas deliberately out of order: card 1 ant 1, card 0 ant 1, card 0 ant 0.
+    video = RxEvent(
+        timestamp=1.0,
+        id="video rx",
+        packets_window={"fec_rec": 0, "lost": 0, "bad": 0},
+        rx_ant_stats=[
+            _rx_ant(0x101, 1, (-60, -58, -55), (18, 20, 22)),
+            _rx_ant(0x001, 2, (-55, -53, -50), (22, 24, 26)),
+            _rx_ant(0x000, 3, (-52, -48, -45), (26, 28, 30)),
+        ],
+        session=None,
+        tx_wlan=None,
+    )
+    mavlink = RxEvent(
+        timestamp=1.0,
+        id="mavlink rx",
+        packets_window={"fec_rec": 0, "lost": 0, "bad": 0},
+        rx_ant_stats=[_rx_ant(0x000, 10, (-50, -49, -48), (30, 31, 32))],
+        session=None,
+        tx_wlan=None,
+    )
+
+    # Same events, two different arrival orders -> identical rendered frame.
+    out_a = render_frame([settings, video, mavlink])
+    out_b = render_frame([settings, mavlink, video])
+    assert out_a == out_b
+
+    lines = out_a.splitlines()
+    # Streams sorted by id: mavlink rx before video rx.
+    assert lines.index("-- mavlink rx --") < lines.index("-- video rx --")
+
+    # Antennas within video sorted by card then ant index: (c0,a0),(c0,a1),(c1,a1).
+    video_ant_lines = [ln for ln in lines if any(f"| pkt {n} |" in ln for n in (1, 2, 3))]
+    assert [ln.split(" | ")[0] for ln in video_ant_lines] == [
+        "card 0 ant 0",
+        "card 0 ant 1",
+        "card 1 ant 1",
+    ]
+
+
+def test_sticky_first_window_matches_render_frame():
+    """A fresh StickyRenderer's first window (nothing missing yet) renders
+    exactly what the stateless render_frame would."""
+    settings = SettingsEvent(
+        profile="gs", is_cluster=False, wlans=["wlan0"], settings={}, timestamp=1.0
+    )
+    video = RxEvent(
+        timestamp=1.0,
+        id="video rx",
+        packets_window={"fec_rec": 2, "lost": 1, "bad": 0},
+        rx_ant_stats=[
+            _rx_ant(0x100, 180, (-60, -58, -55), (18, 20, 22)),
+            _rx_ant(0x000, 185, (-52, -48, -45), (26, 28, 30), (22, 24, 26)),
+        ],
+        session=SES,
+        tx_wlan=1,
+    )
+    assert StickyRenderer().render([settings, video]) == render_frame([settings, video])
+
+
+def test_sticky_keeps_missing_antenna_row():
+    """An antenna that received in an earlier window but not this one keeps
+    its slot, marked (no data), instead of collapsing."""
+    sticky = StickyRenderer()
+    w1 = RxEvent(
+        timestamp=1.0,
+        id="video rx",
+        packets_window={"fec_rec": 0, "lost": 0, "bad": 0},
+        rx_ant_stats=[
+            _rx_ant(0x000, 185, (-52, -48, -45), (26, 28, 30)),
+            _rx_ant(0x100, 180, (-60, -58, -55), (18, 20, 22)),
+        ],
+        session=SES,
+        tx_wlan=None,
+    )
+    sticky.render([w1])
+
+    # Window 2: card 1 dropped out entirely.
+    w2 = RxEvent(
+        timestamp=2.0,
+        id="video rx",
+        packets_window={"fec_rec": 0, "lost": 0, "bad": 0},
+        rx_ant_stats=[_rx_ant(0x000, 190, (-51, -47, -44), (27, 29, 31))],
+        session=SES,
+        tx_wlan=None,
+    )
+    lines = sticky.render([w2]).splitlines()
+
+    card0 = next(ln for ln in lines if ln.startswith("card 0 ant 0"))
+    assert "pkt 190" in card0
+    card1 = next(ln for ln in lines if ln.startswith("card 1 ant 0"))
+    assert "(no data)" in card1
+    # Order preserved: card 0 above card 1.
+    assert lines.index(card0) < lines.index(card1)
+
+
+def test_sticky_keeps_missing_stream_block():
+    """A whole stream absent this window keeps its header + antenna rows as
+    placeholders rather than vanishing."""
+    sticky = StickyRenderer()
+    video = RxEvent(
+        timestamp=1.0,
+        id="video rx",
+        packets_window={"fec_rec": 0, "lost": 0, "bad": 0},
+        rx_ant_stats=[_rx_ant(0x000, 185, (-52, -48, -45), (26, 28, 30))],
+        session=SES,
+        tx_wlan=None,
+    )
+    mavlink = RxEvent(
+        timestamp=1.0,
+        id="mavlink rx",
+        packets_window={"fec_rec": 0, "lost": 0, "bad": 0},
+        rx_ant_stats=[_rx_ant(0x000, 10, (-50, -49, -48), (30, 31, 32))],
+        session=None,
+        tx_wlan=None,
+    )
+    sticky.render([video, mavlink])
+
+    # Window 2: only video reported.
+    lines = sticky.render([video]).splitlines()
+    assert "-- mavlink rx --" in lines
+    mav_card = next(ln for ln in lines if ln.startswith("card 0 ant 0") and "(no data)" in ln)
+    assert mav_card
+    assert any("counters: (no data)" in ln for ln in lines)
+
+
+def test_sticky_resets_on_new_session():
+    """A new session (epoch change) forgets the accumulated row set, so a
+    card from the previous session is not carried as (no data)."""
+    sticky = StickyRenderer()
+    w1 = RxEvent(
+        timestamp=1.0,
+        id="video rx",
+        packets_window={"fec_rec": 0, "lost": 0, "bad": 0},
+        rx_ant_stats=[
+            _rx_ant(0x000, 185, (-52, -48, -45), (26, 28, 30)),
+            _rx_ant(0x100, 180, (-60, -58, -55), (18, 20, 22)),
+        ],
+        session=_ses(1),
+        tx_wlan=None,
+    )
+    sticky.render([w1])
+
+    # New session (epoch 2), only card 0 present now.
+    w2 = RxEvent(
+        timestamp=2.0,
+        id="video rx",
+        packets_window={"fec_rec": 0, "lost": 0, "bad": 0},
+        rx_ant_stats=[_rx_ant(0x000, 190, (-51, -47, -44), (27, 29, 31))],
+        session=_ses(2),
+        tx_wlan=None,
+    )
+    out = sticky.render([w2])
+    # card 1 from the old session was forgotten -> not shown at all.
+    assert "card 1" not in out
+    assert "(no data)" not in out
 
 
 def test_render_frame_shows_node_for_cluster_encoded_ant():
